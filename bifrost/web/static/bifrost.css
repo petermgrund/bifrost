@@ -140,3 +140,4 @@ table.results th { color: var(--muted); font-weight: 600; }
 @media (max-width: 760px) { .detail-body { grid-template-columns: 1fr; } }
 .facechip.s-differs, .facerow.s-differs { outline: 1px dashed #f5cf7a; }
 .facerow.s-differs .applyone { border-color: #6b4a12; }
+.overlay[hidden] { display: none; }

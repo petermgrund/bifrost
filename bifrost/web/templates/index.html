@@ -1,6 +1,10 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>Bifrost <small>v{{ version }}</small></h1>
-<p><em>The bridge between realms: one console for everything Gramps.</em></p>
-<p>The inbox arrives in Phase 2. For now: <a href="/faces">Faces</a>.</p>
+<h1>Inbox <small>v{{ version }}</small></h1>
+<p class="hint"><em>The bridge between realms — what needs doing right now.</em></p>
+<div id="inbox-cards" class="inbox-grid">Loading…</div>
+
+<h2>Recent runs</h2>
+<div id="runs-list">Loading…</div>
 {% endblock %}
+{% block scripts %}<script src="/static/inbox.js"></script>{% endblock %}

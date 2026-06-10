@@ -39,6 +39,17 @@ class PaperlessConfig:
 
 
 @dataclass(frozen=True)
+class SyncImmichConfig:
+    sync_tags: tuple[str, ...] = ("Sync/Gramps",)
+    public_url: str = ""
+    # Each mapping: when an Immich originalPath starts with immich_prefix,
+    # strip it and prepend gramps_prefix (a mount under /app/media in Gramps).
+    path_mappings: tuple[dict, ...] = ()
+    # Gramps tag handle marking places eligible for GPS-based linking.
+    place_tag_handle: str = ""
+
+
+@dataclass(frozen=True)
 class FacesConfig:
     # Write-through export of person links in the legacy person_map.yaml
     # format, kept until Phase 2 retires immich_to_gramps.py --link-faces
@@ -54,6 +65,7 @@ class Config:
     db_path: Path
     config_path: Path
     faces: FacesConfig = FacesConfig()
+    sync_immich: SyncImmichConfig = SyncImmichConfig()
 
 
 DEFAULT_PATH = Path(__file__).resolve().parents[2] / "config.yaml"
@@ -79,6 +91,13 @@ def load_config(path: str | Path | None = None) -> Config:
         db = cfg_path.parent / db
     faces_raw = raw.get("faces") or {}
     export = faces_raw.get("person_map_export")
+    si_raw = (raw.get("sync") or {}).get("immich") or {}
+    sync_immich = SyncImmichConfig(
+        sync_tags=tuple(si_raw.get("sync_tags") or ("Sync/Gramps",)),
+        public_url=(si_raw.get("public_url") or "").rstrip("/"),
+        path_mappings=tuple(si_raw.get("path_mappings") or ()),
+        place_tag_handle=si_raw.get("place_tag_handle") or "",
+    )
     return Config(
         gramps=GrampsConfig(**section("gramps", ["base_url", "username", "password"])),
         immich=ImmichConfig(**section("immich", ["base_url", "api_key"])),
@@ -86,4 +105,5 @@ def load_config(path: str | Path | None = None) -> Config:
         db_path=db,
         config_path=cfg_path,
         faces=FacesConfig(person_map_export=Path(export) if export else None),
+        sync_immich=sync_immich,
     )

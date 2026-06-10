@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Sync · Bifrost{% endblock %}
+{% block content %}
+<h1>Sync</h1>
+
+<section class="syncpanel">
+  <h2>Immich → Gramps</h2>
+  <p class="hint">New <code>Sync/Gramps</code>-tagged photos become Gramps media
+  (with dates, places, descriptions and faces per their tags), and already-synced
+  photos are refreshed. Preview shows every change before anything is written.</p>
+  <div class="toolbar">
+    <button id="preview-btn" class="primary">Preview</button>
+    <button id="apply-btn" disabled>Apply</button>
+    <span id="sync-status" class="hint"></span>
+  </div>
+  <div id="sync-results"></div>
+</section>
+
+<section class="syncpanel">
+  <h2>Paperless → Gramps</h2>
+  <p class="hint">Arrives in Phase 3. Until then, use the control-center job.</p>
+</section>
+{% endblock %}
+{% block scripts %}<script src="/static/sync.js"></script>{% endblock %}

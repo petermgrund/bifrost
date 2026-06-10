@@ -40,13 +40,25 @@ app = FastAPI(title="Bifrost", version=__version__, lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=WEB_DIR / "static"), name="static")
 
 from .routes.faces import router as faces_router  # noqa: E402
+from .routes.sync import router as sync_router  # noqa: E402
 
 app.include_router(faces_router)
+app.include_router(sync_router)
 
 
 @app.get("/healthz")
 async def healthz() -> dict:
     return {"status": "ok", "version": __version__}
+
+
+@app.get("/api/runs")
+async def recent_runs(request: Request, limit: int = 10):
+    rows = request.app.state.conn.execute(
+        "SELECT id, job, status, started_at, finished_at, summary"
+        " FROM runs ORDER BY id DESC LIMIT ?",
+        (min(limit, 50),),
+    ).fetchall()
+    return [dict(r) for r in rows]
 
 
 @app.get("/", response_class=HTMLResponse)

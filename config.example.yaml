@@ -21,3 +21,15 @@ faces:
   # Write-through export for the legacy pipeline (Phase 1 shim, removed in
   # Phase 2). Path as seen inside the container; see docker-compose.yml.
   person_map_export: "/legacy/person_map.yaml"
+
+sync:
+  immich:
+    sync_tags: ["Sync/Gramps"]
+    public_url: "https://your-immich-public-url"
+    # When an Immich originalPath starts with immich_prefix, strip it and
+    # prepend gramps_prefix (a volume mount under /app/media in Gramps).
+    path_mappings:
+      - immich_prefix: "/usr/src/app/upload/upload/"
+        gramps_prefix: "immich/"
+    # Gramps tag handle marking places eligible for GPS-based linking.
+    place_tag_handle: "REPLACE_ME"

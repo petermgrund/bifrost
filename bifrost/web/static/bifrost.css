@@ -141,3 +141,17 @@ table.results th { color: var(--muted); font-weight: 600; }
 .facechip.s-differs, .facerow.s-differs { outline: 1px dashed #f5cf7a; }
 .facerow.s-differs .applyone { border-color: #6b4a12; }
 .overlay[hidden] { display: none; }
+
+/* --- inbox + sync --- */
+.inbox-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: .8rem; margin: 1rem 0; }
+.inbox-card { display: flex; flex-direction: column; gap: .3rem; background: var(--panel); border-radius: 10px; padding: 1rem; text-decoration: none; color: var(--text); border: 1px solid transparent; }
+.inbox-card:hover { border-color: var(--accent-dim); }
+.inbox-card .count { font-size: 2rem; font-weight: 700; color: var(--accent); }
+.inbox-card.done .count { color: var(--muted); }
+.inbox-card .label { font-size: .85rem; color: var(--muted); }
+.inbox-card .verb { font-size: .8rem; color: var(--accent); }
+.inbox-card.done .verb { color: var(--ok); }
+.syncpanel { background: var(--panel); border-radius: 10px; padding: 1rem 1.2rem; margin: 1rem 0; }
+.syncpanel h2 { margin-top: 0; }
+.syncpanel h3 { margin: 1rem 0 .3rem; font-size: .95rem; }
+code { background: var(--panel-2); border-radius: 4px; padding: .05rem .35rem; font-size: .85em; }

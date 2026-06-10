@@ -121,6 +121,34 @@ class GrampsClient:
     async def list_media(self) -> list[dict]:
         return await self._paged("/media/")
 
+    async def list_media_gramps_ids(self) -> set[str]:
+        items = await self._paged("/media/", keys="gramps_id")
+        return {m["gramps_id"] for m in items if m.get("gramps_id")}
+
+    async def create_media(self, media_obj: dict) -> dict:
+        resp = await self._request(
+            "POST", "/objects",
+            json=[media_obj], headers={"Content-Type": "application/json"},
+        )
+        return resp.json()
+
+    async def update_media(self, handle: str, media_obj: dict) -> dict:
+        resp = await self._request(
+            "PUT", f"/media/{handle}",
+            json=media_obj, headers={"Content-Type": "application/json"},
+        )
+        return resp.json()
+
+    async def update_place(self, handle: str, place_obj: dict) -> dict:
+        resp = await self._request(
+            "PUT", f"/places/{handle}",
+            json=place_obj, headers={"Content-Type": "application/json"},
+        )
+        return resp.json()
+
+    async def list_places_full(self) -> list[dict]:
+        return await self._paged("/places/")
+
     async def get_place(self, handle: str) -> dict:
         resp = await self._request("GET", f"/places/{handle}")
         return resp.json()

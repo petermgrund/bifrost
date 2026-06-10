@@ -373,9 +373,13 @@ async def apply_face(
     gramps_handle: str,
     asset_id: str,
     pad: float,
+    media_handle: str | None = None,
 ) -> dict:
     """Set this face's pad and materialize its rect in Gramps (create the
-    MediaRef if missing, update its rect otherwise). Returns the new state."""
+    MediaRef if missing, update its rect otherwise). Returns the new state.
+
+    Pass media_handle when the caller already knows it (e.g. the sync module
+    right after creating the media) to skip the synced-media lookup."""
     pad = max(0.0, min(0.5, pad))
     link = next(
         (e for e in list_links(conn) if e["gramps_handle"] == gramps_handle), None
@@ -383,11 +387,12 @@ async def apply_face(
     if link is None:
         raise ValueError("no link for this Gramps person")
 
-    synced = await synced_immich_media(gramps)
-    media_obj = synced.get(asset_id)
-    if media_obj is None:
-        raise ValueError("asset is not synced to Gramps")
-    media_handle = media_obj["handle"]
+    if media_handle is None:
+        synced = await synced_immich_media(gramps)
+        media_obj = synced.get(asset_id)
+        if media_obj is None:
+            raise ValueError("asset is not synced to Gramps")
+        media_handle = media_obj["handle"]
 
     face = next(
         (f for f in await immich.get_faces(asset_id)

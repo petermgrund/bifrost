@@ -149,6 +149,54 @@ class GrampsClient:
     async def list_places_full(self) -> list[dict]:
         return await self._paged("/places/")
 
+    async def get_media_by_gramps_id(self, gramps_id: str) -> dict | None:
+        resp = await self._request("GET", "/media/", params={"gramps_id": gramps_id})
+        items = resp.json()
+        if items and isinstance(items, list):
+            for m in items:
+                if m.get("gramps_id") == gramps_id:
+                    return m
+        return None
+
+    async def create_note(self, note_obj: dict) -> dict:
+        resp = await self._request(
+            "POST", "/objects",
+            json=[note_obj], headers={"Content-Type": "application/json"},
+        )
+        return resp.json()
+
+    async def update_note(self, handle: str, note_obj: dict) -> dict:
+        resp = await self._request(
+            "PUT", f"/notes/{handle}",
+            json=note_obj, headers={"Content-Type": "application/json"},
+        )
+        return resp.json()
+
+    async def get_media_backlinks(self, handle: str) -> dict:
+        """Objects referencing a media object, keyed by type."""
+        resp = await self._request(
+            "GET", f"/media/{handle}", params={"backlinks": "true"}
+        )
+        return resp.json().get("backlinks", {})
+
+    async def get_object(self, api_path: str, handle: str) -> dict:
+        resp = await self._request("GET", f"/{api_path}/{handle}")
+        return resp.json()
+
+    async def update_object(self, api_path: str, handle: str, obj: dict) -> dict:
+        resp = await self._request(
+            "PUT", f"/{api_path}/{handle}",
+            json=obj, headers={"Content-Type": "application/json"},
+        )
+        return resp.json()
+
+    async def get_tag_handle(self, name: str) -> str | None:
+        resp = await self._request("GET", "/tags/", params={"keys": "handle,name"})
+        for t in resp.json() or []:
+            if t.get("name") == name:
+                return t.get("handle")
+        return None
+
     async def get_place(self, handle: str) -> dict:
         resp = await self._request("GET", f"/places/{handle}")
         return resp.json()

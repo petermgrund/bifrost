@@ -1,31 +1,29 @@
-/* Sync page — preview/apply for the Immich → Gramps module. */
+/* Sync page — preview/apply panels for each source module. */
 "use strict";
 
-const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const api = async (path, opts = {}) => {
-  const resp = await fetch(path, { headers: { "Content-Type": "application/json" }, ...opts });
+const api = async (path, body) => {
+  const resp = await fetch(path, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body || {}),
+  });
   if (!resp.ok) throw new Error(`${resp.status}: ${await resp.text()}`);
   return resp.json();
 };
 
-const GROUPS = [
-  ["media", "Media"],
-  ["face", "Faces"],
-  ["place", "Place links"],
-];
+const GROUP_LABELS = { doc: "Documents", media: "Media updates", note: "Transcriptions", face: "Faces", place: "Place links" };
 
-function render(payload) {
+function render(panel, payload) {
   const items = payload.events.filter(e => e.kind === "item");
   const summary = payload.events.find(e => e.kind === "summary");
   const errors = payload.events.filter(e => e.kind === "error");
 
   let html = "";
-  for (const [entity, label] of GROUPS) {
+  for (const entity of Object.keys(GROUP_LABELS)) {
     const rows = items.filter(e => e.entity === entity);
     if (!rows.length) continue;
-    html += `<h3>${label} <span class="hint">(${rows.length})</span></h3>
+    html += `<h3>${GROUP_LABELS[entity]} <span class="hint">(${rows.length})</span></h3>
       <table class="results"><tr><th>action</th><th>what</th><th>detail</th></tr>` +
       rows.map(e => `<tr>
         <td class="action-${e.action}">${e.action.replace("_", " ")}</td>
@@ -34,47 +32,57 @@ function render(payload) {
       `</table>`;
   }
   if (errors.length) {
-    html += `<h3 class="action-failed">Errors</h3>` +
+    html += `<h3 class="action-failed">Warnings / errors</h3>` +
       errors.map(e => `<div class="action-failed">${esc(e.detail)}</div>`).join("");
   }
   if (summary) {
     const verb = payload.apply ? "Done" : "Would do";
     html += `<div class="summary-line">${verb}: ${esc(JSON.stringify(summary.data))}</div>`;
   }
-  $("sync-results").innerHTML = html || "<div class='hint'>Nothing to do — everything is in sync.</div>";
+  panel.querySelector(".results").innerHTML =
+    html || "<div class='hint'>Nothing to do — everything is in sync.</div>";
   return summary;
 }
 
-let previewHadWork = false;
+document.querySelectorAll(".syncpanel[data-source]").forEach(panel => {
+  const source = panel.dataset.source;
+  const previewBtn = panel.querySelector(".preview-btn");
+  const applyBtn = panel.querySelector(".apply-btn");
+  const status = panel.querySelector(".status");
+  const forceTx = panel.querySelector(".force-tx");
+  const body = () => forceTx ? { force_transcriptions: forceTx.checked } : {};
 
-$("preview-btn").addEventListener("click", async () => {
-  $("preview-btn").disabled = true;
-  $("sync-status").textContent = "Previewing…";
-  try {
-    const payload = await api("/sync/api/immich/preview", { method: "POST", body: "{}" });
-    const summary = render(payload);
-    const c = summary ? summary.data : {};
-    previewHadWork = Object.entries(c).some(([k, v]) => k !== "skipped" && k !== "errors" && v > 0);
-    $("apply-btn").disabled = !previewHadWork;
-    $("sync-status").textContent = `Preview run #${payload.run_id}. ` +
-      (previewHadWork ? "Review above, then Apply." : "");
-  } catch (e) {
-    $("sync-results").innerHTML = `<div class="action-failed">${esc(e.message)}</div>`;
-    $("sync-status").textContent = "";
-  } finally {
-    $("preview-btn").disabled = false;
-  }
-});
+  previewBtn.addEventListener("click", async () => {
+    previewBtn.disabled = true;
+    status.textContent = "Previewing…";
+    panel.querySelector(".results").innerHTML = "";
+    try {
+      const payload = await api(`/sync/api/${source}/preview`, body());
+      const summary = render(panel, payload);
+      const c = summary ? summary.data : {};
+      const hasWork = Object.entries(c).some(([k, v]) =>
+        !["skipped", "errors", "baselined"].includes(k) && v > 0);
+      applyBtn.disabled = !hasWork;
+      status.textContent = `Preview run #${payload.run_id}.` +
+        (hasWork ? " Review above, then Apply." : "");
+    } catch (e) {
+      panel.querySelector(".results").innerHTML = `<div class="action-failed">${esc(e.message)}</div>`;
+      status.textContent = "";
+    } finally {
+      previewBtn.disabled = false;
+    }
+  });
 
-$("apply-btn").addEventListener("click", async () => {
-  $("apply-btn").disabled = true;
-  $("sync-status").textContent = "Applying…";
-  try {
-    const payload = await api("/sync/api/immich/apply", { method: "POST", body: "{}" });
-    render(payload);
-    $("sync-status").textContent = `Applied (run #${payload.run_id}).`;
-  } catch (e) {
-    $("sync-results").innerHTML = `<div class="action-failed">${esc(e.message)}</div>`;
-    $("sync-status").textContent = "";
-  }
+  applyBtn.addEventListener("click", async () => {
+    applyBtn.disabled = true;
+    status.textContent = "Applying…";
+    try {
+      const payload = await api(`/sync/api/${source}/apply`, body());
+      render(panel, payload);
+      status.textContent = `Applied (run #${payload.run_id}).`;
+    } catch (e) {
+      panel.querySelector(".results").innerHTML = `<div class="action-failed">${esc(e.message)}</div>`;
+      status.textContent = "";
+    }
+  });
 });

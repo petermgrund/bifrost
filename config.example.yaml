@@ -33,3 +33,14 @@ sync:
         gramps_prefix: "immich/"
     # Gramps tag handle marking places eligible for GPS-based linking.
     place_tag_handle: "REPLACE_ME"
+  paperless:
+    sync_tags: ["doc", "img"]
+    public_url: "https://your-paperless-public-url"
+    gramps_public_url: "https://your-gramps-public-url"
+    # Custom field ids in Paperless (idempotency key + backlink + date opt-in)
+    gramps_id_field_id: 0
+    gramps_url_field_id: 0
+    date_qualifier_field_id: null
+    date_meaning_field_id: null
+    # Paperless tag id marking documents with a transcription to sync
+    transcription_tag_id: null

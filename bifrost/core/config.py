@@ -50,6 +50,21 @@ class SyncImmichConfig:
 
 
 @dataclass(frozen=True)
+class SyncPaperlessConfig:
+    sync_tags: tuple[str, ...] = ("doc", "img")
+    public_url: str = ""
+    # Public Gramps URL used for the link written back into Paperless.
+    gramps_public_url: str = ""
+    # Paperless custom field ids (see paper-to-gramps ADMIN_GUIDE).
+    gramps_id_field_id: int = 0
+    gramps_url_field_id: int = 0
+    date_qualifier_field_id: int | None = None
+    date_meaning_field_id: int | None = None
+    # Paperless tag id marking documents with a transcription to sync.
+    transcription_tag_id: int | None = None
+
+
+@dataclass(frozen=True)
 class FacesConfig:
     # Write-through export of person links in the legacy person_map.yaml
     # format, kept until Phase 2 retires immich_to_gramps.py --link-faces
@@ -66,6 +81,7 @@ class Config:
     config_path: Path
     faces: FacesConfig = FacesConfig()
     sync_immich: SyncImmichConfig = SyncImmichConfig()
+    sync_paperless: SyncPaperlessConfig = SyncPaperlessConfig()
 
 
 DEFAULT_PATH = Path(__file__).resolve().parents[2] / "config.yaml"
@@ -98,6 +114,17 @@ def load_config(path: str | Path | None = None) -> Config:
         path_mappings=tuple(si_raw.get("path_mappings") or ()),
         place_tag_handle=si_raw.get("place_tag_handle") or "",
     )
+    sp_raw = (raw.get("sync") or {}).get("paperless") or {}
+    sync_paperless = SyncPaperlessConfig(
+        sync_tags=tuple(sp_raw.get("sync_tags") or ("doc", "img")),
+        public_url=(sp_raw.get("public_url") or "").rstrip("/"),
+        gramps_public_url=(sp_raw.get("gramps_public_url") or "").rstrip("/"),
+        gramps_id_field_id=int(sp_raw.get("gramps_id_field_id") or 0),
+        gramps_url_field_id=int(sp_raw.get("gramps_url_field_id") or 0),
+        date_qualifier_field_id=sp_raw.get("date_qualifier_field_id"),
+        date_meaning_field_id=sp_raw.get("date_meaning_field_id"),
+        transcription_tag_id=sp_raw.get("transcription_tag_id"),
+    )
     return Config(
         gramps=GrampsConfig(**section("gramps", ["base_url", "username", "password"])),
         immich=ImmichConfig(**section("immich", ["base_url", "api_key"])),
@@ -106,4 +133,5 @@ def load_config(path: str | Path | None = None) -> Config:
         config_path=cfg_path,
         faces=FacesConfig(person_map_export=Path(export) if export else None),
         sync_immich=sync_immich,
+        sync_paperless=sync_paperless,
     )

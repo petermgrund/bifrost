@@ -6,9 +6,10 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 async function load() {
-  const [listing, runs] = await Promise.all([
+  const [listing, runs, paperless] = await Promise.all([
     fetch("/faces/api/photos").then(r => r.json()),
     fetch("/api/runs?limit=8").then(r => r.json()),
+    fetch("/sync/api/paperless/pending").then(r => r.json()).catch(() => ({ count: 0 })),
   ]);
 
   const photos = listing.photos;
@@ -18,6 +19,7 @@ async function load() {
   const differs = faces.filter(f => f.status === "differs").length;
 
   const cards = [
+    { n: paperless.count, label: "documents tagged for sync, not in Gramps yet", href: "/sync", verb: "Sync" },
     { n: unsynced, label: "photos tagged for sync, not in Gramps yet", href: "/sync", verb: "Sync" },
     { n: listing.pending_total, label: "faces pending in Gramps", href: "/faces", verb: "Review" },
     { n: unlinked, label: "detected faces with no person link", href: "/faces", verb: "Link" },

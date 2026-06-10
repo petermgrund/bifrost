@@ -3,22 +3,31 @@
 {% block content %}
 <h1>Sync</h1>
 
-<section class="syncpanel">
+<section class="syncpanel" data-source="paperless">
+  <h2>Paperless → Gramps</h2>
+  <p class="hint">Tagged documents (<code>doc</code>/<code>img</code>) become Gramps media;
+  versions, titles, dates (per the Date-qualifier field) and transcriptions are kept current.
+  Preview shows every change before anything is written.</p>
+  <div class="toolbar">
+    <button class="primary preview-btn">Preview</button>
+    <button class="apply-btn" disabled>Apply</button>
+    <label class="check"><input type="checkbox" class="force-tx"> Force-rewrite all transcriptions</label>
+    <span class="status hint"></span>
+  </div>
+  <div class="results"></div>
+</section>
+
+<section class="syncpanel" data-source="immich">
   <h2>Immich → Gramps</h2>
   <p class="hint">New <code>Sync/Gramps</code>-tagged photos become Gramps media
   (with dates, places, descriptions and faces per their tags), and already-synced
-  photos are refreshed. Preview shows every change before anything is written.</p>
+  photos are refreshed.</p>
   <div class="toolbar">
-    <button id="preview-btn" class="primary">Preview</button>
-    <button id="apply-btn" disabled>Apply</button>
-    <span id="sync-status" class="hint"></span>
+    <button class="primary preview-btn">Preview</button>
+    <button class="apply-btn" disabled>Apply</button>
+    <span class="status hint"></span>
   </div>
-  <div id="sync-results"></div>
-</section>
-
-<section class="syncpanel">
-  <h2>Paperless → Gramps</h2>
-  <p class="hint">Arrives in Phase 3. Until then, use the control-center job.</p>
+  <div class="results"></div>
 </section>
 {% endblock %}
 {% block scripts %}<script src="/static/sync.js"></script>{% endblock %}

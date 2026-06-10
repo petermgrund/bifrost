@@ -12,10 +12,11 @@ class InboxPage extends BifrostElement {
     this.load();
   }
   async load() {
-    const [listing, runs, paperless] = await Promise.all([
+    const [listing, runs, paperless, uncited] = await Promise.all([
       api('/faces/api/photos'),
       api('/api/runs?limit=8'),
       api('/sync/api/paperless/pending').catch(() => ({ count: 0 })),
+      api('/citations/api/media?uncited=true').catch(() => []),
     ]);
     const faces = listing.photos.flatMap((p) => p.faces);
     this.cards = [
@@ -23,6 +24,7 @@ class InboxPage extends BifrostElement {
       { n: listing.photos.filter((p) => !p.synced).length, label: 'photos to sync', href: '/sync' },
       { n: listing.pending_total, label: 'faces pending', href: '/faces' },
       { n: faces.filter((f) => f.status === 'unlinked').length, label: 'unlinked faces', href: '/faces' },
+      { n: uncited.length, label: 'media without citations', href: '/citations' },
     ];
     this.runs = runs;
   }

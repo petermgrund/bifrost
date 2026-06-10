@@ -174,9 +174,13 @@ class GrampsClient:
         return None
 
     async def create_note(self, note_obj: dict) -> dict:
+        return await self.create_object(note_obj)
+
+    async def create_object(self, obj: dict) -> dict:
+        """Create any Gramps object (the _class field selects the type)."""
         resp = await self._request(
             "POST", "/objects",
-            json=[note_obj], headers={"Content-Type": "application/json"},
+            json=[obj], headers={"Content-Type": "application/json"},
         )
         return resp.json()
 

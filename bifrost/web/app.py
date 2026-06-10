@@ -13,6 +13,7 @@ from fastapi.templating import Jinja2Templates
 from .. import __version__
 from ..core import db
 from ..core.clients import GrampsClient, ImmichClient, PaperlessClient
+from ..core.clients.anthropic import AnthropicClient
 from ..core.config import load_config
 
 WEB_DIR = Path(__file__).parent
@@ -28,20 +29,24 @@ async def lifespan(app: FastAPI):
     app.state.gramps = GrampsClient(cfg.gramps.base_url, cfg.gramps.username, cfg.gramps.password)
     app.state.immich = ImmichClient(cfg.immich.base_url, cfg.immich.api_key)
     app.state.paperless = PaperlessClient(cfg.paperless.base_url, cfg.paperless.api_token)
+    app.state.anthropic = AnthropicClient(cfg.anthropic.api_key, cfg.anthropic.model)
     app.state.caches = {}
     yield
     await app.state.gramps.close()
     await app.state.immich.close()
     await app.state.paperless.close()
+    await app.state.anthropic.close()
     app.state.conn.close()
 
 
 app = FastAPI(title="Bifrost", version=__version__, lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=WEB_DIR / "static"), name="static")
 
+from .routes.citations import router as citations_router  # noqa: E402
 from .routes.faces import router as faces_router  # noqa: E402
 from .routes.sync import router as sync_router  # noqa: E402
 
+app.include_router(citations_router)
 app.include_router(faces_router)
 app.include_router(sync_router)
 

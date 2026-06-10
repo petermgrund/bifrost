@@ -65,6 +65,12 @@ class SyncPaperlessConfig:
 
 
 @dataclass(frozen=True)
+class AnthropicConfig:
+    api_key: str = ""
+    model: str = "claude-fable-5"
+
+
+@dataclass(frozen=True)
 class FacesConfig:
     # Write-through export of person links in the legacy person_map.yaml
     # format, kept until Phase 2 retires immich_to_gramps.py --link-faces
@@ -82,6 +88,7 @@ class Config:
     faces: FacesConfig = FacesConfig()
     sync_immich: SyncImmichConfig = SyncImmichConfig()
     sync_paperless: SyncPaperlessConfig = SyncPaperlessConfig()
+    anthropic: AnthropicConfig = AnthropicConfig()
 
 
 DEFAULT_PATH = Path(__file__).resolve().parents[2] / "config.yaml"
@@ -134,4 +141,8 @@ def load_config(path: str | Path | None = None) -> Config:
         faces=FacesConfig(person_map_export=Path(export) if export else None),
         sync_immich=sync_immich,
         sync_paperless=sync_paperless,
+        anthropic=AnthropicConfig(
+            api_key=(raw.get("anthropic") or {}).get("api_key") or "",
+            model=(raw.get("anthropic") or {}).get("model") or "claude-fable-5",
+        ),
     )

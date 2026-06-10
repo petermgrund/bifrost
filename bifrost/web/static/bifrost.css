@@ -253,3 +253,13 @@ table.results th { color: var(--muted); font-weight: 700; }
   .panes { grid-template-columns: 1fr; }
   .pane-mid { padding-top: 0; }
 }
+
+/* ---- citations ---- */
+.fieldform { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: .5rem 1.25rem; margin: .75rem 0; }
+.fieldrow { display: flex; flex-direction: column; gap: .2rem; margin: .3rem 0; }
+.fieldrow span { font-size: .75rem; color: var(--muted); }
+textarea { font: inherit; font-size: .85rem; background: var(--surface); color: var(--text); border: 1px solid var(--border-strong); border-radius: var(--radius); padding: .45rem .6rem; width: 100%; resize: vertical; }
+textarea:focus { outline: none; border-color: var(--accent); }
+.reviewgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: start; }
+.reviewgrid .syncpanel { margin: 0; }
+@media (max-width: 900px) { .reviewgrid { grid-template-columns: 1fr; } }

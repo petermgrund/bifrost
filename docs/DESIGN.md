@@ -249,8 +249,14 @@ custom-field write-back ordering).
 *Exit: control-center "paperless" job retired.*
 
 **Phase 4 — places & citations.**
-Absorb osm-to-gramps as `boundaries.py` (it is already async FastAPI; mostly a
-move). Build citations on gda-sync's salvaged client patterns.
+Citations ✅ (June 10): record-type field checklists as data
+(`citation_types.yaml`: US set from the ee-us-citations skill + Swedish/
+Norwegian/Italian types drafted from the tree's real sources), EE
+composition via the Claude API (forced-tool structured output with an
+auto fallback for models that reject forcing; editable draft; manual
+fallback when no key), save chain Repository→Source→Note→Citation with
+media link — round-trip verified against live Gramps. Remaining:
+absorb osm-to-gramps as `boundaries.py`.
 *Exit: osm-to-gramps container retired; citations usable end-to-end.*
 
 **Phase 5 — retire control-center.**

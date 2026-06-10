@@ -44,3 +44,9 @@ sync:
     date_meaning_field_id: null
     # Paperless tag id marking documents with a transcription to sync
     transcription_tag_id: null
+
+anthropic:
+  # Used by the citation generator to compose EE citation text (editable
+  # before save; manual entry works without it).
+  api_key: "REPLACE_ME"
+  model: "claude-fable-5"

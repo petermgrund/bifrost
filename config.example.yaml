@@ -16,3 +16,8 @@ paperless:
 
 # Resolved relative to this file's directory if not absolute.
 database: data/bifrost.db
+
+faces:
+  # Write-through export for the legacy pipeline (Phase 1 shim, removed in
+  # Phase 2). Path as seen inside the container; see docker-compose.yml.
+  person_map_export: "/legacy/person_map.yaml"

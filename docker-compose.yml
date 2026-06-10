@@ -10,3 +10,7 @@ services:
     volumes:
       - ./config.yaml:/app/config.yaml:ro
       - ./data:/app/data
+      # Phase 1 shim: write-through person_map.yaml export for the legacy
+      # pipeline (file bind mount; the export truncates in place, preserving
+      # the inode). Remove in Phase 2.
+      - /opt/stacks/immich-to-gramps/person_map.yaml:/legacy/person_map.yaml

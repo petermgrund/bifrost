@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Faces · Bifrost{% endblock %}
+{% block content %}
+<div class="toolbar">
+  <h1>Faces</h1>
+  <button id="refresh-btn">Refresh from servers</button>
+</div>
+
+<section class="panes">
+  <div class="pane">
+    <h2>Gramps people</h2>
+    <input id="gramps-search" type="search" placeholder="Search by name...">
+    <div id="gramps-list" class="cardlist">Loading…</div>
+  </div>
+  <div class="pane-mid">
+    <input id="link-label" type="text" placeholder="Label (optional)">
+    <button id="link-btn" class="primary" disabled>Link pair</button>
+    <div id="pair-hint" class="hint">Select one person on each side</div>
+  </div>
+  <div class="pane">
+    <h2>Immich people</h2>
+    <input id="immich-search" type="search" placeholder="Search by name...">
+    <div id="immich-list" class="cardlist">Loading…</div>
+  </div>
+</section>
+
+<section>
+  <h2>Face sync</h2>
+  <div class="toolbar">
+    <label class="check"><input type="checkbox" id="dry-run" checked> Dry run (preview only)</label>
+    <button id="sync-btn" class="primary">Sync faces (add new)</button>
+    <button id="repad-btn">Re-pad existing</button>
+    <span id="op-status" class="hint"></span>
+  </div>
+  <div id="op-results"></div>
+</section>
+
+<section>
+  <h2>Synced media</h2>
+  <div class="toolbar">
+    <input id="media-search" type="search" placeholder="Search by title...">
+    <button class="chip active" data-filter="all">All</button>
+    <button class="chip" data-filter="locked">Locked</button>
+    <button class="chip" data-filter="unlocked">Unlocked</button>
+  </div>
+  <div id="media-list" class="cardlist media-grid">Loading…</div>
+</section>
+{% endblock %}
+{% block scripts %}<script src="/static/faces.js"></script>{% endblock %}

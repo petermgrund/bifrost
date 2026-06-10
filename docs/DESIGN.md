@@ -210,7 +210,10 @@ Scaffold repo, port the three clients into `core/clients/`, unified
 
 **Phase 1 — faces (first full cutover).**
 Port the face-linker GUI into `web/`; `person_links` becomes the source of
-truth. **Compat shim:** on every link change, Bifrost re-exports
+truth. Scope turned out larger than "linking UI": the legacy GUI also *applies*
+links (sync faces, re-pad, manual-faces lock with tight-rect recompute), so
+those operations port now too — the service can only retire with full parity.
+**Compat shim:** on every link change, Bifrost re-exports
 `person_map.yaml`, because the legacy `immich_to_gramps.py --link-faces` path
 reads it during syncs — this keeps the legacy pipeline correct until Phase 2
 retires it.

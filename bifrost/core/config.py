@@ -39,12 +39,21 @@ class PaperlessConfig:
 
 
 @dataclass(frozen=True)
+class FacesConfig:
+    # Write-through export of person links in the legacy person_map.yaml
+    # format, kept until Phase 2 retires immich_to_gramps.py --link-faces
+    # (which reads it). None disables the export.
+    person_map_export: Path | None = None
+
+
+@dataclass(frozen=True)
 class Config:
     gramps: GrampsConfig
     immich: ImmichConfig
     paperless: PaperlessConfig
     db_path: Path
     config_path: Path
+    faces: FacesConfig = FacesConfig()
 
 
 DEFAULT_PATH = Path(__file__).resolve().parents[2] / "config.yaml"
@@ -68,10 +77,13 @@ def load_config(path: str | Path | None = None) -> Config:
     db = Path(raw.get("database") or "data/bifrost.db")
     if not db.is_absolute():
         db = cfg_path.parent / db
+    faces_raw = raw.get("faces") or {}
+    export = faces_raw.get("person_map_export")
     return Config(
         gramps=GrampsConfig(**section("gramps", ["base_url", "username", "password"])),
         immich=ImmichConfig(**section("immich", ["base_url", "api_key"])),
         paperless=PaperlessConfig(**section("paperless", ["base_url", "api_token"])),
         db_path=db,
         config_path=cfg_path,
+        faces=FacesConfig(person_map_export=Path(export) if export else None),
     )

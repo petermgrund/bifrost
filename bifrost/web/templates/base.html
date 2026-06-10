@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Bifrost{% endblock %}</title>
+  <link rel="stylesheet" href="/static/bifrost.css">
+</head>
+<body>
+  <header class="topbar">
+    <span class="brand">Bifrost</span>
+    <nav>
+      <a href="/">Inbox</a>
+      <a href="/faces">Faces</a>
+      <a class="disabled" title="Phase 2">Sync</a>
+      <a class="disabled" title="Phase 4">Places</a>
+      <a class="disabled" title="Phase 4">Citations</a>
+    </nav>
+  </header>
+  <main>{% block content %}{% endblock %}</main>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

@@ -41,9 +41,13 @@ experience) will reuse Bifrost's core library.
 4. **One client per system.** Exactly one Gramps client, one Immich client,
    one Paperless client, in one package. (Today: 3 Gramps, 2 Paperless,
    2 Immich implementations across projects.)
-5. **Boring tech, deliberately.** FastAPI + Jinja + htmx + SSE, vanilla-JS
-   islands for interactive pages. SQLite. No task queue, no SPA framework —
-   single user, asyncio is plenty.
+5. **Boring tech, deliberately.** FastAPI + SQLite backend; the frontend is
+   Lit web components (Peter's pick, revised from vanilla-JS islands) with
+   the bundle and fonts vendored locally — no CDN at runtime, no build step,
+   no node_modules. Components render into light DOM so one global
+   stylesheet themes everything. No task queue — single user, asyncio is
+   plenty. Visual language: Scandinavian minimal (near-white, cool grays,
+   one Nordic-blue accent, self-hosted Inter).
 6. **Tailnet-only binding** (`100.89.34.77` + `127.0.0.1`), like everything
    else on eir. Never eth0.
 7. **Open for extension.** Adding a new sync source, citation type, or inbox

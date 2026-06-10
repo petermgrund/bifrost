@@ -1,10 +1,3 @@
 {% extends "base.html" %}
-{% block content %}
-<h1>Inbox <small>v{{ version }}</small></h1>
-<p class="hint"><em>The bridge between realms</em></p>
-<div id="inbox-cards" class="inbox-grid">Loading…</div>
-
-<h2>Recent runs</h2>
-<div id="runs-list">Loading…</div>
-{% endblock %}
-{% block scripts %}<script src="/static/inbox.js"></script>{% endblock %}
+{% block content %}<inbox-page></inbox-page>{% endblock %}
+{% block scripts %}<script type="module" src="/static/app/inbox-page.js"></script>{% endblock %}

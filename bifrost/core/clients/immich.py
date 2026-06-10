@@ -13,7 +13,8 @@ class ImmichClient:
     def __init__(self, base_url: str, api_key: str) -> None:
         self._base = base_url.rstrip("/")
         self._client = httpx.AsyncClient(
-            timeout=30.0, headers={"x-api-key": api_key, "Accept": "application/json"}
+            timeout=30.0, follow_redirects=True,
+            headers={"x-api-key": api_key, "Accept": "application/json"},
         )
 
     async def __aenter__(self) -> "ImmichClient":

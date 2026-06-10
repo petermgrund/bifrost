@@ -22,7 +22,11 @@ class GrampsClient:
         self._base = base_url.rstrip("/")
         self._user = username
         self._pass = password
-        self._client = httpx.AsyncClient(timeout=30.0)
+        # follow_redirects matches requests' default: Gramps 308-redirects
+        # POST /objects -> /objects/ (preserving method + body), and other
+        # no-trailing-slash endpoints similarly. Without this, httpx returns
+        # the redirect's HTML body and .json() fails.
+        self._client = httpx.AsyncClient(timeout=30.0, follow_redirects=True)
         self._token: str | None = None
         self._auth_lock = asyncio.Lock()
 

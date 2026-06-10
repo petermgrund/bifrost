@@ -14,6 +14,7 @@ class PaperlessClient:
         self._base = base_url.rstrip("/")
         self._client = httpx.AsyncClient(
             timeout=30.0,
+            follow_redirects=True,  # match requests' default (see GrampsClient)
             headers={
                 "Authorization": f"Token {api_token}",
                 "Accept": "application/json; version=9",

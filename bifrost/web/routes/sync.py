@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from ...modules import sync_immich, sync_paperless
@@ -74,6 +74,35 @@ async def paperless_apply(request: Request, body: PaperlessBody):
     run_id, events = await record_run(st.conn, _paperless_job(body, False), gen)
     st.caches.clear()
     return {"run_id": run_id, "apply": True, "events": [e.__dict__ for e in events]}
+
+
+class ResyncMediaBody(BaseModel):
+    media_id: str
+    apply: bool = False
+
+
+@router.post("/api/paperless/resync-media")
+async def paperless_resync_media(request: Request, body: ResyncMediaBody):
+    """Resync just one media object's transcription notes, by Gramps media id."""
+    st = _state(request)
+    media_id = body.media_id.strip()
+    if not media_id:
+        raise HTTPException(400, "media id required")
+    doc_id = await sync_paperless.paperless_id_for_media(st.gramps, media_id)
+    if doc_id is None:
+        raise HTTPException(
+            404, f"no Gramps media '{media_id}', or it has no Paperless ID attribute")
+    gen = sync_paperless.sync(
+        st.paperless, st.gramps, st.conn, st.cfg.sync_paperless,
+        apply=body.apply, force_transcriptions=True,
+        transcriptions_only=True, single_doc_id=doc_id,
+    )
+    job = "sync.paperless.resync-media" + ("" if body.apply else ".preview")
+    run_id, events = await record_run(st.conn, job, gen)
+    if body.apply:
+        st.caches.clear()
+    return {"run_id": run_id, "apply": body.apply, "media_id": media_id,
+            "doc_id": doc_id, "events": [e.__dict__ for e in events]}
 
 
 @router.get("/api/paperless/pending")

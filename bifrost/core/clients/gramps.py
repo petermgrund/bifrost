@@ -154,7 +154,18 @@ class GrampsClient:
         return await self._paged("/places/")
 
     async def get_media_by_gramps_id(self, gramps_id: str) -> dict | None:
-        resp = await self._request("GET", "/media/", params={"gramps_id": gramps_id})
+        # Gramps returns 404 (not an empty list) when no media has this id;
+        # for a lookup that's "not found", not an error.
+        await self._ensure_token()
+        resp = await self._client.get(
+            f"{self._base}/media/",
+            headers={"Authorization": f"Bearer {self._token}"},
+            params={"gramps_id": gramps_id},
+        )
+        if resp.status_code == 404:
+            return None
+        if resp.status_code >= 400:
+            raise GrampsError(f"GET /media/ → {resp.status_code}: {resp.text[:500]}")
         items = resp.json()
         if items and isinstance(items, list):
             for m in items:

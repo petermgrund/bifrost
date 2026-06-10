@@ -228,6 +228,21 @@ def _doc_gramps_id(doc: dict, field_id: int) -> str | None:
     return None
 
 
+async def paperless_id_for_media(gramps: GrampsClient, media_gramps_id: str) -> int | None:
+    """Resolve a Gramps media id (e.g. 'TP5TCM') to its source Paperless doc id
+    via the 'Paperless ID' attribute the sync writes on every media object."""
+    media = await gramps.get_media_by_gramps_id(media_gramps_id.strip())
+    if not media:
+        return None
+    for attr in media.get("attribute_list", []):
+        if attr.get("type") == "Paperless ID":
+            try:
+                return int(attr["value"])
+            except (ValueError, TypeError, KeyError):
+                return None
+    return None
+
+
 async def sync(
     paperless: PaperlessClient,
     gramps: GrampsClient,
@@ -236,6 +251,7 @@ async def sync(
     apply: bool,
     force_transcriptions: bool = False,
     transcriptions_only: bool = False,
+    single_doc_id: int | None = None,
 ) -> AsyncIterator[SyncEvent]:
     counts = {"created": 0, "skipped": 0, "versions_updated": 0, "baselined": 0,
               "titles_updated": 0, "dates_updated": 0,
@@ -543,8 +559,16 @@ async def sync(
     # ============ Phase 4: transcriptions ============
     if cfg.transcription_tag_id:
         tx_docs = await paperless.list_documents_by_tag(cfg.transcription_tag_id)
-        yield SyncEvent(kind="started",
-                        detail=f"{len(tx_docs)} document(s) with transcription tag")
+        if single_doc_id is not None:
+            tx_docs = [d for d in tx_docs if d["id"] == single_doc_id]
+            detail = (f"document #{single_doc_id} (transcription-tagged)"
+                      if tx_docs
+                      else f"document #{single_doc_id} is not transcription-tagged "
+                           "— nothing to resync")
+            yield SyncEvent(kind="started", detail=detail)
+        else:
+            yield SyncEvent(kind="started",
+                            detail=f"{len(tx_docs)} document(s) with transcription tag")
         for doc in tx_docs:
             doc_id = doc["id"]
             title = doc.get("title", f"Untitled (Paperless #{doc_id})")

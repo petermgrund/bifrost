@@ -137,3 +137,52 @@ document.querySelectorAll(".syncpanel[data-source]").forEach(panel => {
     }
   });
 });
+
+/* Single-object transcription resync — keyed on a typed Gramps media ID. */
+(() => {
+  const panel = document.getElementById("resync-media");
+  if (!panel) return;
+  const input = panel.querySelector("#resync-id");
+  const previewBtn = panel.querySelector(".preview-btn");
+  const applyBtn = panel.querySelector(".apply-btn");
+  const status = panel.querySelector(".status");
+  const setPrimary = (btn) => {
+    [previewBtn, applyBtn].forEach(b => b.classList.remove("primary"));
+    if (btn) btn.classList.add("primary");
+  };
+
+  const run = async (apply) => {
+    const media_id = input.value.trim();
+    if (!media_id) { status.textContent = "Enter a media ID first."; return; }
+    (apply ? applyBtn : previewBtn).disabled = true;
+    status.textContent = apply ? "Applying…" : "Previewing…";
+    if (!apply) panel.querySelector(".results").innerHTML = "";
+    try {
+      const payload = await api("/sync/api/paperless/resync-media", { media_id, apply });
+      render(panel, { ...payload, apply });
+      if (apply) {
+        status.textContent = `Applied to ${payload.media_id} (Paperless #${payload.doc_id}, run #${payload.run_id}).`;
+        applyBtn.disabled = true;
+        setPrimary(null);
+      } else {
+        const c = (payload.events.find(e => e.kind === "summary") || {}).data || {};
+        const hasWork = (c.tx_created || 0) + (c.tx_updated || 0) > 0;
+        applyBtn.disabled = !hasWork;
+        setPrimary(hasWork ? applyBtn : null);
+        status.textContent = `${payload.media_id} → Paperless #${payload.doc_id}.` +
+          (hasWork ? " Reviewed? Then apply." : " Nothing to rewrite.");
+      }
+    } catch (e) {
+      panel.querySelector(".results").innerHTML = `<div class="action-failed">${esc(e.message)}</div>`;
+      status.textContent = "";
+    } finally {
+      previewBtn.disabled = false;
+    }
+  };
+
+  previewBtn.addEventListener("click", () => run(false));
+  applyBtn.addEventListener("click", () => run(true));
+  // Typing a new ID invalidates a prior preview's apply.
+  input.addEventListener("input", () => { applyBtn.disabled = true; setPrimary(null); });
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") run(false); });
+})();

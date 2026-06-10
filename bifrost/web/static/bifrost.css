@@ -3,22 +3,28 @@
    chrome. */
 
 @font-face {
-  font-family: "Inter";
-  font-weight: 400;
-  font-display: swap;
-  src: url("/static/vendor/fonts/inter-400.woff2") format("woff2");
-}
-@font-face {
-  font-family: "Inter";
-  font-weight: 500;
-  font-display: swap;
-  src: url("/static/vendor/fonts/inter-500.woff2") format("woff2");
-}
-@font-face {
-  font-family: "Inter";
+  font-family: "Space Grotesk";
   font-weight: 600;
   font-display: swap;
-  src: url("/static/vendor/fonts/inter-600.woff2") format("woff2");
+  src: url("/static/vendor/fonts/space-grotesk-600.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Space Grotesk";
+  font-weight: 700;
+  font-display: swap;
+  src: url("/static/vendor/fonts/space-grotesk-700.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Space Mono";
+  font-weight: 400;
+  font-display: swap;
+  src: url("/static/vendor/fonts/space-mono-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Space Mono";
+  font-weight: 700;
+  font-display: swap;
+  src: url("/static/vendor/fonts/space-mono-700.woff2") format("woff2");
 }
 
 :root {
@@ -42,8 +48,8 @@
 
 body {
   margin: 0;
-  font-family: "Inter", system-ui, sans-serif;
-  font-size: 15px;
+  font-family: "Space Mono", ui-monospace, monospace;
+  font-size: 13.5px;
   line-height: 1.5;
   background: var(--bg);
   color: var(--text);
@@ -51,7 +57,8 @@ body {
 
 main { max-width: 1180px; margin: 0 auto; padding: 1.25rem 1.5rem 4rem; }
 
-h1 { font-size: 1.5rem; font-weight: 600; letter-spacing: -0.015em; margin: .75rem 0 1rem; }
+h1, h2, h3, .brand, .inbox-card .count { font-family: "Space Grotesk", system-ui, sans-serif; }
+h1 { font-size: 1.6rem; font-weight: 700; letter-spacing: -0.015em; margin: .75rem 0 1rem; }
 h2 { font-size: 1.02rem; font-weight: 600; letter-spacing: -0.01em; margin: 1.75rem 0 .5rem; }
 h3 { font-size: .9rem; font-weight: 600; margin: 1.25rem 0 .25rem; }
 a { color: var(--accent); }
@@ -88,7 +95,7 @@ button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent);
 button:disabled { opacity: .4; cursor: default; }
 button.primary {
   background: var(--accent); border-color: var(--accent);
-  color: #fff; font-weight: 500;
+  color: #fff; font-weight: 700;
 }
 button.primary:hover:not(:disabled) { background: var(--accent-dark); color: #fff; }
 button.chip { border-radius: 999px; padding: .22rem .85rem; font-size: .8rem; border-color: var(--border); }
@@ -114,13 +121,13 @@ input:focus { outline: none; border-color: var(--accent); }
   padding: .3rem 1.1rem; border-radius: 999px; font-size: .88rem;
 }
 .tab.active {
-  background: var(--surface); color: var(--text); font-weight: 500;
+  background: var(--surface); color: var(--text); font-weight: 700;
   box-shadow: 0 1px 2px #0e141b14; border: 1px solid var(--border);
 }
 
 /* ---- badges ---- */
 .badge {
-  font-size: .7rem; font-weight: 500; padding: .1rem .5rem; border-radius: 999px;
+  font-size: .7rem; font-weight: 700; padding: .1rem .5rem; border-radius: 999px;
   background: var(--accent-soft); color: var(--accent-dark); white-space: nowrap;
 }
 .badge.warn { background: #f6eedd; color: var(--warn); }
@@ -160,7 +167,7 @@ input:focus { outline: none; border-color: var(--accent); }
 .photo-card.unsynced { opacity: .55; }
 .photo-card img { width: 68px; height: 68px; border-radius: var(--radius); object-fit: cover; background: var(--surface-2); }
 .photo-card .body { flex: 1; min-width: 0; }
-.photo-card .title { font-size: .88rem; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.photo-card .title { font-size: .88rem; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .photo-card .meta {
   font-size: .74rem; color: var(--muted);
   display: flex; gap: .35rem; align-items: center; flex-wrap: wrap; margin-top: .25rem;
@@ -210,7 +217,7 @@ input:focus { outline: none; border-color: var(--accent); }
 /* ---- results / runs ---- */
 table.results { width: 100%; border-collapse: collapse; font-size: .85rem; margin-top: .4rem; }
 table.results th, table.results td { text-align: left; padding: .35rem .5rem; border-bottom: 1px solid var(--border); }
-table.results th { color: var(--muted); font-weight: 500; }
+table.results th { color: var(--muted); font-weight: 700; }
 .action-created, .action-updated { color: var(--ok); }
 .action-would_create, .action-would_update { color: var(--warn); }
 .action-failed { color: var(--err); }

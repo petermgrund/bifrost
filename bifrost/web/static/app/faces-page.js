@@ -163,7 +163,7 @@ class FacesPage extends BifrostElement {
         <div class="meta">
           ${p.gramps_id || ''}
           ${p.pending_count ? html`<span class="badge">${p.pending_count} pending</span>` : nothing}
-          ${p.is_manual ? html`<span class="badge warn" title="Has a manually-drawn face">⚠ manual</span>` : nothing}
+          ${p.is_manual ? html`<span class="badge warn" title="Has a manually-drawn face">Manual</span>` : nothing}
           ${p.synced ? nothing : html`<span class="badge unlinked">not in Gramps</span>`}
         </div>
       </div>
@@ -192,7 +192,7 @@ class FacesPage extends BifrostElement {
           <span class="spacer"></span>
           <button @click=${() => (this.openAsset = null)}>✕</button>
         </div>
-        ${p.is_manual ? html`<div class="alert">⚠ A face here was drawn manually in Immich; default pad is 0%.</div>` : nothing}
+        ${p.is_manual ? html`<div class="alert">A face here was drawn manually in Immich; default pad is 0%.</div>` : nothing}
         <div class="detail-body">
           <div class="imgwrap">
             <img src="/faces/api/thumb/asset/${p.asset_id}?size=preview" alt="">${boxes}

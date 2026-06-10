@@ -43,6 +43,12 @@ async def immich_apply(request: Request):
 
 class PaperlessBody(BaseModel):
     force_transcriptions: bool = False
+    transcriptions_only: bool = False
+
+
+def _paperless_job(body: PaperlessBody, preview: bool) -> str:
+    name = "sync.paperless.transcriptions" if body.transcriptions_only else "sync.paperless"
+    return f"{name}.preview" if preview else name
 
 
 @router.post("/api/paperless/preview")
@@ -51,8 +57,9 @@ async def paperless_preview(request: Request, body: PaperlessBody):
     gen = sync_paperless.sync(
         st.paperless, st.gramps, st.conn, st.cfg.sync_paperless,
         apply=False, force_transcriptions=body.force_transcriptions,
+        transcriptions_only=body.transcriptions_only,
     )
-    run_id, events = await record_run(st.conn, "sync.paperless.preview", gen)
+    run_id, events = await record_run(st.conn, _paperless_job(body, True), gen)
     return {"run_id": run_id, "apply": False, "events": [e.__dict__ for e in events]}
 
 
@@ -62,8 +69,9 @@ async def paperless_apply(request: Request, body: PaperlessBody):
     gen = sync_paperless.sync(
         st.paperless, st.gramps, st.conn, st.cfg.sync_paperless,
         apply=True, force_transcriptions=body.force_transcriptions,
+        transcriptions_only=body.transcriptions_only,
     )
-    run_id, events = await record_run(st.conn, "sync.paperless", gen)
+    run_id, events = await record_run(st.conn, _paperless_job(body, False), gen)
     st.caches.clear()
     return {"run_id": run_id, "apply": True, "events": [e.__dict__ for e in events]}
 

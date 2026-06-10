@@ -11,7 +11,6 @@
   <div class="toolbar">
     <button class="primary preview-btn">Preview</button>
     <button class="apply-btn" disabled>Apply</button>
-    <label class="check"><input type="checkbox" class="force-tx"> Force-rewrite all transcriptions</label>
     <span class="status hint"></span>
   </div>
   <div class="results"></div>
@@ -24,6 +23,20 @@
   photos are refreshed.</p>
   <div class="toolbar">
     <button class="primary preview-btn">Preview</button>
+    <button class="apply-btn" disabled>Apply</button>
+    <span class="status hint"></span>
+  </div>
+  <div class="results"></div>
+</section>
+
+<section class="syncpanel maintenance" data-source="paperless"
+         data-body='{"transcriptions_only": true, "force_transcriptions": true}'>
+  <h2>Maintenance: rewrite all transcription notes</h2>
+  <p class="hint">Re-writes every transcription (and translation) note from current
+  Paperless content, ignoring the change-detection hashes. Use after fixing OCR in
+  bulk or changing the note format — not part of a normal sync.</p>
+  <div class="toolbar">
+    <button class="preview-btn">Preview</button>
     <button class="apply-btn" disabled>Apply</button>
     <span class="status hint"></span>
   </div>

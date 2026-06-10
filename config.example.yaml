@@ -1,0 +1,18 @@
+# Bifrost configuration — copy to config.yaml, fill in, chmod 600.
+# config.yaml is gitignored; this example is the committed reference.
+
+gramps:
+  base_url: "http://100.89.34.77:81/api"
+  username: "REPLACE_ME"
+  password: "REPLACE_ME"
+
+immich:
+  base_url: "http://100.89.34.77:2283"
+  api_key: "REPLACE_ME"
+
+paperless:
+  base_url: "http://100.89.34.77:8010"
+  api_token: "REPLACE_ME"
+
+# Resolved relative to this file's directory if not absolute.
+database: data/bifrost.db

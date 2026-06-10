@@ -1,0 +1,12 @@
+services:
+  bifrost:
+    build: .
+    container_name: bifrost
+    restart: unless-stopped
+    ports:
+      # Bound to tailnet + loopback only — never eth0.
+      - "100.89.34.77:8800:8800"
+      - "127.0.0.1:8800:8800"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./data:/app/data

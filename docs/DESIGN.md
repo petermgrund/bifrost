@@ -46,6 +46,15 @@ experience) will reuse Bifrost's core library.
    single user, asyncio is plenty.
 6. **Tailnet-only binding** (`100.89.34.77` + `127.0.0.1`), like everything
    else on eir. Never eth0.
+7. **Open for extension.** Adding a new sync source, citation type, or inbox
+   card must be additive, not surgical: a sync module is anything conforming
+   to the small protocol (async generator of `SyncEvent`s + an inbox-count
+   hook + optional routes/templates) and registering itself; citation types
+   are data/templates, not code branches. When a design choice trades
+   convenience now against a closed door later, prefer the open door — but
+   don't build speculative abstraction for futures we haven't met. The
+   registry pattern lands when the second sync module does (Phase 3), not
+   before.
 
 ## 3. Repository layout
 
@@ -120,11 +129,15 @@ CREATE TABLE doc_versions (
 );
 
 CREATE TABLE transcription_state (
-    paperless_id       INTEGER PRIMARY KEY,
-    content_hash       TEXT NOT NULL,
-    note_handle        TEXT,
-    translation_handle TEXT,
-    updated_at         TEXT NOT NULL
+    -- columns match the legacy transcriptions.json schema exactly
+    paperless_id        INTEGER PRIMARY KEY,
+    content_hash        TEXT NOT NULL,
+    note_handle         TEXT,
+    gramps_note_id      TEXT,
+    gramps_media_id     TEXT,
+    translation_handle  TEXT,
+    translation_note_id TEXT,
+    updated_at          TEXT NOT NULL
 );
 
 CREATE TABLE runs (

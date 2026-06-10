@@ -1,4 +1,9 @@
-"""Faces page + JSON API (port of the legacy person_linker_gui routes)."""
+"""Faces page + JSON API.
+
+One mental model: links (People view) + per-face padding (Photos view).
+The single bulk action is "apply pending"; everything else is direct
+manipulation that applies immediately.
+"""
 
 from __future__ import annotations
 
@@ -56,7 +61,7 @@ async def immich_people(request: Request, refresh: bool = False):
     return st.caches["immich_people"]
 
 
-# --- links CRUD ---
+# --- links CRUD (link changes invalidate the photo listing) ---
 
 class LinkBody(BaseModel):
     gramps_handle: str
@@ -72,10 +77,12 @@ async def get_links(request: Request):
 @router.post("/api/links")
 async def create_link(request: Request, body: LinkBody):
     st = _state(request)
-    return faces.set_link(
+    result = faces.set_link(
         st.conn, body.gramps_handle, body.immich_person_id, body.label,
         st.cfg.faces.person_map_export,
     )
+    st.caches.pop("photos", None)
+    return result
 
 
 @router.delete("/api/links/{gramps_handle}")
@@ -83,6 +90,7 @@ async def remove_link(request: Request, gramps_handle: str):
     st = _state(request)
     if not faces.delete_link(st.conn, gramps_handle, st.cfg.faces.person_map_export):
         raise HTTPException(404, "not found")
+    st.caches.pop("photos", None)
     return faces.list_links(st.conn)
 
 
@@ -95,62 +103,59 @@ async def person_thumb(request: Request, person_id: str):
 
 
 @router.get("/api/thumb/asset/{asset_id}")
-async def asset_thumb(request: Request, asset_id: str):
-    content, ctype = await _state(request).immich.asset_thumbnail(asset_id)
+async def asset_thumb(request: Request, asset_id: str, size: str = "thumbnail"):
+    if size not in ("thumbnail", "preview"):
+        raise HTTPException(400, "size must be thumbnail or preview")
+    content, ctype = await _state(request).immich.asset_thumbnail(asset_id, size)
     return Response(content, media_type=ctype, headers={"Cache-Control": "public, max-age=3600"})
 
 
-# --- apply operations ---
+# --- photos view ---
 
-class ApplyBody(BaseModel):
-    dry_run: bool = True
-
-
-@router.post("/api/sync")
-async def sync_faces(request: Request, body: ApplyBody):
+@router.get("/api/photos")
+async def photos(request: Request, refresh: bool = False):
     st = _state(request)
-    gen = faces.link_faces(st.gramps, st.immich, st.conn, apply=not body.dry_run)
-    run_id, events = await record_run(st.conn, "faces.link", gen)
-    return {"run_id": run_id, "dry_run": body.dry_run,
-            "events": [e.__dict__ for e in events]}
+    if st.caches.get("photos") is None or refresh:
+        st.caches["photos"] = await faces.photo_listing(st.gramps, st.immich, st.conn)
+    return st.caches["photos"]
 
 
-@router.post("/api/repad")
-async def repad_faces(request: Request, body: ApplyBody):
-    st = _state(request)
-    gen = faces.repad_faces(st.gramps, st.immich, st.conn, apply=not body.dry_run)
-    run_id, events = await record_run(st.conn, "faces.repad", gen)
-    return {"run_id": run_id, "dry_run": body.dry_run,
-            "events": [e.__dict__ for e in events]}
-
-
-# --- synced media browser + lock ---
-
-@router.get("/api/synced-media")
-async def synced_media(request: Request, refresh: bool = False):
-    st = _state(request)
-    if st.caches.get("synced_media") is None or refresh:
-        st.caches["synced_media"] = await faces.synced_media_listing(
-            st.gramps, st.immich, st.conn
-        )
-    return st.caches["synced_media"]
-
-
-class LockBody(BaseModel):
+class FaceBody(BaseModel):
+    gramps_handle: str
     asset_id: str
-    locked: bool
+    pad: float
 
 
-@router.post("/api/lock")
-async def lock_asset(request: Request, body: LockBody):
+@router.post("/api/face")
+async def set_face(request: Request, body: FaceBody):
     st = _state(request)
     try:
-        result = await faces.set_asset_lock(
-            st.gramps, st.immich, st.conn, body.asset_id, body.locked
+        result = await faces.apply_face(
+            st.gramps, st.immich, st.conn, body.gramps_handle, body.asset_id, body.pad
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    for row in st.caches.get("synced_media") or []:
-        if row["immich_asset_id"] == body.asset_id:
-            row["is_manual"] = body.locked
+    # Patch the cached listing in place so the UI stays consistent without a
+    # full (and slow) refresh.
+    listing = st.caches.get("photos")
+    if listing:
+        for photo in listing["photos"]:
+            if photo["asset_id"] != body.asset_id:
+                continue
+            for f in photo["faces"]:
+                if f.get("gramps_handle") == body.gramps_handle:
+                    f.update(result)
+            photo["pending_count"] = sum(
+                1 for f in photo["faces"] if f.get("status") in ("pending", "outdated")
+            )
+        listing["pending_total"] = sum(p["pending_count"] for p in listing["photos"])
     return result
+
+
+@router.post("/api/apply-pending")
+async def apply_pending(request: Request):
+    st = _state(request)
+    gen = faces.apply_pending(st.gramps, st.immich, st.conn)
+    run_id, events = await record_run(st.conn, "faces.apply", gen)
+    st.caches.pop("photos", None)
+    return {"run_id": run_id, "events": [e.__dict__ for e in events]}

@@ -63,6 +63,18 @@ MIGRATIONS: list[str] = [
         PRIMARY KEY (run_id, seq)
     );
     """,
+    # 2 — per-(person, photo) face padding. The Gramps rect is always the
+    # materialization of Immich's detected box + this pad; absence means the
+    # default applies (0.15, or 0.0 on Sync/ManualFaces-tagged assets).
+    """
+    CREATE TABLE face_pads (
+        gramps_handle TEXT NOT NULL,
+        asset_id      TEXT NOT NULL,
+        pad           REAL NOT NULL,
+        updated_at    TEXT NOT NULL,
+        PRIMARY KEY (gramps_handle, asset_id)
+    );
+    """,
 ]
 
 

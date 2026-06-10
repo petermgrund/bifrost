@@ -74,3 +74,21 @@ def test_yaml_export_matches_legacy_format(tmp_path):
         {"gramps_handle": "H1", "immich_person_id": "I1", "label": "Grandma"},
         {"gramps_handle": "H2", "immich_person_id": "I2"},
     ]}
+
+
+def test_face_status():
+    from bifrost.modules.faces import face_status
+    assert face_status(None, [1, 2, 3, 4]) == "pending"
+    assert face_status([1, 2, 3, 4], [1, 2, 3, 5]) == "outdated"
+    assert face_status([1, 2, 3, 4], [1, 2, 3, 4]) == "applied"
+
+
+def test_effective_pad_defaults(tmp_path):
+    from bifrost.modules.faces import DEFAULT_PAD, effective_pad, set_stored_pad
+    conn = _conn(tmp_path)
+    assert effective_pad(conn, "H1", "A1", is_manual=False) == DEFAULT_PAD
+    assert effective_pad(conn, "H1", "A1", is_manual=True) == 0.0
+    set_stored_pad(conn, "H1", "A1", 0.30)
+    # stored value wins over both defaults
+    assert effective_pad(conn, "H1", "A1", is_manual=False) == 0.30
+    assert effective_pad(conn, "H1", "A1", is_manual=True) == 0.30

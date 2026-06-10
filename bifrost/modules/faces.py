@@ -1,16 +1,18 @@
 """Faces module — person links and face-rectangle MediaRefs.
 
-Ported from immich-to-gramps (person_linker_gui.py + run_link_faces /
-run_repad_faces in immich_to_gramps.py), with bifrost's SQLite as the source
-of truth for links and a write-through person_map.yaml export for the legacy
-pipeline (removed in Phase 2).
+One mental model: the Gramps rect for a (person, photo) face is always the
+materialization of Immich's detected box + a per-face padding value. Editing
+the pad recomputes the rect; a face whose rect is missing or stale is
+"pending"; the Sync/ManualFaces tag is an informational alert (its only
+behavioral effect is a 0% *default* pad), not a lock.
 
-Long operations (link_faces, repad_faces) are async generators yielding
-SyncEvents; preview is the same generator with apply=False.
+SQLite is the source of truth for links and pads, with a write-through
+person_map.yaml export for the legacy pipeline (removed in Phase 2).
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import sqlite3
 from datetime import datetime
@@ -25,12 +27,13 @@ from ..core.events import SyncEvent
 
 log = logging.getLogger("bifrost.faces")
 
-# Default expansion applied to Immich face boxes when writing them to Gramps.
-# 0.15 grows each side by 15% of the box dimension. Assets tagged
-# Sync/ManualFaces opt out (tight crop, and re-pad leaves them alone).
-FACE_PAD_FACTOR = 0.15
+DEFAULT_PAD = 0.15
 MANUAL_FACES_TAG = "Sync/ManualFaces"
+# Phase 2 moves this into config with the sync module; faces only needs it to
+# show "tagged but not yet synced" photos in the grid.
+SYNC_TAG = "Sync/Gramps"
 IMMICH_ID_ATTR = "Immich ID"
+CONCURRENCY = 8
 
 PERSON_MAP_HEADER = """# Person mapping between Gramps and Immich
 #
@@ -79,6 +82,19 @@ def immich_face_to_gramps_rect(face: dict, pad_factor: float = 0.0) -> list[int]
     ]
 
 
+def face_status(current_rect: list | None, expected_rect: list | None) -> str:
+    if current_rect is None:
+        return "pending"
+    if expected_rect is not None and list(current_rect) != list(expected_rect):
+        return "outdated"
+    return "applied"
+
+
+# Pads worth recognizing when adopting pre-bifrost rects as intent (tight and
+# the legacy default; finer values were never produced by the old pipeline).
+ADOPTABLE_PADS = (0.0, DEFAULT_PAD)
+
+
 # ---------------------------------------------------------------------------
 # Person links (SQLite is the source of truth; YAML export is a compat shim)
 # ---------------------------------------------------------------------------
@@ -98,9 +114,7 @@ def list_links(conn: sqlite3.Connection) -> list[dict]:
 
 def person_map_dict(conn: sqlite3.Connection) -> dict[str, str]:
     """{immich_person_id: gramps_handle} — the shape the apply logic wants."""
-    return {
-        e["immich_person_id"]: e["gramps_handle"] for e in list_links(conn)
-    }
+    return {e["immich_person_id"]: e["gramps_handle"] for e in list_links(conn)}
 
 
 def set_link(
@@ -154,6 +168,36 @@ def export_person_map(conn: sqlite3.Connection, path: Path | None) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Per-face padding
+# ---------------------------------------------------------------------------
+
+def get_stored_pad(conn: sqlite3.Connection, handle: str, asset_id: str) -> float | None:
+    row = conn.execute(
+        "SELECT pad FROM face_pads WHERE gramps_handle=? AND asset_id=?",
+        (handle, asset_id),
+    ).fetchone()
+    return row["pad"] if row else None
+
+
+def set_stored_pad(conn: sqlite3.Connection, handle: str, asset_id: str, pad: float) -> None:
+    with conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO face_pads (gramps_handle, asset_id, pad, updated_at)"
+            " VALUES (?, ?, ?, ?)",
+            (handle, asset_id, pad, datetime.now().isoformat(timespec="seconds")),
+        )
+
+
+def effective_pad(
+    conn: sqlite3.Connection, handle: str, asset_id: str, is_manual: bool
+) -> float:
+    stored = get_stored_pad(conn, handle, asset_id)
+    if stored is not None:
+        return stored
+    return 0.0 if is_manual else DEFAULT_PAD
+
+
+# ---------------------------------------------------------------------------
 # Shared lookups
 # ---------------------------------------------------------------------------
 
@@ -179,300 +223,251 @@ async def manual_face_asset_ids(immich: ImmichClient) -> set[str]:
         return set()
 
 
+async def _gather_limited(coros: list) -> list:
+    sem = asyncio.Semaphore(CONCURRENCY)
+
+    async def run(c):
+        async with sem:
+            return await c
+
+    return await asyncio.gather(*(run(c) for c in coros))
+
+
 # ---------------------------------------------------------------------------
-# Apply operations (async generators of SyncEvents)
+# Photo listing — the workhorse behind the Photos view
 # ---------------------------------------------------------------------------
 
-async def link_faces(
-    gramps: GrampsClient,
-    immich: ImmichClient,
-    conn: sqlite3.Connection,
-    apply: bool,
-) -> AsyncIterator[SyncEvent]:
-    """Scan synced media for Immich faces of linked people; add face-rectangle
-    MediaRefs to the matching Gramps people (port of run_link_faces)."""
-    person_map = person_map_dict(conn)
-    yield SyncEvent(kind="started", detail=f"{len(person_map)} person links loaded")
-    if not person_map:
-        yield SyncEvent(kind="summary", data={"linked": 0})
-        return
+async def photo_listing(
+    gramps: GrampsClient, immich: ImmichClient, conn: sqlite3.Connection
+) -> dict:
+    """Everything the Photos view needs, in one structure:
 
+    photos: [{asset_id, title, gramps_id, media_handle, synced, is_manual,
+              pending_count, faces: [{immich_person_id, immich_name,
+              gramps_handle, label, pad, current_rect, expected_rect,
+              status: applied|outdated|pending|unlinked}]}]
+    """
+    links = list_links(conn)
+    by_immich = {e["immich_person_id"]: e for e in links}
     manual = await manual_face_asset_ids(immich)
     synced = await synced_immich_media(gramps)
-    yield SyncEvent(kind="started", detail=f"{len(synced)} synced media to scan")
 
-    counts = {"created": 0, "skipped": 0, "failed": 0}
-    person_cache: dict[str, dict] = {}
+    # Linked Gramps people, fetched once each (media_list carries the rects)
+    handles = sorted({e["gramps_handle"] for e in links})
+    fetched = await _gather_limited([gramps.get_person(h) for h in handles])
+    persons: dict[str, dict] = {}
+    for h, p in zip(handles, fetched):
+        persons[h] = p
 
+    # Faces per synced asset
+    asset_ids = list(synced.keys())
+    faces_lists = await _gather_limited([immich.get_faces(a) for a in asset_ids])
+    faces_by_asset = dict(zip(asset_ids, faces_lists))
+
+    photos = []
     for asset_id, media_obj in synced.items():
         media_handle = media_obj["handle"]
-        media_title = media_obj.get("desc") or asset_id[:8]
-        media_gid = media_obj.get("gramps_id", "?")
-        pad = 0.0 if asset_id in manual else FACE_PAD_FACTOR
-
-        try:
-            faces = await immich.get_faces(asset_id)
-        except Exception as exc:  # noqa: BLE001
-            yield SyncEvent(
-                kind="error", entity="face", source_id=asset_id,
-                detail=f"could not fetch faces: {exc}",
-            )
-            counts["failed"] += 1
-            continue
-
-        for face in faces:
-            person = face.get("person") or {}
-            immich_pid = person.get("id")
-            handle = person_map.get(immich_pid) if immich_pid else None
-            if not handle:
-                continue
-            immich_name = person.get("name") or immich_pid[:8]
-
-            if handle not in person_cache:
-                try:
-                    person_cache[handle] = await gramps.get_person(handle)
-                except Exception as exc:  # noqa: BLE001
-                    yield SyncEvent(
-                        kind="error", entity="face", source_id=asset_id,
-                        detail=f"could not fetch Gramps person {handle[:12]}: {exc}",
-                    )
-                    counts["failed"] += 1
-                    person_cache[handle] = {}
-                    continue
-            gramps_person = person_cache[handle]
-            if not gramps_person:
-                continue
-
-            refs = gramps_person.setdefault("media_list", [])
-            if any(mr.get("ref") == media_handle for mr in refs):
-                counts["skipped"] += 1
-                continue
-
-            rect = immich_face_to_gramps_rect(face, pad_factor=pad)
-            gramps_name = person_display_name(gramps_person)
-            event = SyncEvent(
-                kind="item", entity="face",
-                action="created" if apply else "would_create",
-                source_id=asset_id,
-                gramps_id=gramps_person.get("gramps_id"),
-                title=f"{immich_name} → {gramps_name} on '{media_title}'",
-                data={"rect": rect, "media_gramps_id": media_gid,
-                      "media_handle": media_handle, "pad": pad},
-            )
-
-            if apply:
-                refs.append({
-                    "_class": "MediaRef",
-                    "ref": media_handle,
-                    "rect": rect,
-                    "attribute_list": [],
-                    "citation_list": [],
-                    "note_list": [],
-                    "private": False,
+        is_manual = asset_id in manual
+        face_rows = []
+        for face in faces_by_asset.get(asset_id, []):
+            ip = face.get("person") or {}
+            ipid = ip.get("id")
+            if not ipid:
+                continue  # unassigned ML detection — nothing to act on yet
+            link = by_immich.get(ipid)
+            if not link:
+                face_rows.append({
+                    "immich_person_id": ipid,
+                    "immich_name": ip.get("name") or "(unnamed)",
+                    "status": "unlinked",
                 })
-                try:
-                    await gramps.update_person(handle, gramps_person)
-                except Exception as exc:  # noqa: BLE001
-                    refs.pop()
-                    event = SyncEvent(
-                        kind="item", entity="face", action="failed",
-                        source_id=asset_id, title=event.title,
-                        detail=str(exc),
-                    )
-                    counts["failed"] += 1
-                    yield event
-                    continue
-            counts["created"] += 1
-            yield event
-
-    yield SyncEvent(kind="summary", data=counts)
-
-
-async def repad_faces(
-    gramps: GrampsClient,
-    immich: ImmichClient,
-    conn: sqlite3.Connection,
-    apply: bool,
-) -> AsyncIterator[SyncEvent]:
-    """Recompute rects on existing Immich-sourced face MediaRefs to apply the
-    current padding (port of run_repad_faces). Sync/ManualFaces assets are
-    skipped entirely."""
-    person_map = person_map_dict(conn)
-    yield SyncEvent(kind="started", detail=f"{len(person_map)} person links loaded")
-    if not person_map:
-        yield SyncEvent(kind="summary", data={"updated": 0})
-        return
-
-    manual = await manual_face_asset_ids(immich)
-    synced = await synced_immich_media(gramps)
-    by_handle = {m["handle"]: (aid, m) for aid, m in synced.items()}
-    yield SyncEvent(kind="started", detail=f"{len(by_handle)} Immich-sourced media in Gramps")
-
-    counts = {"updated": 0, "unchanged": 0, "skipped": 0, "failed": 0}
-    faces_cache: dict[str, list[dict]] = {}
-
-    async def faces_for(asset_id: str) -> list[dict]:
-        if asset_id not in faces_cache:
-            try:
-                faces_cache[asset_id] = await immich.get_faces(asset_id)
-            except Exception as exc:  # noqa: BLE001
-                log.warning("Could not fetch faces for %s: %s", asset_id[:8], exc)
-                faces_cache[asset_id] = []
-        return faces_cache[asset_id]
-
-    for immich_pid, handle in person_map.items():
-        try:
-            person = await gramps.get_person(handle)
-        except Exception as exc:  # noqa: BLE001
-            yield SyncEvent(kind="error", entity="face",
-                            detail=f"could not fetch Gramps person {handle[:12]}: {exc}")
-            counts["failed"] += 1
-            continue
-
-        gramps_name = person_display_name(person)
-        changed = False
-        for mr in person.get("media_list", []):
-            rect = mr.get("rect")
-            if not rect:
-                continue  # plain person<->photo link, not a face crop
-            lookup = by_handle.get(mr.get("ref"))
-            if not lookup:
-                counts["skipped"] += 1
-                continue  # not Immich-sourced
-            asset_id, media_obj = lookup
-            if asset_id in manual:
-                counts["skipped"] += 1
                 continue
-
-            matching = next(
-                (f for f in await faces_for(asset_id)
-                 if (f.get("person") or {}).get("id") == immich_pid),
+            handle = link["gramps_handle"]
+            person = persons.get(handle) or {}
+            pad = effective_pad(conn, handle, asset_id, is_manual)
+            expected = immich_face_to_gramps_rect(face, pad_factor=pad)
+            current = next(
+                (mr.get("rect") for mr in person.get("media_list", [])
+                 if mr.get("ref") == media_handle and mr.get("rect")),
                 None,
             )
-            if not matching:
-                counts["skipped"] += 1
-                continue
+            status = face_status(current, expected)
 
-            new_rect = immich_face_to_gramps_rect(matching, pad_factor=FACE_PAD_FACTOR)
-            if not new_rect or new_rect == list(rect):
-                counts["unchanged"] += 1
-                continue
+            # Adopt pre-bifrost intent: a rect that matches a recognizable pad
+            # isn't drift — record that pad instead of flagging it.
+            if (
+                status == "outdated"
+                and get_stored_pad(conn, handle, asset_id) is None
+            ):
+                for candidate in ADOPTABLE_PADS:
+                    adopted = immich_face_to_gramps_rect(face, pad_factor=candidate)
+                    if adopted is not None and list(current) == adopted:
+                        set_stored_pad(conn, handle, asset_id, candidate)
+                        pad, expected, status = candidate, adopted, "applied"
+                        break
 
-            old_rect = list(rect)
-            if apply:
-                mr["rect"] = new_rect
-                changed = True
-            counts["updated"] += 1
-            yield SyncEvent(
-                kind="item", entity="face",
-                action="updated" if apply else "would_update",
-                source_id=asset_id,
-                gramps_id=person.get("gramps_id"),
-                title=f"{gramps_name} on '{media_obj.get('desc') or asset_id[:8]}'",
-                data={"old_rect": old_rect, "rect": new_rect,
-                      "media_gramps_id": media_obj.get("gramps_id")},
-            )
+            # On manual-faces photos a mismatch is protected, not pending:
+            # the rect may be a deliberate human choice. Individual apply
+            # (with the warning banner in view) is the only way to touch it.
+            if status == "outdated" and is_manual:
+                status = "differs"
 
-        if changed:
-            try:
-                await gramps.update_person(handle, person)
-            except Exception as exc:  # noqa: BLE001
-                yield SyncEvent(kind="error", entity="face",
-                                detail=f"save {gramps_name} failed: {exc}")
-                counts["failed"] += 1
-
-    yield SyncEvent(kind="summary", data=counts)
-
-
-# ---------------------------------------------------------------------------
-# Synced-media browser + manual-faces lock
-# ---------------------------------------------------------------------------
-
-async def synced_media_listing(
-    gramps: GrampsClient, immich: ImmichClient, conn: sqlite3.Connection
-) -> list[dict]:
-    manual = await manual_face_asset_ids(immich)
-
-    face_links_per_media: dict[str, list[dict]] = {}
-    for entry in list_links(conn):
-        handle = entry["gramps_handle"]
-        try:
-            person = await gramps.get_person(handle)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("get_person %s failed: %s", handle[:12], exc)
-            continue
-        label = entry.get("label") or person_display_name(person)
-        for mr in person.get("media_list", []):
-            if mr.get("rect") and mr.get("ref"):
-                face_links_per_media.setdefault(mr["ref"], []).append(
-                    {"gramps_handle": handle, "label": label}
-                )
-
-    items = []
-    for asset_id, m in (await synced_immich_media(gramps)).items():
-        items.append({
-            "media_handle": m["handle"],
-            "gramps_id": m.get("gramps_id", ""),
-            "title": m.get("desc") or asset_id[:8],
-            "immich_asset_id": asset_id,
-            "is_manual": asset_id in manual,
-            "face_links": face_links_per_media.get(m["handle"], []),
+            face_rows.append({
+                "immich_person_id": ipid,
+                "immich_name": ip.get("name") or "(unnamed)",
+                "gramps_handle": handle,
+                "gramps_id": person.get("gramps_id"),
+                "label": link.get("label") or (person_display_name(person) if person else None),
+                "pad": pad,
+                "current_rect": current,
+                "expected_rect": expected,
+                "status": status,
+            })
+        photos.append({
+            "asset_id": asset_id,
+            "title": media_obj.get("desc") or asset_id[:8],
+            "gramps_id": media_obj.get("gramps_id", ""),
+            "media_handle": media_handle,
+            "synced": True,
+            "is_manual": is_manual,
+            "pending_count": sum(1 for f in face_rows if f["status"] in ("pending", "outdated")),
+            "faces": face_rows,
         })
-    items.sort(key=lambda r: r["title"].lower())
-    return items
+
+    # Tagged-but-unsynced assets: visible (greyed) so media creation has an
+    # honest home here when the sync module lands in Phase 2.
+    try:
+        sync_tag = await immich.resolve_tag_id(SYNC_TAG)
+        if sync_tag:
+            for item in await immich.search_assets_by_tag(sync_tag):
+                if item["id"] in synced:
+                    continue
+                photos.append({
+                    "asset_id": item["id"],
+                    "title": item.get("originalFileName") or item["id"][:8],
+                    "gramps_id": None,
+                    "media_handle": None,
+                    "synced": False,
+                    "is_manual": item["id"] in manual,
+                    "pending_count": 0,
+                    "faces": [],
+                })
+    except Exception as exc:  # noqa: BLE001 — grid still useful without these
+        log.warning("Could not list unsynced tagged assets: %s", exc)
+
+    photos.sort(key=lambda p: ((not p["synced"]), p["title"].lower()))
+    return {
+        "photos": photos,
+        "pending_total": sum(p["pending_count"] for p in photos),
+    }
 
 
-async def set_asset_lock(
+# ---------------------------------------------------------------------------
+# Apply — the single-face atom and the one bulk action
+# ---------------------------------------------------------------------------
+
+async def apply_face(
     gramps: GrampsClient,
     immich: ImmichClient,
     conn: sqlite3.Connection,
+    gramps_handle: str,
     asset_id: str,
-    locked: bool,
+    pad: float,
 ) -> dict:
-    """Lock = tag Sync/ManualFaces + recompute tight rects for linked faces.
-    Unlock = remove the tag (rects revert on the next re-pad run)."""
-    tag_id = await immich.resolve_tag_id(MANUAL_FACES_TAG)
-    if not tag_id:
-        raise ValueError(f"{MANUAL_FACES_TAG} tag not found in Immich — create it first")
+    """Set this face's pad and materialize its rect in Gramps (create the
+    MediaRef if missing, update its rect otherwise). Returns the new state."""
+    pad = max(0.0, min(0.5, pad))
+    link = next(
+        (e for e in list_links(conn) if e["gramps_handle"] == gramps_handle), None
+    )
+    if link is None:
+        raise ValueError("no link for this Gramps person")
 
-    if not locked:
-        await immich.untag_assets(tag_id, [asset_id])
-        return {"asset_id": asset_id, "is_manual": False}
-
-    await immich.tag_assets(tag_id, [asset_id])
-
-    media_obj = None
-    for aid, m in (await synced_immich_media(gramps)).items():
-        if aid == asset_id:
-            media_obj = m
-            break
+    synced = await synced_immich_media(gramps)
+    media_obj = synced.get(asset_id)
     if media_obj is None:
-        return {"asset_id": asset_id, "is_manual": True, "rects_updated": 0,
-                "warning": "asset is not synced to Gramps; tag added but no rects to revert"}
-
+        raise ValueError("asset is not synced to Gramps")
     media_handle = media_obj["handle"]
-    immich_to_handle = person_map_dict(conn)
-    rects_updated = 0
-    for face in await immich.get_faces(asset_id):
-        immich_pid = (face.get("person") or {}).get("id")
-        handle = immich_to_handle.get(immich_pid) if immich_pid else None
-        if not handle:
-            continue
-        tight = immich_face_to_gramps_rect(face, pad_factor=0.0)
-        if not tight:
-            continue
-        try:
-            person = await gramps.get_person(handle)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("Could not fetch Gramps person %s: %s", handle[:12], exc)
-            continue
-        changed = False
-        for mr in person.get("media_list", []):
-            if mr.get("ref") == media_handle and mr.get("rect") and mr["rect"] != tight:
-                mr["rect"] = tight
-                changed = True
-        if changed:
-            await gramps.update_person(handle, person)
-            rects_updated += 1
 
-    return {"asset_id": asset_id, "is_manual": True, "rects_updated": rects_updated}
+    face = next(
+        (f for f in await immich.get_faces(asset_id)
+         if (f.get("person") or {}).get("id") == link["immich_person_id"]),
+        None,
+    )
+    if face is None:
+        raise ValueError("Immich no longer detects this person's face on this asset")
+
+    rect = immich_face_to_gramps_rect(face, pad_factor=pad)
+    if rect is None:
+        raise ValueError("face has no usable bounding box")
+
+    person = await gramps.get_person(gramps_handle)
+    refs = person.setdefault("media_list", [])
+    existing = next((mr for mr in refs if mr.get("ref") == media_handle), None)
+    if existing is not None:
+        existing["rect"] = rect
+    else:
+        refs.append({
+            "_class": "MediaRef",
+            "ref": media_handle,
+            "rect": rect,
+            "attribute_list": [],
+            "citation_list": [],
+            "note_list": [],
+            "private": False,
+        })
+    await gramps.update_person(gramps_handle, person)
+    set_stored_pad(conn, gramps_handle, asset_id, pad)
+
+    return {
+        "gramps_handle": gramps_handle,
+        "asset_id": asset_id,
+        "pad": pad,
+        "current_rect": rect,
+        "expected_rect": rect,
+        "status": "applied",
+    }
+
+
+async def apply_pending(
+    gramps: GrampsClient,
+    immich: ImmichClient,
+    conn: sqlite3.Connection,
+) -> AsyncIterator[SyncEvent]:
+    """Materialize every pending/outdated face using its effective pad."""
+    listing = await photo_listing(gramps, immich, conn)
+    todo = [
+        (p, f)
+        for p in listing["photos"]
+        for f in p["faces"]
+        if f["status"] in ("pending", "outdated")
+    ]
+    yield SyncEvent(kind="started", detail=f"{len(todo)} pending face(s)")
+
+    counts = {"created": 0, "updated": 0, "failed": 0}
+    for photo, face in todo:
+        action = "created" if face["status"] == "pending" else "updated"
+        try:
+            await apply_face(
+                gramps, immich, conn,
+                face["gramps_handle"], photo["asset_id"], face["pad"],
+            )
+        except Exception as exc:  # noqa: BLE001
+            counts["failed"] += 1
+            yield SyncEvent(
+                kind="item", entity="face", action="failed",
+                source_id=photo["asset_id"],
+                title=f"{face.get('label') or face['immich_name']} on '{photo['title']}'",
+                detail=str(exc),
+            )
+            continue
+        counts[action] += 1
+        yield SyncEvent(
+            kind="item", entity="face", action=action,
+            source_id=photo["asset_id"],
+            gramps_id=face.get("gramps_id"),
+            title=f"{face.get('label') or face['immich_name']} on '{photo['title']}'",
+            data={"rect": face["expected_rect"], "pad": face["pad"]},
+        )
+
+    yield SyncEvent(kind="summary", data=counts)

@@ -140,6 +140,17 @@ CREATE TABLE transcription_state (
     updated_at          TEXT NOT NULL
 );
 
+CREATE TABLE face_pads (
+    -- per-(person, photo) padding: the Gramps rect is always the
+    -- materialization of Immich's detected box + this pad; absence means the
+    -- default applies (15%, or 0% on Sync/ManualFaces-tagged assets)
+    gramps_handle TEXT NOT NULL,
+    asset_id      TEXT NOT NULL,
+    pad           REAL NOT NULL,
+    updated_at    TEXT NOT NULL,
+    PRIMARY KEY (gramps_handle, asset_id)
+);
+
 CREATE TABLE runs (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     job         TEXT NOT NULL,
@@ -194,7 +205,7 @@ class SyncEvent:
 | Page | Contents |
 |---|---|
 | **Inbox** (home) | pending counts with links: unsynced tagged Immich assets, unsynced tagged Paperless docs, unlinked Immich faces, places missing boundaries; recent runs strip |
-| **Faces** | ported two-pane linker (Gramps people ↔ Immich people w/ thumbnails); unlinked-faces queue; link/unlink writes `person_links` |
+| **Faces** | two views. *People*: two-pane linker (Gramps ↔ Immich w/ thumbnails). *Photos*: grid + per-photo detail with face rectangles drawn on the image; **per-face padding slider** applies immediately (direct manipulation — this subsumed the legacy sync/re-pad/lock buttons); the one bulk action is "Apply pending" (faces created by new links). `Sync/ManualFaces` is an alert + 0% default; rect mismatches on those photos are status `differs`, protected from bulk apply. Pre-bifrost rects matching a recognizable pad are *adopted* as intent rather than flagged. |
 | **Sync** | Immich + Paperless panels: preview → review checklist → apply, live per-item progress |
 | **Places** | boundary coverage table, generate/regenerate (phase 4) |
 | **Citations** | source/citation builder (phase 4) |

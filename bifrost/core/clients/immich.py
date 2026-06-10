@@ -83,6 +83,21 @@ class ImmichClient:
                 return t["id"]
         return None
 
+    async def search_assets_by_tag(self, tag_id: str) -> list[dict]:
+        items: list[dict] = []
+        page = 1
+        while True:
+            resp = await self._request(
+                "POST", "/api/search/metadata",
+                json={"tagIds": [tag_id], "size": 1000, "page": page},
+            )
+            assets = resp.json().get("assets", {})
+            items.extend(assets.get("items", []))
+            if not assets.get("nextPage"):
+                break
+            page += 1
+        return items
+
     async def search_asset_ids_by_tag(self, tag_id: str) -> set[str]:
         ids: set[str] = set()
         page = 1

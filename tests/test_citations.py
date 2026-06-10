@@ -59,3 +59,14 @@ def test_system_prompt_carries_style_guides():
     assert "Politiets registerblade" in p       # gloss rule with Peter's examples
     assert "Never produce a Source List Entry" in p
     assert "always left blank" in p             # citation date rule
+
+
+def test_next_sequential_id():
+    from bifrost.modules.citations import next_sequential_id
+    # continues from the max, never refills gaps
+    assert next_sequential_id("C", {"C0001", "C0036", "C0068"}) == "C0069"
+    # legacy N_RANDOM ids are ignored when finding the max
+    assert next_sequential_id("N", {"N0134", "N_XNH8SH", "N_RX4ZRR"}) == "N0135"
+    # empty tree starts at 0001; width grows naturally past 9999
+    assert next_sequential_id("R", set()) == "R0001"
+    assert next_sequential_id("C", {"C9999"}) == "C10000"

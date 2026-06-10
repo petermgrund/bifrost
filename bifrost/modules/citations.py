@@ -14,6 +14,7 @@ FIRST/SHORT REFERENCE NOTE blocks; confidence as Gramps 0-4; dual-layer
 from __future__ import annotations
 
 import logging
+import re
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -22,7 +23,7 @@ import yaml
 
 from ..core.clients import GrampsClient
 from ..core.clients.anthropic import AnthropicClient
-from .sync_immich import generate_gramps_id, generate_handle
+from .sync_immich import generate_handle
 
 log = logging.getLogger("bifrost.citations")
 
@@ -38,6 +39,20 @@ def load_citation_types() -> dict:
         merged["fields"] = list(t["fields"]) + digital
         types.append(merged)
     return {"groups": raw["groups"], "types": types}
+
+
+def next_sequential_id(prefix: str, existing: set[str]) -> str:
+    """Next id in the tree's native sequential convention (C0001, S0042…).
+
+    Bare random 6-char ids are reserved for MEDIA objects only (deletion-
+    collision safety + physical photo labels); everything else follows the
+    Gramps-style sequence. Ids not matching ^PREFIX\\d+$ (e.g. legacy
+    N_XXXXXX transcription notes) are ignored when finding the max.
+    """
+    pat = re.compile(rf"^{prefix}(\d+)$")
+    nums = [int(m.group(1)) for i in existing if (m := pat.match(i))]
+    n = (max(nums) + 1) if nums else 1
+    return f"{prefix}{n:04d}"
 
 
 # ---------------------------------------------------------------------------
@@ -310,12 +325,16 @@ async def save(
     created object is reported even if a later step fails."""
     created: dict = {}
     now = int(datetime.utcnow().timestamp())
-    existing_ids = await gramps.list_media_gramps_ids()  # collision pool for note ids
+
+    async def mint(api_path: str, prefix: str) -> str:
+        items = await gramps._paged(f"/{api_path}/", keys="gramps_id")
+        return next_sequential_id(
+            prefix, {i["gramps_id"] for i in items if i.get("gramps_id")})
 
     if repository_handle is None and draft.get("repository"):
         r = draft["repository"]
         repository_handle = generate_handle()
-        repo_gid = "R_" + generate_gramps_id(existing_ids)
+        repo_gid = await mint("repositories", "R")
         repo_obj = {
             "_class": "Repository", "handle": repository_handle, "gramps_id": repo_gid,
             "name": r["name"], "type": r["type"], "change": now,
@@ -329,7 +348,7 @@ async def save(
     if source_handle is None and draft.get("source"):
         s = draft["source"]
         source_handle = generate_handle()
-        src_gid = "S_" + generate_gramps_id(existing_ids)
+        src_gid = await mint("sources", "S")
         reporefs = []
         if repository_handle:
             reporefs.append({
@@ -351,7 +370,7 @@ async def save(
         raise ValueError("no source chosen and none drafted")
 
     note_handle = generate_handle()
-    note_gid = "N_" + generate_gramps_id(existing_ids)
+    note_gid = await mint("notes", "N")
     await gramps.create_object({
         "_class": "Note", "handle": note_handle, "gramps_id": note_gid,
         "text": {"_class": "StyledText", "string": _note_text(draft["notes"]), "tags": []},
@@ -362,7 +381,7 @@ async def save(
 
     c = draft["citation"]
     citation_handle = generate_handle()
-    cit_gid = "C_" + generate_gramps_id(existing_ids)
+    cit_gid = await mint("citations", "C")
     cit_obj = {
         "_class": "Citation", "handle": citation_handle, "gramps_id": cit_gid,
         "source_handle": source_handle, "page": c["page"],

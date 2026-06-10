@@ -119,8 +119,8 @@ class CitationsPage extends BifrostElement {
       repository: this.pick.source ? null : { name: '', type: 'Archive', url: '' },
       call_number: '',
       source: this.pick.source ? null : { title: '', author: '', pubinfo: '', abbrev: '' },
-      citation: { page: '', date: null, confidence: 2 },
-      notes: { first_reference: '', short_reference: '', source_list_entry: '' },
+      citation: { page: '', confidence: 2 },
+      notes: { first_reference: '', short_reference: '' },
       quality: null,
     };
     this.step = 'review';
@@ -313,22 +313,10 @@ class CitationsPage extends BifrostElement {
         <div class="syncpanel"><h2>Citation</h2>
           <label class="fieldrow"><span>Page / locator</span>${bind(d.citation, 'page')}</label>
           <label class="fieldrow"><span>Confidence (0–4)</span>${bind(d.citation, 'confidence')}</label>
-          <label class="fieldrow"><span>Date</span>
-            <input type="text" .value=${d.citation.date
-              ? `${d.citation.date.day}.${d.citation.date.month}.${d.citation.date.year}` : ''}
-              placeholder="d.m.yyyy or blank"
-              @input=${(e) => {
-                const m = e.target.value.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
-                d.citation.date = m
-                  ? { day: +m[1], month: +m[2], year: +m[3] }
-                  : (e.target.value.trim() ? d.citation.date : null);
-              }}>
-          </label>
         </div>
         <div class="syncpanel"><h2>Notes</h2>
           <label class="fieldrow"><span>First reference</span>${bind(d.notes, 'first_reference', true)}</label>
           <label class="fieldrow"><span>Short reference</span>${bind(d.notes, 'short_reference', true)}</label>
-          <label class="fieldrow"><span>Source list entry</span>${bind(d.notes, 'source_list_entry', true)}</label>
         </div>
       </div>
       <div class="toolbar">

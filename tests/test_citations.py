@@ -29,7 +29,6 @@ def test_note_text_matches_house_convention():
     text = _note_text({
         "first_reference": "Full citation here. ",
         "short_reference": "Short form.",
-        "source_list_entry": "ignored in the note",
     })
     assert text == "FIRST REFERENCE NOTE:\nFull citation here.\n\nSHORT REFERENCE NOTE:\nShort form."
 
@@ -47,3 +46,16 @@ def test_prompt_includes_existing_source_style():
 def test_schema_required_paths():
     assert set(COMPOSE_SCHEMA["required"]) == {"citation", "notes", "quality"}
     assert COMPOSE_SCHEMA["properties"]["citation"]["properties"]["confidence"]["maximum"] == 4
+    # house style: no citation dates, no source list entries
+    assert "date" not in COMPOSE_SCHEMA["properties"]["citation"]["properties"]
+    assert "source_list_entry" not in COMPOSE_SCHEMA["properties"]["notes"]["properties"]
+
+
+def test_system_prompt_carries_style_guides():
+    from bifrost.modules.citations import system_prompt
+    p = system_prompt()
+    assert "Bureau of the Census" in p          # US guide loaded
+    assert "Husförhörslängder" in p             # Swedish guide loaded
+    assert "Politiets registerblade" in p       # gloss rule with Peter's examples
+    assert "Never produce a Source List Entry" in p
+    assert "always left blank" in p             # citation date rule

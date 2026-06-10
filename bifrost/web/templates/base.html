@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Bifrost{% endblock %}</title>
+  <link rel="icon" type="image/svg+xml" href="/static/bifrost_logo.svg">
   <link rel="stylesheet" href="/static/bifrost.css">
   <script type="importmap">
   { "imports": { "lit": "/static/vendor/lit-all.min.js" } }
@@ -11,7 +12,7 @@
 </head>
 <body>
   <header class="topbar">
-    <span class="brand">Bifrost</span>
+    <a class="brand" href="/"><img class="logo" src="/static/bifrost_logo.svg" alt="">Bifrost</a>
     <nav>
       <a href="/">Inbox</a>
       <a href="/faces">Faces</a>

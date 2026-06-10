@@ -263,3 +263,7 @@ textarea:focus { outline: none; border-color: var(--accent); }
 .reviewgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: start; }
 .reviewgrid .syncpanel { margin: 0; }
 @media (max-width: 900px) { .reviewgrid { grid-template-columns: 1fr; } }
+
+/* ---- brand logo ---- */
+.brand { display: flex; align-items: center; gap: .55rem; text-decoration: none; }
+.brand .logo { height: 26px; width: auto; display: block; }

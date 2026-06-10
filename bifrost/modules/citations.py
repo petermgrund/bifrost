@@ -78,15 +78,6 @@ COMPOSE_SCHEMA = {
             "type": "object",
             "properties": {
                 "page": {"type": "string", "description": "Locator: page/entry/dwelling/image…"},
-                "date": {
-                    "type": ["object", "null"],
-                    "description": "Date of the record entry itself, if known.",
-                    "properties": {
-                        "day": {"type": "integer"}, "month": {"type": "integer"},
-                        "year": {"type": "integer"},
-                    },
-                    "required": ["day", "month", "year"],
-                },
                 "confidence": {"type": "integer", "minimum": 0, "maximum": 4,
                                "description": "Gramps: 0 very low … 4 very high, per the GPS mapping."},
             },
@@ -97,9 +88,8 @@ COMPOSE_SCHEMA = {
             "properties": {
                 "first_reference": {"type": "string"},
                 "short_reference": {"type": "string"},
-                "source_list_entry": {"type": "string"},
             },
-            "required": ["first_reference", "short_reference", "source_list_entry"],
+            "required": ["first_reference", "short_reference"],
         },
         "quality": {
             "type": "object",
@@ -115,37 +105,53 @@ COMPOSE_SCHEMA = {
     "required": ["citation", "notes", "quality"],
 }
 
-SYSTEM_PROMPT = """You construct Evidence Explained (EE) citations for genealogical \
-records and map them to Gramps Web fields. Follow EE conventions exactly:
+SYSTEM_PROMPT_CORE = """You construct Evidence Explained (EE) citations for \
+genealogical records and map them to Gramps Web fields. Follow EE conventions \
+and the HOUSE STYLE GUIDES below exactly — the guides override generic EE \
+practice wherever they differ.
 
-- Three layers: First Reference Note (full, specific-to-general), Short \
-Reference Note, Source List Entry (bibliography style).
+- Two citation layers only: First Reference Note (full, specific-to-general) \
+and Short Reference Note. Never produce a Source List Entry.
 - Punctuation: commas within a layer, semicolons between major layers, \
 colons for sub-elements, parentheses for publication details.
 - Records accessed through a digital platform get a dual-layer citation: \
 the database/image layer AND the underlying original, joined with "citing". \
-The Gramps Source represents the original record series; platform details \
-go in pubinfo.
-- Dates as day month year (15 March 1870). Full state names in the First \
-Reference Note, abbreviations in the Short.
+The Gramps Source represents the original record series; platform homepage \
+goes in pubinfo, the deep URL goes in the First Reference Note.
+- Foreign-language record-series names and creating bodies get a bracketed \
+English gloss in the First Reference Note on first use (EE 2.28): \
+Husförhörslängder [household examinations], Politiets registerblade [police \
+register pages], Fangeprotokoll [prisoner rolls], Älvdals häradsrätt [Älvdal \
+district court]. Gloss in the FRN only — never in the source title field; \
+the Short Reference Note drops it.
+- The citation date field is always left blank — never return a date.
+- Dates in prose as day month year (15 March 1870). Full state names in the \
+First Reference Note, traditional abbreviations (Minn., Wis.) in the Short — \
+never USPS two-letter codes.
 - Mark anything missing as [NEEDED: description] rather than inventing it.
-- Gramps confidence from the GPS assessment: original+primary+direct=4; \
-original+primary+indirect or derivative+primary+direct=3; secondary \
-info=2; authored/compiled=1; undetermined provenance=0.
-- The source `abbrev` is a short display title. `page` is the specific \
-locator within the source (page, entry number, dwelling/family, image N \
-of M…), written like the existing examples.
-
-House conventions (match these exactly):
-- Citation note text is two blocks separated by a blank line:
-  FIRST REFERENCE NOTE:\\n<text>\\n\\nSHORT REFERENCE NOTE:\\n<text>
-  (you return the layers separately; the app assembles the note).
-- Non-English record series keep their native names (Atti di Matrimonio, \
-Bouppteckningar, Ministerialbok) with the parish/court cited as author.
+- Gramps confidence from the GPS assessment per the guides' §10 tables: \
+original+primary+direct=4; original+primary+indirect or clean image of an \
+original=3; derivative+primary or original+secondary=2; \
+derivative+secondary or compiled-without-images=1; hearsay/undetermined=0.
+- For record kinds without a dedicated guide (Norwegian, Danish, Italian…), \
+apply the nearest guide's principles — the Swedish guide for Nordic records \
+(collection-led titles, native series names, glosses, NAD-style call \
+numbers), the US guide for English-language records.
 
 When an existing Source was chosen, return null for repository and source \
-and compose only the citation locator, date, confidence, notes and quality \
+and compose only the citation locator, confidence, notes and quality \
 consistent with that source's established style."""
+
+_STYLE_DIR = Path(__file__).parent / "data"
+
+
+def _style_guides() -> str:
+    return "\n\n---\n\n".join(
+        p.read_text() for p in sorted(_STYLE_DIR.glob("style_*.md")))
+
+
+def system_prompt() -> str:
+    return SYSTEM_PROMPT_CORE + "\n\n===== HOUSE STYLE GUIDES =====\n\n" + _style_guides()
 
 
 def build_compose_prompt(
@@ -189,7 +195,7 @@ async def compose(
     rt = next((t for t in types if t["key"] == record_type_key), None)
     today = datetime.now().strftime("%-d %B %Y")
     user = build_compose_prompt(rt, fields, media, existing_source, today)
-    draft = await anthropic.complete_structured(SYSTEM_PROMPT, user, COMPOSE_SCHEMA)
+    draft = await anthropic.complete_structured(system_prompt(), user, COMPOSE_SCHEMA)
     if existing_source:
         draft["repository"] = None
         draft["source"] = None
@@ -266,7 +272,7 @@ async def compose_from_dump(
     parts.append(f"THE DUMP:\n{dump.strip()}")
     parts.append("Compose the EE citation now.")
     draft = await anthropic.complete_structured(
-        SYSTEM_PROMPT, "\n\n".join(parts), DUMP_SCHEMA)
+        system_prompt(), "\n\n".join(parts), DUMP_SCHEMA)
 
     # Resolve matches server-side; a hallucinated id degrades to "new".
     matched_source = next(
@@ -355,11 +361,6 @@ async def save(
     created["note"] = note_gid
 
     c = draft["citation"]
-    date_obj = None
-    if c.get("date"):
-        d = c["date"]
-        date_obj = {"_class": "Date", "dateval": [d["day"], d["month"], d["year"], False],
-                    "modifier": 0, "quality": 0, "text": ""}
     citation_handle = generate_handle()
     cit_gid = "C_" + generate_gramps_id(existing_ids)
     cit_obj = {
@@ -369,8 +370,6 @@ async def save(
         "note_list": [note_handle], "media_list": [], "attribute_list": [],
         "tag_list": [], "private": False,
     }
-    if date_obj:
-        cit_obj["date"] = date_obj
     if media_handle:
         cit_obj["media_list"] = [{
             "_class": "MediaRef", "ref": media_handle, "rect": [],

@@ -15,6 +15,9 @@ class CitationsPage extends BifrostElement {
     error: { state: true },
     saved: { state: true },
     sourceQuery: { state: true },
+    dump: { state: true },
+    matched: { state: true },
+    wizard: { state: true },
     repoQuery: { state: true },
   };
 
@@ -32,6 +35,9 @@ class CitationsPage extends BifrostElement {
     this.error = '';
     this.saved = null;
     this.sourceQuery = '';
+    this.dump = '';
+    this.matched = null;
+    this.wizard = false;
     this.repoQuery = '';
   }
 
@@ -63,6 +69,9 @@ class CitationsPage extends BifrostElement {
     this.draft = null;
     this.error = '';
     this.saved = null;
+    this.dump = '';
+    this.matched = null;
+    this.wizard = false;
   }
 
   /* ---- compose / save ---- */
@@ -76,6 +85,27 @@ class CitationsPage extends BifrostElement {
         media_handle: this.pick.media?.handle || null,
         source_handle: this.pick.source?.handle || null,
       });
+      this.step = 'review';
+    } catch (e) {
+      this.error = e.message;
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  async composeDump() {
+    this.busy = true;
+    this.error = '';
+    try {
+      const r = await post('/citations/api/compose-dump', {
+        dump: this.dump,
+        media_handle: this.pick.media?.handle || null,
+      });
+      this.draft = r.draft;
+      this.matched = { source: r.matched_source, repository: r.matched_repository };
+      this.pick = { ...this.pick,
+        source: r.matched_source || null,
+        repository: r.matched_repository || null };
       this.step = 'review';
     } catch (e) {
       this.error = e.message;
@@ -116,7 +146,7 @@ class CitationsPage extends BifrostElement {
   /* ---- render ---- */
   render() {
     if (!this.ctx) return html`<h1>Citations</h1><div class="hint">${this.error || 'Loading…'}</div>`;
-    const steps = ['media', 'source', 'details', 'review'];
+    const steps = ['media', 'describe', 'details', 'review'];
     return html`
       <div class="pagehead">
         <h1>Citations</h1>
@@ -132,7 +162,7 @@ class CitationsPage extends BifrostElement {
       ${this.error ? html`<div class="alert">${this.error}</div>` : nothing}
       ${{
         media: () => this.renderMedia(),
-        source: () => this.renderSource(),
+        describe: () => this.renderDescribe(),
         details: () => this.renderDetails(),
         review: () => this.renderReview(),
       }[this.step]()}
@@ -155,7 +185,7 @@ class CitationsPage extends BifrostElement {
       </div>
       <div class="cardlist" style="max-height:60vh">
         ${rows.map((m) => html`<div class="card"
-          @click=${() => { this.pick = { ...this.pick, media: m }; this.step = 'source'; }}>
+          @click=${() => { this.pick = { ...this.pick, media: m }; this.step = 'describe'; }}>
           <span class="name">${m.title}</span>
           <span class="meta">${m.gramps_id} · ${m.origin}</span>
           ${m.cited ? html`<span class="badge unlinked">cited</span>` : nothing}
@@ -163,7 +193,25 @@ class CitationsPage extends BifrostElement {
       </div>`;
   }
 
-  renderSource() {
+  renderDescribe() {
+    return html`
+      <p class="hint">Citing: <strong>${this.pick.media?.title}</strong></p>
+      <div class="syncpanel">
+        <h2>Describe the record</h2>
+        <textarea rows="7" placeholder="Dump everything you know: what the record is, who's in it, dates, page/entry numbers, archive references, the URL you found it at…"
+          .value=${this.dump} @input=${(e) => (this.dump = e.target.value)}></textarea>
+        <div class="toolbar">
+          ${this.ctx.llm ? html`<button class="primary" ?disabled=${this.busy || !this.dump.trim()}
+            @click=${this.composeDump}>${this.busy ? 'Composing…' : 'Compose citation'}</button>` : nothing}
+          <button @click=${() => (this.wizard = !this.wizard)}>
+            ${this.wizard ? 'Hide' : 'Structured wizard'}</button>
+        </div>
+        <p class="hint">Matches an existing source when one fits; drafts a new one when none does.</p>
+      </div>
+      ${this.wizard ? this.renderWizard() : nothing}`;
+  }
+
+  renderWizard() {
     const q = this.sourceQuery.toLowerCase();
     const matches = this.ctx.sources.filter((s) =>
       !q || s.title.toLowerCase().includes(q) || s.abbrev.toLowerCase().includes(q)).slice(0, 30);
@@ -233,12 +281,19 @@ class CitationsPage extends BifrostElement {
       </div>`;
     }
     const d = this.draft;
+    const m = this.matched;
+    const matchedBanner = m && (m.source || m.repository)
+      ? html`<p class="hint">${m.source
+          ? html`Using existing source <strong>${m.source.gramps_id}</strong> — ${m.source.title}`
+          : html`New source in existing repository <strong>${m.repository.gramps_id}</strong> — ${m.repository.name}`}</p>`
+      : nothing;
     const bind = (obj, key, multiline = false) => multiline
       ? html`<textarea rows="4" .value=${obj[key] || ''}
           @input=${(e) => { obj[key] = e.target.value; }}></textarea>`
       : html`<input type="text" .value=${String(obj[key] ?? '')}
           @input=${(e) => { obj[key] = e.target.value; }}>`;
     return html`
+      ${matchedBanner}
       ${d.quality ? html`<p class="hint">${d.quality.source_type} source ·
         ${d.quality.information_type.toLowerCase()} information ·
         ${d.quality.evidence_type.toLowerCase()} evidence — ${d.quality.note}</p>` : nothing}

@@ -197,6 +197,92 @@ async def compose(
 
 
 # ---------------------------------------------------------------------------
+# Dump mode — freeform text in, matched-or-new source + citation out
+# ---------------------------------------------------------------------------
+
+DUMP_SCHEMA = {
+    **COMPOSE_SCHEMA,
+    "properties": {
+        **COMPOSE_SCHEMA["properties"],
+        "matched_source_gramps_id": {
+            "type": ["string", "null"],
+            "description": "gramps_id of the EXISTING source this record belongs to, "
+                           "or null if none truly fits. Never force a match.",
+        },
+        "matched_repository_gramps_id": {
+            "type": ["string", "null"],
+            "description": "When drafting a NEW source: gramps_id of an existing "
+                           "repository that holds it, or null to create one.",
+        },
+    },
+}
+
+DUMP_INSTRUCTIONS = """The user has pasted a freeform description of a record \
+("the dump"). Extract every citation element from it.
+
+MATCHING: a catalog of the tree's existing sources and repositories follows. \
+If the record clearly belongs to one of the existing sources (same record \
+series — e.g. another page of the same census county, another entry in the \
+same parish register volume), set matched_source_gramps_id and return null \
+for repository/source. If only the repository matches (new source held by a \
+known archive/platform), set matched_repository_gramps_id and draft the new \
+source. Match conservatively: a different county, volume, or year range is a \
+DIFFERENT source. When matched, compose the citation in that source's \
+established style."""
+
+
+def _catalog(sources: list[dict], repos: list[dict]) -> str:
+    src_lines = [
+        f"  {s['gramps_id']} | {s['title']} | {s.get('abbrev') or ''} | {(s.get('pubinfo') or '')[:90]}"
+        for s in sources
+    ]
+    repo_lines = [f"  {r['gramps_id']} | {r['name']} | {r['type']}" for r in repos]
+    return ("EXISTING SOURCES:\n" + "\n".join(src_lines)
+            + "\n\nEXISTING REPOSITORIES:\n" + "\n".join(repo_lines))
+
+
+def _type_guidance_digest() -> str:
+    lines = []
+    for t in load_citation_types()["types"]:
+        if t.get("guidance"):
+            lines.append(f"- {t['label']}: {' '.join(t['guidance'].split())}")
+    return "DOMAIN NOTES BY RECORD KIND:\n" + "\n".join(lines)
+
+
+async def compose_from_dump(
+    anthropic: AnthropicClient,
+    dump: str,
+    media: dict | None,
+    sources: list[dict],
+    repos: list[dict],
+) -> dict:
+    today = datetime.now().strftime("%-d %B %Y")
+    parts = [DUMP_INSTRUCTIONS, f"Today's date (for access dates): {today}"]
+    if media:
+        parts.append(f"MEDIA OBJECT this citation will be attached to:\n"
+                     f"  title: {media.get('desc')}\n  gramps id: {media.get('gramps_id')}")
+    parts.append(_catalog(sources, repos))
+    parts.append(_type_guidance_digest())
+    parts.append(f"THE DUMP:\n{dump.strip()}")
+    parts.append("Compose the EE citation now.")
+    draft = await anthropic.complete_structured(
+        SYSTEM_PROMPT, "\n\n".join(parts), DUMP_SCHEMA)
+
+    # Resolve matches server-side; a hallucinated id degrades to "new".
+    matched_source = next(
+        (s for s in sources if s["gramps_id"] == draft.get("matched_source_gramps_id")), None)
+    matched_repo = next(
+        (r for r in repos if r["gramps_id"] == draft.get("matched_repository_gramps_id")), None)
+    if matched_source:
+        draft["source"] = None
+        draft["repository"] = None
+    elif matched_repo:
+        draft["repository"] = None
+    return {"draft": draft, "matched_source": matched_source,
+            "matched_repository": matched_repo}
+
+
+# ---------------------------------------------------------------------------
 # Save — create the chain bottom-up, link the media
 # ---------------------------------------------------------------------------
 

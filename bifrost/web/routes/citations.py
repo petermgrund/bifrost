@@ -66,6 +66,32 @@ async def compose(request: Request, body: ComposeBody):
     return draft
 
 
+class DumpBody(BaseModel):
+    dump: str
+    media_handle: str | None = None
+
+
+@router.post("/api/compose-dump")
+async def compose_dump(request: Request, body: DumpBody):
+    st = _state(request)
+    if not st.anthropic.configured:
+        raise HTTPException(400, "no Anthropic API key configured")
+    if not body.dump.strip():
+        raise HTTPException(400, "dump is empty")
+    if st.caches.get("citations_context") is None:
+        st.caches["citations_context"] = await citations.context(st.gramps)
+    ctx = st.caches["citations_context"]
+    media = None
+    if body.media_handle:
+        media = await st.gramps.get_object("media", body.media_handle)
+    try:
+        result = await citations.compose_from_dump(
+            st.anthropic, body.dump, media, ctx["sources"], ctx["repositories"])
+    except AnthropicError as exc:
+        raise HTTPException(502, f"composition failed: {exc}") from exc
+    return result
+
+
 class SaveBody(BaseModel):
     draft: dict
     media_handle: str | None = None

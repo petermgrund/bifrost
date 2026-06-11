@@ -292,7 +292,7 @@ async def sync(
             content = (doc.get("content") or "").strip()
             if content:
                 _tx, tl = split_transcription(content)
-                cols["transcription"] = "✓ + translation" if tl else "✓"
+                cols["transcription"] = "with translation" if tl else "yes"
             else:
                 cols["transcription"] = "tagged, no text yet"
         return cols
@@ -446,7 +446,7 @@ async def sync(
 
         vcols: dict = {"version": "changed"}
         if media.get("path") != new_path or media.get("mime") != new_mime:
-            vcols["path/mime"] = "✓"
+            vcols["path/mime"] = "updated"
             if apply:
                 media["path"] = new_path
                 media["mime"] = new_mime
@@ -589,9 +589,9 @@ async def sync(
             has_translation = tl_text is not None
             had_translation = bool(tracked["translation_handle"]) if tracked else False
 
-            ncols: dict = {"transcription": "✓"}
+            ncols: dict = {"transcription": "yes"}
             if has_translation:
-                ncols["translation"] = "✓"
+                ncols["translation"] = "yes"
             elif had_translation:
                 ncols["translation"] = "removed in Paperless; old note kept"
 

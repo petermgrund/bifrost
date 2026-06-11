@@ -321,7 +321,7 @@ async def sync(
                     place_to_link = result[0]
                     cols["place"] = place_to_link.get("name", {}).get("value", "?")
         if desc_text:
-            cols["description"] = "✓ (used as title)"
+            cols["description"] = "used as title"
         elif TAG_SYNC_DESCRIPTION in tags:
             cols["description"] = "tagged, empty"
 

@@ -54,3 +54,10 @@ export function summarize(counts, applied) {
 
 export const hasWork = (counts) =>
   counts && Object.entries(counts).some(([k, v]) => !QUIET.has(k) && v > 0);
+
+/* Small inline SVG status icons — visually unambiguous (shape + color),
+   unlike glyph checkmarks/dashes. */
+export const iconYes = html`<svg class="icon yes" viewBox="0 0 16 16" width="15" height="15" aria-label="yes">
+  <path d="M2.5 8.5 L6.5 12.5 L13.5 4" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+export const iconNo = html`<svg class="icon no" viewBox="0 0 16 16" width="15" height="15" aria-label="no">
+  <path d="M4 4 L12 12 M12 4 L4 12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>`;

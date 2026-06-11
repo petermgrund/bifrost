@@ -47,6 +47,23 @@ async def listing(gramps: GrampsClient, boundaries_dir: Path | None) -> list[dic
     return rows
 
 
+async def set_relation(gramps: GrampsClient, handle: str, relation_id: int) -> dict:
+    """Add an OSM relation URL to a place, matching the tree's convention
+    (type 'OSM URL'). Refuses if the place already carries one."""
+    place = await gramps.get_place(handle)
+    if relation_id_from_place(place):
+        raise ValueError("place already has an OSM relation URL")
+    place.setdefault("urls", []).append({
+        "_class": "Url",
+        "path": f"https://www.openstreetmap.org/relation/{relation_id}",
+        "desc": "",
+        "type": "OSM URL",
+        "private": False,
+    })
+    await gramps.update_place(handle, place)
+    return {"handle": handle, "relation": relation_id}
+
+
 async def generate_one(service_url: str, place_handle: str, force: bool) -> dict:
     async with httpx.AsyncClient(timeout=180.0) as client:
         resp = await client.post(f"{service_url}/generate",

@@ -28,7 +28,29 @@ async def list_places(request: Request, refresh: bool = False):
     if st.caches.get("places") is None or refresh:
         st.caches["places"] = await boundaries.listing(
             st.gramps, st.cfg.places.boundaries_dir)
-    return st.caches["places"]
+    return {"places": st.caches["places"],
+            "gramps_url": st.cfg.sync_paperless.gramps_public_url}
+
+
+class SetRelationBody(BaseModel):
+    handle: str
+    relation: str  # raw id or a full openstreetmap.org/relation/N URL
+
+
+@router.post("/api/set-relation")
+async def set_relation(request: Request, body: SetRelationBody):
+    st = _state(request)
+    raw = body.relation.strip()
+    m = boundaries.RELATION_RE.search(raw)
+    rid = int(m.group(1)) if m else (int(raw) if raw.isdigit() else None)
+    if rid is None:
+        raise HTTPException(400, "give a numeric relation id or an openstreetmap.org/relation/… URL")
+    try:
+        result = await boundaries.set_relation(st.gramps, body.handle, rid)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    st.caches.pop("places", None)
+    return result
 
 
 class GenerateBody(BaseModel):

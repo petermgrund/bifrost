@@ -1,8 +1,9 @@
-import { BifrostElement, html, nothing, api, post } from './core.js';
+import { BifrostElement, html, nothing, api, post, iconYes, iconNo } from './core.js';
 
 class PlacesPage extends BifrostElement {
   static properties = {
     rows: { state: true },
+    grampsUrl: { state: true },
     query: { state: true },
     filter: { state: true },     // all | relation | missing
     busy: { state: true },       // handle currently generating, or 'all'
@@ -12,6 +13,7 @@ class PlacesPage extends BifrostElement {
   constructor() {
     super();
     this.rows = null;
+    this.grampsUrl = '';
     this.query = '';
     this.filter = 'relation';
     this.busy = null;
@@ -24,7 +26,20 @@ class PlacesPage extends BifrostElement {
   }
 
   async load(refresh = false) {
-    this.rows = await api(`/places/api/list${refresh ? '?refresh=1' : ''}`);
+    const r = await api(`/places/api/list${refresh ? '?refresh=1' : ''}`);
+    this.rows = r.places;
+    this.grampsUrl = r.gramps_url;
+  }
+
+  async addRelation(row, value) {
+    if (!value.trim()) return;
+    this.status = '';
+    try {
+      await post('/places/api/set-relation', { handle: row.handle, relation: value });
+      await this.load(true);
+    } catch (e) {
+      this.status = `${row.gramps_id}: ${e.message}`;
+    }
   }
 
   async generate(row, force) {
@@ -91,11 +106,15 @@ class PlacesPage extends BifrostElement {
         <tr><th>id</th><th>place</th><th>OSM relation</th><th>boundary</th><th></th></tr>
         ${filtered.map((r) => html`<tr>
           <td class="hint">${r.gramps_id}</td>
-          <td>${r.name}</td>
+          <td>${this.grampsUrl
+            ? html`<a href="${this.grampsUrl}/place/${r.gramps_id}" target="_blank">${r.name}</a>`
+            : r.name}</td>
           <td class="hint">${r.relation
             ? html`<a href="https://www.openstreetmap.org/relation/${r.relation}" target="_blank">${r.relation}</a>`
-            : '—'}</td>
-          <td>${r.has_boundary ? html`<span class="action-created">✓</span>` : html`<span class="hint">—</span>`}</td>
+            : html`<input class="relinput" type="text" placeholder="relation id or URL"
+                @keydown=${(e) => { if (e.key === 'Enter') this.addRelation(r, e.target.value); }}
+                @change=${(e) => this.addRelation(r, e.target.value)}>`}</td>
+          <td>${r.has_boundary ? iconYes : iconNo}</td>
           <td>${r.relation ? html`<button class="applyone" ?disabled=${this.busy}
             @click=${() => this.generate(r, r.has_boundary)}>
             ${this.busy === r.handle ? '…' : r.has_boundary ? 'Regenerate' : 'Generate'}</button>` : nothing}</td>

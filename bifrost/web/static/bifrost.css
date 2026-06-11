@@ -323,3 +323,4 @@ textarea:focus { outline: none; border-color: var(--accent); }
 
 #theme-toggle { border: none; background: transparent; font-size: 1.05rem; padding: .2rem .4rem; color: var(--muted); }
 #theme-toggle:hover { color: var(--accent); border: none; }
+.icon { vertical-align: -2px; } .icon.yes { color: var(--ok); } .icon.no { color: var(--err); opacity: .55; } .relinput { max-width: 9rem; font-size: .78rem; padding: .2rem .45rem; }

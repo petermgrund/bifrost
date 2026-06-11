@@ -183,7 +183,6 @@ class CitationsPage extends BifrostElement {
         ${rows.map((m) => html`<div class="card"
           @click=${() => { this.pick = { ...this.pick, media: m }; this.step = 'describe'; }}>
           <span class="cid">${m.gramps_id}</span>
-          <span class="corigin">${m.origin}</span>
           <span class="name">${m.title}</span>
           ${m.cited ? html`<span class="badge unlinked">cited</span>` : nothing}
         </div>`)}

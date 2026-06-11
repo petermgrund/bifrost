@@ -255,9 +255,14 @@ Norwegian/Italian types drafted from the tree's real sources), EE
 composition via the Claude API (forced-tool structured output with an
 auto fallback for models that reject forcing; editable draft; manual
 fallback when no key), save chain Repository→Source→Note→Citation with
-media link — round-trip verified against live Gramps. Remaining:
-absorb osm-to-gramps as `boundaries.py`.
-*Exit: osm-to-gramps container retired; citations usable end-to-end.*
+media link — round-trip verified against live Gramps. Places ✅ (June 11): /places page — boundary status table (OSM relation
++ GeoJSON sidecar per place), per-place generate/regenerate, bulk
+generate-missing. bifrost is the interface and orchestrator; the
+osm-to-gramps service stays on as the rendering engine (full renderer
+absorption deferred — the interface is what retires the control-center
+job).
+*Exit: citations + places usable end-to-end ✓; renderer absorption and
+container retirement remain optional follow-ups.*
 
 **Phase 5 — retire control-center.**
 Anything still useful (link tiles, history) lives in Bifrost by now.

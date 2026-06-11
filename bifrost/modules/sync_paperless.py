@@ -278,25 +278,24 @@ async def sync(
         except Exception:  # noqa: BLE001 — meaning is log-context only
             m_field = None
 
-    def _prospective_detail(doc: dict) -> str | None:
+    def _prospective_cols(doc: dict) -> dict:
         """What a created doc will get: date + attached notes — the facts the
         reviewer cares about (paths and mime live in event data, not here)."""
-        parts = []
+        cols: dict = {}
         if q_field:
             q_val = paperless.get_custom_field_value(doc, q_field)
             date_obj = build_gramps_date_from_paperless(
                 doc, q_options.get(q_val) if q_val else None)
             if date_obj:
-                parts.append(f"date: {format_gramps_date(date_obj)}")
+                cols["date"] = format_gramps_date(date_obj)
         if cfg.transcription_tag_id and cfg.transcription_tag_id in doc.get("tags", []):
             content = (doc.get("content") or "").strip()
             if content:
                 _tx, tl = split_transcription(content)
-                parts.append("transcription + translation notes" if tl
-                             else "transcription note")
+                cols["transcription"] = "✓ + translation" if tl else "✓"
             else:
-                parts.append("transcription tagged, but no text content yet")
-        return "; ".join(parts) or None
+                cols["transcription"] = "tagged, no text yet"
+        return cols
 
     documents: list[dict] = []
     tag_map: dict[str, int] = {}
@@ -337,8 +336,7 @@ async def sync(
             counts["created"] += 1
             yield SyncEvent(kind="item", entity="doc", action="would_create",
                             source_id=str(doc_id), title=title,
-                            detail=_prospective_detail(doc),
-                            data={"path": gramps_path})
+                            data={"path": gramps_path, "cols": _prospective_cols(doc)})
             continue
 
         gramps_id = generate_gramps_id(existing_ids)
@@ -406,8 +404,7 @@ async def sync(
         counts["created"] += 1
         yield SyncEvent(kind="item", entity="doc", action="created",
                         source_id=str(doc_id), gramps_id=gramps_id, title=title,
-                        detail=_prospective_detail(doc),
-                        data={"path": gramps_path})
+                        data={"path": gramps_path, "cols": _prospective_cols(doc)})
 
     # ============ Phase 2: version sync ============
     img_tag_id = tag_map.get("img")
@@ -447,9 +444,9 @@ async def sync(
                             detail=f"no Gramps media {gramps_id}")
             continue
 
-        details = ["version changed"]
+        vcols: dict = {"version": "changed"}
         if media.get("path") != new_path or media.get("mime") != new_mime:
-            details.append("path/mime updated")
+            vcols["path/mime"] = "✓"
             if apply:
                 media["path"] = new_path
                 media["mime"] = new_mime
@@ -473,7 +470,7 @@ async def sync(
                     if modified:
                         await gramps.update_object(api_path, obj_handle, obj)
             if cleared:
-                details.append(f"{cleared} face rect(s) cleared")
+                vcols["face rects"] = f"{cleared} cleared"
 
         if apply:
             _set_version(conn, doc_id, current_checksum, gramps_id)
@@ -481,7 +478,7 @@ async def sync(
         yield SyncEvent(kind="item", entity="doc",
                         action="updated" if apply else "would_update",
                         source_id=str(doc_id), gramps_id=gramps_id, title=title,
-                        detail="; ".join(details))
+                        data={"cols": vcols})
 
     # ============ Phase 3: date/title sync ============
     # (q_options / m_options were resolved up front, before phase 1)
@@ -509,12 +506,12 @@ async def sync(
             continue
 
         media_dirty = False
-        changes = []
+        mcols: dict = {}
 
         # Title sync (skip-title-sync Gramps tag opts out)
         skip_title = bool(skip_tag_handle and skip_tag_handle in (media.get("tag_list") or []))
         if not skip_title and media.get("desc") != title:
-            changes.append(f"title: {media.get('desc')!r} → {title!r}")
+            mcols["title"] = f"{media.get('desc')!r} → {title!r}"
             if apply:
                 media["desc"] = title
                 media_dirty = True
@@ -533,10 +530,9 @@ async def sync(
         date_obj = build_gramps_date_from_paperless(doc, q_label)
         if date_obj is not None and not dates_equal(media.get("date") or {}, date_obj):
             meaning = f" [{m_label}]" if m_label else ""
-            changes.append(
-                f"date{meaning}: {format_gramps_date(media.get('date') or {})}"
-                f" → {format_gramps_date(date_obj)}"
-            )
+            mcols["date" + meaning] = (
+                f"{format_gramps_date(media.get('date') or {})}"
+                f" → {format_gramps_date(date_obj)}")
             if apply:
                 media["date"] = date_obj
                 media_dirty = True
@@ -551,11 +547,11 @@ async def sync(
                 yield SyncEvent(kind="item", entity="doc", action="failed",
                                 source_id=str(doc_id), title=title, detail=str(exc))
                 continue
-        if changes:
+        if mcols:
             yield SyncEvent(kind="item", entity="media",
                             action="updated" if apply else "would_update",
                             source_id=str(doc_id), gramps_id=gramps_id, title=title,
-                            detail="; ".join(changes))
+                            data={"cols": mcols})
 
     # ============ Phase 4: transcriptions ============
     if cfg.transcription_tag_id:
@@ -593,18 +589,18 @@ async def sync(
             has_translation = tl_text is not None
             had_translation = bool(tracked["translation_handle"]) if tracked else False
 
-            label = "transcription"
+            ncols: dict = {"transcription": "✓"}
             if has_translation:
-                label = "transcription + translation"
+                ncols["translation"] = "✓"
             elif had_translation:
-                label = "transcription (translation removed; old note kept)"
+                ncols["translation"] = "removed in Paperless; old note kept"
 
             if not apply:
                 counts["tx_updated" if is_update else "tx_created"] += 1
                 yield SyncEvent(kind="item", entity="note",
                                 action="would_update" if is_update else "would_create",
                                 source_id=str(doc_id), gramps_id=gramps_id,
-                                title=title, detail=label)
+                                title=title, data={"cols": ncols})
                 continue
 
             try:
@@ -688,7 +684,7 @@ async def sync(
                 yield SyncEvent(kind="item", entity="note",
                                 action="updated" if is_update else "created",
                                 source_id=str(doc_id), gramps_id=gramps_id,
-                                title=title, detail=label)
+                                title=title, data={"cols": ncols})
             except Exception as exc:  # noqa: BLE001
                 counts["errors"] += 1
                 yield SyncEvent(kind="item", entity="note", action="failed",

@@ -14,3 +14,5 @@ services:
       # pipeline (file bind mount; the export truncates in place, preserving
       # the inode). Remove in Phase 2.
       - /opt/stacks/immich-to-gramps/person_map.yaml:/legacy/person_map.yaml
+      # boundary GeoJSON sidecars (status display on the Places page)
+      - /mnt/storage/gramps/static-boundaries:/boundaries:ro

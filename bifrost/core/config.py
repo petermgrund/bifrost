@@ -65,6 +65,15 @@ class SyncPaperlessConfig:
 
 
 @dataclass(frozen=True)
+class PlacesConfig:
+    # The osm-to-gramps rendering service (kept running; bifrost is the
+    # interface and orchestrator — full absorption can come later).
+    osm_service_url: str = ""
+    # GeoJSON sidecar dir (read-only mount) for boundary status display.
+    boundaries_dir: Path | None = None
+
+
+@dataclass(frozen=True)
 class AnthropicConfig:
     api_key: str = ""
     model: str = "claude-fable-5"
@@ -89,6 +98,7 @@ class Config:
     sync_immich: SyncImmichConfig = SyncImmichConfig()
     sync_paperless: SyncPaperlessConfig = SyncPaperlessConfig()
     anthropic: AnthropicConfig = AnthropicConfig()
+    places: PlacesConfig = PlacesConfig()
 
 
 DEFAULT_PATH = Path(__file__).resolve().parents[2] / "config.yaml"
@@ -144,5 +154,9 @@ def load_config(path: str | Path | None = None) -> Config:
         anthropic=AnthropicConfig(
             api_key=(raw.get("anthropic") or {}).get("api_key") or "",
             model=(raw.get("anthropic") or {}).get("model") or "claude-fable-5",
+        ),
+        places=PlacesConfig(
+            osm_service_url=((raw.get("places") or {}).get("osm_service_url") or "").rstrip("/"),
+            boundaries_dir=Path(b) if (b := (raw.get("places") or {}).get("boundaries_dir")) else None,
         ),
     )

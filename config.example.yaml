@@ -50,3 +50,9 @@ anthropic:
   # before save; manual entry works without it).
   api_key: "REPLACE_ME"
   model: "claude-fable-5"
+
+places:
+  # osm-to-gramps boundary rendering service + the GeoJSON sidecar dir
+  # (mounted read-only; used only to show boundary status).
+  osm_service_url: "http://100.89.34.77:82"
+  boundaries_dir: "/boundaries"

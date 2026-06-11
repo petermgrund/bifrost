@@ -44,10 +44,12 @@ app.mount("/static", StaticFiles(directory=WEB_DIR / "static"), name="static")
 
 from .routes.citations import router as citations_router  # noqa: E402
 from .routes.faces import router as faces_router  # noqa: E402
+from .routes.places import router as places_router  # noqa: E402
 from .routes.sync import router as sync_router  # noqa: E402
 
 app.include_router(citations_router)
 app.include_router(faces_router)
+app.include_router(places_router)
 app.include_router(sync_router)
 
 

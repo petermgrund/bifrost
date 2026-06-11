@@ -114,13 +114,20 @@ function renderResult(payload) {
     ${GROUPS.map(([entity, label]) => {
       const rows = items.filter((e) => e.entity === entity);
       if (!rows.length) return nothing;
+      // structured columns: union of cols keys across the group's rows,
+      // in first-seen order; plain detail column only as fallback
+      const colKeys = [...new Set(rows.flatMap((e) => Object.keys(e.data?.cols || {})))];
+      const hasDetail = !colKeys.length && rows.some((e) => e.detail);
       return html`<h3>${label} <span class="hint">(${rows.length})</span></h3>
         <table class="results">
-          <tr><th>action</th><th>what</th><th>detail</th></tr>
+          <tr><th>action</th><th>what</th>
+            ${colKeys.map((k) => html`<th>${k}</th>`)}
+            ${hasDetail ? html`<th>detail</th>` : nothing}</tr>
           ${rows.map((e) => html`<tr>
             <td class="action-${e.action}">${e.action.replace('_', ' ')}</td>
             <td>${e.title || e.source_id}${e.gramps_id ? html` <span class="hint">${e.gramps_id}</span>` : nothing}</td>
-            <td class="hint">${e.detail || ''}</td></tr>`)}
+            ${colKeys.map((k) => html`<td class="hint">${e.data?.cols?.[k] ?? ''}</td>`)}
+            ${hasDetail ? html`<td class="hint">${e.detail || ''}</td>` : nothing}</tr>`)}
         </table>`;
     })}
     ${errors.length ? html`<h3 class="action-failed">Errors</h3>${errors.map((e) => html`<div class="action-failed">${e.detail}</div>`)}` : nothing}

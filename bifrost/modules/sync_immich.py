@@ -56,6 +56,11 @@ MAX_PLACE_DISTANCE_KM = 0.25  # 250 metres
 # Pure helpers (ported verbatim from the legacy script)
 # ---------------------------------------------------------------------------
 
+def ellipsize(s: str, n: int = 64) -> str:
+    s = s.strip()
+    return s if len(s) <= n else s[: n - 1].rstrip() + "…"
+
+
 def get_asset_tag_values(asset: dict) -> set[str]:
     return {t["value"].lower() for t in asset.get("tags", []) if "value" in t}
 
@@ -266,12 +271,16 @@ async def sync(
     # --- New assets → Media ---
     for asset in assets:
         asset_id = asset["id"]
-        title = asset.get("originalFileName") or f"Immich {asset_id[:8]}"
+        filename = asset.get("originalFileName") or f"Immich {asset_id[:8]}"
         if asset_id in synced:
             counts["skipped"] += 1
             continue
 
         tags = get_asset_tag_values(asset)
+        desc_text = ""
+        if TAG_SYNC_DESCRIPTION in tags:
+            desc_text = ((asset.get("exifInfo") or {}).get("description") or "").strip()
+        title = desc_text or filename
         gramps_id = generate_gramps_id(existing_ids)
         handle = generate_handle()
         gramps_path = translate_path(asset.get("originalPath", ""), cfg.path_mappings)
@@ -296,12 +305,12 @@ async def sync(
             ],
         }
 
-        flags = []
+        cols: dict = {}
         if TAG_SYNC_DATE in tags:
             gramps_date = build_gramps_date(asset)
             if gramps_date:
                 media_obj["date"] = gramps_date
-                flags.append(f"date={format_gramps_date(gramps_date)}")
+                cols["date"] = format_gramps_date(gramps_date)
 
         place_to_link = None
         if TAG_SYNC_LOCATION in tags and places_with_coords:
@@ -310,9 +319,11 @@ async def sync(
                 result = find_closest_place(coords[0], coords[1], places_with_coords)
                 if result:
                     place_to_link = result[0]
-                    flags.append(f"place={place_to_link.get('name', {}).get('value', '?')}")
-        if TAG_SYNC_DESCRIPTION in tags:
-            flags.append("desc")
+                    cols["place"] = place_to_link.get("name", {}).get("value", "?")
+        if desc_text:
+            cols["description"] = "✓ (used as title)"
+        elif TAG_SYNC_DESCRIPTION in tags:
+            cols["description"] = "tagged, empty"
 
         if apply:
             try:
@@ -335,9 +346,8 @@ async def sync(
         yield SyncEvent(
             kind="item", entity="media",
             action="created" if apply else "would_create",
-            source_id=asset_id, gramps_id=gramps_id, title=title,
-            detail=", ".join(flags) or None,
-            data={"path": gramps_path, "mime": mime},
+            source_id=asset_id, gramps_id=gramps_id, title=ellipsize(title),
+            data={"path": gramps_path, "mime": mime, "cols": cols},
         )
 
         # Faces of linked people, via the faces module (per-face pads apply)
@@ -367,8 +377,8 @@ async def sync(
                 kind="item", entity="face",
                 action="created" if apply else "would_create",
                 source_id=asset_id,
-                title=f"{link.get('label') or face_title} on '{title}'",
-                data={"pad": pad},
+                title=f"{link.get('label') or face_title} on '{ellipsize(title, 40)}'",
+                data={"cols": {"pad": f"{int(pad * 100)}%"}},
             )
 
         # Closest-place link for the new media
@@ -395,7 +405,8 @@ async def sync(
                 kind="item", entity="place",
                 action="updated" if apply else "would_update",
                 source_id=asset_id, gramps_id=place_to_link.get("gramps_id"),
-                title=f"'{title}' → {place_name}",
+                title=ellipsize(title, 40),
+                data={"cols": {"place": place_name}},
             )
 
     # --- Refresh passes for already-synced assets ---
@@ -418,7 +429,7 @@ async def sync(
                 or new_date.get("quality", 0) != cur.get("quality", 0)
             )
             if differs:
-                detail = f"date: {format_gramps_date(cur)} → {format_gramps_date(new_date)}"
+                date_change = f"{format_gramps_date(cur)} → {format_gramps_date(new_date)}"
                 if apply:
                     try:
                         media["date"] = new_date
@@ -433,7 +444,8 @@ async def sync(
                 yield SyncEvent(kind="item", entity="media",
                                 action="updated" if apply else "would_update",
                                 source_id=asset_id, gramps_id=gramps_id,
-                                title=title, detail=detail)
+                                title=ellipsize(title),
+                                data={"cols": {"date": date_change}})
 
         # Sync/Location refresh
         if TAG_SYNC_LOCATION in tags and places_with_coords:
@@ -463,7 +475,8 @@ async def sync(
                     yield SyncEvent(kind="item", entity="place",
                                     action="updated" if apply else "would_update",
                                     source_id=asset_id, gramps_id=place.get("gramps_id"),
-                                    title=f"'{title}' → {place_name}")
+                                    title=ellipsize(title, 40),
+                                    data={"cols": {"place": place_name}})
 
         # Sync/Description refresh
         if TAG_SYNC_DESCRIPTION in tags:
@@ -484,6 +497,7 @@ async def sync(
                 yield SyncEvent(kind="item", entity="media",
                                 action="updated" if apply else "would_update",
                                 source_id=asset_id, gramps_id=gramps_id,
-                                title=title, detail=f"desc: {snippet!r}")
+                                title=ellipsize(title),
+                                data={"cols": {"description": snippet}})
 
     yield SyncEvent(kind="summary", data=counts)

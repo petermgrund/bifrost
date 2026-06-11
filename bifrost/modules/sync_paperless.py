@@ -29,6 +29,7 @@ from typing import AsyncIterator
 from ..core.clients import GrampsClient, PaperlessClient
 from ..core.config import SyncPaperlessConfig
 from ..core.events import SyncEvent
+from .citations import next_sequential_id
 from .sync_immich import generate_gramps_id, generate_handle
 
 log = logging.getLogger("bifrost.sync.paperless")
@@ -569,6 +570,7 @@ async def sync(
         else:
             yield SyncEvent(kind="started",
                             detail=f"{len(tx_docs)} document(s) with transcription tag")
+        note_ids: set[str] | None = None  # fetched on first mint
         for doc in tx_docs:
             doc_id = doc["id"]
             title = doc.get("title", f"Untitled (Paperless #{doc_id})")
@@ -607,6 +609,27 @@ async def sync(
 
             try:
                 media = await gramps.get_media_by_gramps_id(gramps_id)
+                if not media:
+                    # The Gramps media was deleted (deliberately, per the
+                    # tree's conventions). Creating a note would orphan it;
+                    # updating would 404. Skip loudly.
+                    counts["errors"] += 1
+                    yield SyncEvent(
+                        kind="item", entity="note", action="failed",
+                        source_id=str(doc_id), title=title,
+                        detail=(f"Gramps media {gramps_id} no longer exists — "
+                                f"skipped; clear the doc's gramps_id field in "
+                                f"Paperless if the deletion was intentional"))
+                    continue
+
+                async def mint_note_id() -> str:
+                    nonlocal note_ids
+                    if note_ids is None:
+                        items = await gramps._paged("/notes/", keys="gramps_id")
+                        note_ids = {i["gramps_id"] for i in items if i.get("gramps_id")}
+                    nid = next_sequential_id("N", note_ids)
+                    note_ids.add(nid)
+                    return nid
 
                 if is_update:
                     note_handle = tracked["note_handle"]
@@ -625,22 +648,21 @@ async def sync(
                         )
                     elif has_translation and not had_translation:
                         tl_handle = generate_handle()
-                        tl_gid = "N_" + generate_gramps_id(existing_ids)
+                        tl_gid = await mint_note_id()
                         await gramps.create_note(
                             build_note_obj(tl_handle, tl_gid, tl_text, "Translation"))
-                        if media:
-                            notes = media.get("note_list", [])
-                            if tl_handle not in notes:
-                                notes.append(tl_handle)
-                                media["note_list"] = notes
-                                await gramps.update_media(media["handle"], media)
+                        notes = media.get("note_list", [])
+                        if tl_handle not in notes:
+                            notes.append(tl_handle)
+                            media["note_list"] = notes
+                            await gramps.update_media(media["handle"], media)
                         updates["translation_handle"] = tl_handle
                         updates["translation_note_id"] = tl_gid
                     _set_tx(conn, doc_id, **updates)
                     counts["tx_updated"] += 1
                 else:
                     note_handle = generate_handle()
-                    note_gid = "N_" + generate_gramps_id(existing_ids)
+                    note_gid = await mint_note_id()
                     await gramps.create_note(
                         build_note_obj(note_handle, note_gid, tx_text, "Transcription"))
                     new_handles = [note_handle]
@@ -648,19 +670,18 @@ async def sync(
                               "content_hash": c_hash, "gramps_media_id": gramps_id}
                     if has_translation:
                         tl_handle = generate_handle()
-                        tl_gid = "N_" + generate_gramps_id(existing_ids)
+                        tl_gid = await mint_note_id()
                         await gramps.create_note(
                             build_note_obj(tl_handle, tl_gid, tl_text, "Translation"))
                         new_handles.append(tl_handle)
                         fields["translation_handle"] = tl_handle
                         fields["translation_note_id"] = tl_gid
-                    if media:
-                        notes = media.get("note_list", [])
-                        for h in new_handles:
-                            if h not in notes:
-                                notes.append(h)
-                        media["note_list"] = notes
-                        await gramps.update_media(media["handle"], media)
+                    notes = media.get("note_list", [])
+                    for h in new_handles:
+                        if h not in notes:
+                            notes.append(h)
+                    media["note_list"] = notes
+                    await gramps.update_media(media["handle"], media)
                     _set_tx(conn, doc_id, **fields)
                     counts["tx_created"] += 1
 

@@ -41,7 +41,50 @@
   --ok: #3e7d4e;
   --warn: #9a6b1f;
   --err: #b3433d;
+  --warn-soft: #f6eedd;
+  --label-bg: #ffffffd9;
+  --shadow: #0e141b33;
   --radius: 8px;
+}
+
+/* Dark theme: explicit toggle or system preference */
+:root[data-theme="dark"] {
+  --bg: #15181c;
+  --surface: #1d2126;
+  --surface-2: #262b31;
+  --text: #d5dae0;
+  --muted: #8b939d;
+  --border: #2e343b;
+  --border-strong: #434b55;
+  --accent: #6c9fd4;
+  --accent-dark: #8ab4e2;
+  --accent-soft: #24313f;
+  --ok: #6fae7d;
+  --warn: #c9a04e;
+  --err: #d27a75;
+  --warn-soft: #3a3220;
+  --label-bg: #15181cd9;
+  --shadow: #00000080;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15181c;
+    --surface: #1d2126;
+    --surface-2: #262b31;
+    --text: #d5dae0;
+    --muted: #8b939d;
+    --border: #2e343b;
+    --border-strong: #434b55;
+    --accent: #6c9fd4;
+    --accent-dark: #8ab4e2;
+    --accent-soft: #24313f;
+    --ok: #6fae7d;
+    --warn: #c9a04e;
+    --err: #d27a75;
+    --warn-soft: #3a3220;
+    --label-bg: #15181cd9;
+    --shadow: #00000080;
+  }
 }
 
 * { box-sizing: border-box; }
@@ -130,7 +173,7 @@ input:focus { outline: none; border-color: var(--accent); }
   font-size: .7rem; font-weight: 700; padding: .1rem .5rem; border-radius: 999px;
   background: var(--accent-soft); color: var(--accent-dark); white-space: nowrap;
 }
-.badge.warn { background: #f6eedd; color: var(--warn); }
+.badge.warn { background: var(--warn-soft); color: var(--warn); }
 .badge.unlinked { background: var(--surface-2); color: var(--muted); }
 
 /* ---- people panes ---- */
@@ -175,7 +218,7 @@ input:focus { outline: none; border-color: var(--accent); }
 
 /* ---- photo detail ---- */
 .overlay {
-  position: fixed; inset: 0; background: #1d242b66;
+  position: fixed; inset: 0; background: #10131699;
   display: flex; align-items: center; justify-content: center; z-index: 50;
 }
 .overlay[hidden] { display: none; }
@@ -183,13 +226,13 @@ input:focus { outline: none; border-color: var(--accent); }
   background: var(--surface); border-radius: 14px;
   width: min(960px, 94vw); max-height: 92vh;
   display: flex; flex-direction: column; overflow: hidden;
-  box-shadow: 0 12px 40px #0e141b33;
+  box-shadow: 0 12px 40px var(--shadow);
 }
 .detail-head {
   display: flex; align-items: center; gap: .6rem;
   padding: .8rem 1.1rem; border-bottom: 1px solid var(--border);
 }
-.alert { background: #f6eedd; color: var(--warn); padding: .55rem 1.1rem; font-size: .85rem; }
+.alert { background: var(--warn-soft); color: var(--warn); padding: .55rem 1.1rem; font-size: .85rem; }
 .detail-body { display: grid; grid-template-columns: 1.4fr 1fr; gap: 1.1rem; padding: 1.1rem; overflow-y: auto; }
 .imgwrap { position: relative; align-self: start; }
 .imgwrap img { width: 100%; border-radius: var(--radius); display: block; }
@@ -197,7 +240,7 @@ input:focus { outline: none; border-color: var(--accent); }
 .facebox.pending { border-style: dashed; }
 .facebox span {
   position: absolute; top: -1.25rem; left: 0;
-  font-size: .65rem; background: #ffffffd9; color: var(--accent-dark);
+  font-size: .65rem; background: var(--label-bg); color: var(--accent-dark);
   padding: 0 .3rem; border-radius: 3px; white-space: nowrap;
 }
 .facelist { display: flex; flex-direction: column; gap: .45rem; }
@@ -267,3 +310,16 @@ textarea:focus { outline: none; border-color: var(--accent); }
 /* ---- brand logo ---- */
 .brand { display: flex; align-items: center; gap: .55rem; text-decoration: none; }
 .brand .logo { height: 26px; width: auto; display: block; }
+
+
+/* ---- people table (faces) ---- */
+.people-table td { vertical-align: middle; }
+.people-table img.avatar { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; display: block; }
+.people-table input { max-width: 13rem; font-size: .82rem; padding: .25rem .5rem; }
+
+/* ---- citations media columns ---- */
+.cid { width: 6rem; flex: none; color: var(--muted); font-size: .78rem; }
+.corigin { width: 6rem; flex: none; color: var(--muted); font-size: .78rem; }
+
+#theme-toggle { border: none; background: transparent; font-size: 1.05rem; padding: .2rem .4rem; color: var(--muted); }
+#theme-toggle:hover { color: var(--accent); border: none; }

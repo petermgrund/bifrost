@@ -4,6 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Bifrost{% endblock %}</title>
+  <script>
+    // theme: saved preference wins; otherwise follow the system (set before paint)
+    const t = localStorage.getItem('bifrost-theme');
+    if (t) document.documentElement.dataset.theme = t;
+  </script>
   <link rel="icon" type="image/svg+xml" href="/static/bifrost_logo.svg">
   <link rel="stylesheet" href="/static/bifrost.css">
   <script type="importmap">
@@ -20,6 +25,14 @@
       <a class="disabled" title="Phase 4">Places</a>
       <a href="/citations">Citations</a>
     </nav>
+    <span class="spacer"></span>
+    <button id="theme-toggle" title="Toggle dark mode" onclick="
+      const sys = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      const cur = document.documentElement.dataset.theme || sys;
+      const next = cur === 'dark' ? 'light' : 'dark';
+      document.documentElement.dataset.theme = next;
+      localStorage.setItem('bifrost-theme', next);
+    ">◐</button>
   </header>
   <main>{% block content %}{% endblock %}</main>
   {% block scripts %}{% endblock %}

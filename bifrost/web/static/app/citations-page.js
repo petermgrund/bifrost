@@ -7,7 +7,7 @@ class CitationsPage extends BifrostElement {
     ctx: { state: true },           // types, sources, repositories, llm
     media: { state: true },         // media listing
     mediaQuery: { state: true },
-    uncitedOnly: { state: true },
+    originFilter: { state: true },
     pick: { state: true },          // { media, source, repository, recordType }
     fields: { state: true },        // entered field values
     draft: { state: true },         // composed/edited draft
@@ -27,7 +27,7 @@ class CitationsPage extends BifrostElement {
     this.ctx = null;
     this.media = [];
     this.mediaQuery = '';
-    this.uncitedOnly = true;
+    this.originFilter = 'paperless';
     this.pick = { media: null, source: null, repository: null, recordType: null };
     this.fields = {};
     this.draft = null;
@@ -50,16 +50,11 @@ class CitationsPage extends BifrostElement {
     try {
       [this.ctx, this.media] = await Promise.all([
         api('/citations/api/context'),
-        api(`/citations/api/media?uncited=${this.uncitedOnly}`),
+        api('/citations/api/media'),
       ]);
     } catch (e) {
       this.error = e.message;
     }
-  }
-
-  async toggleUncited(v) {
-    this.uncitedOnly = v;
-    this.media = await api(`/citations/api/media?uncited=${v}`);
   }
 
   reset() {
@@ -171,23 +166,25 @@ class CitationsPage extends BifrostElement {
 
   renderMedia() {
     const q = this.mediaQuery.toLowerCase();
-    const rows = this.media.filter((m) => !q || m.title.toLowerCase().includes(q)
-      || m.gramps_id.toLowerCase().includes(q)).slice(0, 80);
+    const rows = this.media
+      .filter((m) => m.origin === this.originFilter)
+      .filter((m) => !q || m.title.toLowerCase().includes(q)
+        || m.gramps_id.toLowerCase().includes(q)).slice(0, 80);
+    const chip = (f, label) => html`<button class="chip ${this.originFilter === f ? 'active' : ''}"
+      @click=${() => (this.originFilter = f)}>${label}</button>`;
     return html`
       <div class="toolbar">
         <input type="search" placeholder="Search media…" .value=${this.mediaQuery}
           @input=${(e) => (this.mediaQuery = e.target.value)}>
-        <button class="chip ${this.uncitedOnly ? 'active' : ''}"
-          @click=${() => this.toggleUncited(true)}>Uncited</button>
-        <button class="chip ${this.uncitedOnly ? '' : 'active'}"
-          @click=${() => this.toggleUncited(false)}>All</button>
+        ${chip('paperless', 'Paperless')}${chip('immich', 'Immich')}
         <span class="hint">${rows.length} shown</span>
       </div>
       <div class="cardlist" style="max-height:60vh">
         ${rows.map((m) => html`<div class="card"
           @click=${() => { this.pick = { ...this.pick, media: m }; this.step = 'describe'; }}>
+          <span class="cid">${m.gramps_id}</span>
+          <span class="corigin">${m.origin}</span>
           <span class="name">${m.title}</span>
-          <span class="meta">${m.gramps_id} · ${m.origin}</span>
           ${m.cited ? html`<span class="badge unlinked">cited</span>` : nothing}
         </div>`)}
       </div>`;

@@ -36,6 +36,8 @@ class FacesPage extends BifrostElement {
 
   connectedCallback() {
     super.connectedCallback();
+    const f = new URLSearchParams(location.search).get('filter');
+    if (['pending', 'manual', 'unlinked'].includes(f)) this.photoFilter = f;
     this.load();
   }
 
@@ -138,7 +140,8 @@ class FacesPage extends BifrostElement {
       .filter((p) =>
         this.photoFilter === 'all' ||
         (this.photoFilter === 'pending' && p.pending_count > 0) ||
-        (this.photoFilter === 'manual' && p.is_manual));
+        (this.photoFilter === 'manual' && p.is_manual) ||
+        (this.photoFilter === 'unlinked' && p.faces.some((f) => f.status === 'unlinked')));
     const chip = (f, label) => html`<button
       class="chip ${this.photoFilter === f ? 'active' : ''}"
       @click=${() => (this.photoFilter = f)}>${label}</button>`;
@@ -146,7 +149,7 @@ class FacesPage extends BifrostElement {
       <div class="toolbar">
         <input type="search" placeholder="Search photos…"
           .value=${this.photoQuery} @input=${(e) => (this.photoQuery = e.target.value)}>
-        ${chip('all', 'All')}${chip('pending', 'Needs attention')}${chip('manual', 'Manual')}
+        ${chip('all', 'All')}${chip('pending', 'Needs attention')}${chip('unlinked', 'No person link')}${chip('manual', 'Manual')}
       </div>
       <div class="photo-grid">
         ${rows.length ? rows.map((p) => this.photoCard(p))
@@ -163,7 +166,6 @@ class FacesPage extends BifrostElement {
         <div class="meta">
           ${p.gramps_id || ''}
           ${p.pending_count ? html`<span class="badge">${p.pending_count} pending</span>` : nothing}
-          ${p.is_manual ? html`<span class="badge warn" title="Has a manually-drawn face">Manual</span>` : nothing}
           ${p.synced ? nothing : html`<span class="badge unlinked">not in Gramps</span>`}
         </div>
       </div>
@@ -232,7 +234,39 @@ class FacesPage extends BifrostElement {
       </div></div>`;
   }
 
+  async saveLabel(link, label) {
+    this.links = await post('/faces/api/links', {
+      gramps_handle: link.gramps_handle,
+      immich_person_id: link.immich_person_id,
+      label: label.trim() || null,
+    });
+  }
+
   renderPeople() {
+    const byHandle = Object.fromEntries(this.gramps.map((p) => [p.handle, p]));
+    const byId = Object.fromEntries(this.immich.map((p) => [p.id, p]));
+    const rows = this.links
+      .map((l) => ({ ...l, g: byHandle[l.gramps_handle], i: byId[l.immich_person_id] }))
+      .sort((a, b) => (a.g?.name || '').localeCompare(b.g?.name || ''));
+    return html`
+      <h2>Linked people <span class="hint">(${rows.length})</span></h2>
+      <table class="results people-table">
+        <tr><th></th><th>Gramps person</th><th>Immich person</th><th>Label</th><th></th></tr>
+        ${rows.map((l) => html`<tr>
+          <td><img class="avatar" loading="lazy" src="/faces/api/thumb/person/${l.immich_person_id}" alt=""></td>
+          <td>${l.g?.name || l.gramps_handle}</td>
+          <td class="hint">${l.i?.name || '(unnamed)'}</td>
+          <td><input type="text" .value=${l.label || ''} placeholder="—"
+            @change=${(e) => this.saveLabel(l, e.target.value)}></td>
+          <td><button class="unlink" @click=${() => this.unlink(l.gramps_handle)}>unlink</button></td>
+        </tr>`)}
+      </table>
+
+      <h2>Link a new pair</h2>
+      ${this.renderLinkPanes()}`;
+  }
+
+  renderLinkPanes() {
     const gq = this.grampsQuery.toLowerCase();
     const iq = this.immichQuery.toLowerCase();
     const lh = this.linkByHandle, li = this.linkByImmich;
@@ -240,24 +274,16 @@ class FacesPage extends BifrostElement {
     return html`
       <div class="panes">
         <div class="pane">
-          <h2>Gramps people</h2>
-          <input type="search" placeholder="Search…"
+          <input type="search" placeholder="Search Gramps people…"
             @input=${(e) => (this.grampsQuery = e.target.value)}>
           <div class="cardlist">
             ${this.gramps
-              .filter((p) => !gq || p.name.toLowerCase().includes(gq) || p.gramps_id.toLowerCase().includes(gq))
-              .map((p) => {
-                const link = lh[p.handle];
-                return html`<div class="card ${this.selGramps === p.handle ? 'selected' : ''}"
-                  @click=${() => (this.selGramps = this.selGramps === p.handle ? null : p.handle)}>
-                  <span class="name">${p.name}</span>
-                  <span class="meta">${p.gramps_id} · ${p.rect_count}f</span>
-                  ${link
-                    ? html`<span class="badge">${link.label || 'linked'}</span>
-                      <button class="unlink" @click=${(e) => { e.stopPropagation(); this.unlink(p.handle); }}>unlink</button>`
-                    : html`<span class="badge unlinked">–</span>`}
-                </div>`;
-              })}
+              .filter((p) => !lh[p.handle])
+              .filter((p) => !gq || p.name.toLowerCase().includes(gq))
+              .map((p) => html`<div class="card ${this.selGramps === p.handle ? 'selected' : ''}"
+                @click=${() => (this.selGramps = this.selGramps === p.handle ? null : p.handle)}>
+                <span class="name">${p.name}</span>
+              </div>`)}
           </div>
         </div>
         <div class="pane-mid">
@@ -265,17 +291,16 @@ class FacesPage extends BifrostElement {
           <button class="primary" ?disabled=${!both} @click=${this.createLink}>Link pair</button>
         </div>
         <div class="pane">
-          <h2>Immich people</h2>
-          <input type="search" placeholder="Search…"
+          <input type="search" placeholder="Search Immich people…"
             @input=${(e) => (this.immichQuery = e.target.value)}>
           <div class="cardlist">
             ${this.immich
+              .filter((p) => !li[p.id])
               .filter((p) => !iq || (p.name || '').toLowerCase().includes(iq))
               .map((p) => html`<div class="card ${this.selImmich === p.id ? 'selected' : ''}"
                 @click=${() => (this.selImmich = this.selImmich === p.id ? null : p.id)}>
                 <img loading="lazy" src="/faces/api/thumb/person/${p.id}" alt="">
                 <span class="name">${p.name || '(unnamed)'}</span>
-                ${li[p.id] ? html`<span class="badge">linked</span>` : nothing}
               </div>`)}
           </div>
         </div>

@@ -1,4 +1,4 @@
-import { BifrostElement, html, nothing, api } from './core.js';
+import { BifrostElement, html, api } from './core.js';
 
 class InboxPage extends BifrostElement {
   static properties = { cards: { state: true }, runs: { state: true } };
@@ -12,19 +12,18 @@ class InboxPage extends BifrostElement {
     this.load();
   }
   async load() {
-    const [listing, runs, paperless, uncited] = await Promise.all([
+    const [listing, runs, paperless] = await Promise.all([
       api('/faces/api/photos'),
       api('/api/runs?limit=8'),
       api('/sync/api/paperless/pending').catch(() => ({ count: 0 })),
-      api('/citations/api/media?uncited=true').catch(() => []),
     ]);
     const faces = listing.photos.flatMap((p) => p.faces);
     this.cards = [
       { n: paperless.count, label: 'documents to sync', href: '/sync' },
       { n: listing.photos.filter((p) => !p.synced).length, label: 'photos to sync', href: '/sync' },
-      { n: listing.pending_total, label: 'faces pending', href: '/faces' },
-      { n: faces.filter((f) => f.status === 'unlinked').length, label: 'unlinked faces', href: '/faces' },
-      { n: uncited.length, label: 'media without citations', href: '/citations' },
+      { n: listing.pending_total, label: 'faces pending in Gramps', href: '/faces?filter=pending' },
+      { n: faces.filter((f) => f.status === 'unlinked').length,
+        label: 'recognized faces awaiting a person link', href: '/faces?filter=unlinked' },
     ];
     this.runs = runs;
   }

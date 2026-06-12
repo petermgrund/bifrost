@@ -42,11 +42,13 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Bifrost", version=__version__, lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=WEB_DIR / "static"), name="static")
 
+from .routes.activity import router as activity_router  # noqa: E402
 from .routes.citations import router as citations_router  # noqa: E402
 from .routes.faces import router as faces_router  # noqa: E402
 from .routes.places import router as places_router  # noqa: E402
 from .routes.sync import router as sync_router  # noqa: E402
 
+app.include_router(activity_router)
 app.include_router(citations_router)
 app.include_router(faces_router)
 app.include_router(places_router)

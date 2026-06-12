@@ -153,6 +153,10 @@ class GrampsClient:
     async def list_places_full(self) -> list[dict]:
         return await self._paged("/places/")
 
+    async def list_transaction_history(self) -> list[dict]:
+        """The tree's full transaction log (adds/edits/deletes, timestamped)."""
+        return await self._paged("/transactions/history/", page_size=1000)
+
     async def get_media_by_gramps_id(self, gramps_id: str) -> dict | None:
         # Gramps returns 404 (not an empty list) when no media has this id;
         # for a lookup that's "not found", not an error.

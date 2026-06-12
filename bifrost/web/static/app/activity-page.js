@@ -220,8 +220,8 @@ class ActivityPage extends BifrostElement {
     });
 
     const cur = C[C.length - 1];
-    return html`<h2>Event citations
-        <span class="hint">now ${cur.c0} uncited · ${cur.c1} with one · ${cur.c2} with 2+ (of ${cur.total})</span></h2>
+    return html`<p class="hint">Share of events by citation count, week by week —
+        now ${cur.c0} uncited · ${cur.c1} with one · ${cur.c2} with 2+ (of ${cur.total}).</p>
       <div class="chart-wrap">
         <svg class="chart" viewBox="0 0 ${width} ${height}" width=${width} height=${height}>
           ${grid}${bars}
@@ -504,10 +504,11 @@ class ActivityPage extends BifrostElement {
         <button @click=${() => this.load(true)}>Refresh</button>
       </div>
       <div class="toolbar">
-        ${viewtab('dash', 'Dashboard')}${viewtab('db', 'Database')}${viewtab('week', 'This week')}
+        ${viewtab('dash', 'Dashboard')}${viewtab('cov', 'Event citations')}${viewtab('db', 'Database')}${viewtab('week', 'This week')}
       </div>
       ${this.view === 'week' ? this.weekView()
         : this.view === 'db' ? this.sparkGrid()
+        : this.view === 'cov' ? this.covChart()
         : html`
         <div class="toolbar">
           ${chip('added', 'Added')}${chip('edited', 'Edited')}${chip('deleted', 'Deleted')}
@@ -518,8 +519,7 @@ class ActivityPage extends BifrostElement {
           ${CLASSES.map((c) => html`<button class="legitem ${this.hidden.has(c) ? 'off' : ''}"
             @click=${() => this.toggleClass(c)}>
             <span class="dot c-${c.toLowerCase()}"></span>${LABELS[c]}</button>`)}
-        </div>
-        ${this.covChart()}`}
+        </div>`}
       ${this.tooltip()}`;
   }
 }

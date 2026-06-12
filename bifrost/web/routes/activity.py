@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 
+from ...core.clients.anthropic import AnthropicError
 from ...modules import activity
 
 router = APIRouter(prefix="/activity", tags=["activity"])
@@ -25,4 +26,24 @@ async def weekly(request: Request, refresh: bool = False):
     stale = cached is None or cached["this_week"]["week"] != activity.current_week()
     if stale or refresh:
         cached = st.caches["activity"] = await activity.dashboard(st.gramps)
-    return {**cached, "gramps_url": st.cfg.sync_paperless.gramps_public_url}
+    return {**cached, "gramps_url": st.cfg.sync_paperless.gramps_public_url,
+            "llm": st.anthropic.configured}
+
+
+@router.post("/api/interpret")
+async def interpret(request: Request, refresh: bool = False):
+    st = request.app.state
+    if not st.anthropic.configured:
+        raise HTTPException(503, "no Anthropic API key configured")
+    if st.caches.get("activity") is None:
+        st.caches["activity"] = await activity.dashboard(st.gramps)
+    dash = st.caches["activity"]
+    week = dash["this_week"]["week"]
+    key = f"activity_interp:{week}"
+    if st.caches.get(key) is None or refresh:
+        try:
+            st.caches[key] = await st.anthropic.complete_text(
+                activity.INTERPRET_SYSTEM, activity.interpret_prompt(dash))
+        except AnthropicError as exc:
+            raise HTTPException(502, str(exc)) from exc
+    return {"text": st.caches[key]}

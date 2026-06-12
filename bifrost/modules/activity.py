@@ -257,6 +257,63 @@ def _db_totals(txns: list[dict], current: dict[str, set]) -> list[dict]:
     return out
 
 
+INTERPRET_SYSTEM = """\
+You are the weekly-review writer for Bifrost, a personal genealogy curation
+console backed by a Gramps family-tree database. You get one week of database
+activity (objects added/edited/deleted with names and labels, day-by-day
+counts, the prior week's numbers, and event citation coverage).
+
+Write a short interpretation of the week's research work: which families,
+people, or record types got attention (infer from the names and labels),
+whether the week leaned toward data entry (people/events/places) or toward
+sourcing (citations/sources/transcription notes), how citation coverage moved,
+and anything notable (bulk cleanups, deletions, new lines started).
+
+Style: 3–6 plain sentences. Concrete and specific — use names and numbers
+from the data. No praise, no filler, no advice unless something is clearly
+off. Plain text, no markdown, no bullet points."""
+
+
+def interpret_prompt(dash: dict) -> str:
+    """Build the user prompt for the weekly interpretation from dashboard data."""
+    tw = dash["this_week"]
+    week = tw["week"]
+    by_week = {w["week"]: w["actions"] for w in dash["weeks"]}
+    prev_week = (datetime.strptime(week, "%Y-%m-%d") - timedelta(days=7)).date().isoformat()
+
+    lines = [f"Week starting {week} (Monday)."]
+    for label, wk in (("This week", week), ("Last week", prev_week)):
+        acts = by_week.get(wk) or {}
+        if acts:
+            parts = []
+            for action in ("added", "edited", "deleted"):
+                c = acts.get(action) or {}
+                if c:
+                    detail = ", ".join(f"{n} {cls.lower()}" for cls, n in c.items() if cls != "total")
+                    parts.append(f"{action} {c.get('total', 0)} ({detail})")
+            lines.append(f"{label}: " + "; ".join(parts))
+        else:
+            lines.append(f"{label}: no activity")
+    days = ", ".join(f"{d['day']} {d['added']}+/{d['edited']}~/{d['deleted']}-"
+                     for d in tw["days"] if d["added"] or d["edited"] or d["deleted"])
+    if days:
+        lines.append(f"By day (added/edited/deleted): {days}")
+    cov = dash.get("coverage") or []
+    if len(cov) >= 2:
+        a, b = cov[-2], cov[-1]
+        lines.append(
+            f"Event citation coverage: uncited {a['c0']}→{b['c0']}, one citation "
+            f"{a['c1']}→{b['c1']}, two-plus {a['c2']}→{b['c2']}, total events {a['total']}→{b['total']}.")
+    for action in ("added", "edited", "deleted"):
+        rows = tw[action][:60]
+        if rows:
+            lines.append(f"\n{action.capitalize()} objects:")
+            lines += [f"- {r['cls']} {r['gramps_id']} {r['label']}".rstrip() for r in rows]
+        if len(tw[action]) > 60:
+            lines.append(f"… and {len(tw[action]) - 60} more")
+    return "\n".join(lines)
+
+
 def _label(cls: str, d: dict) -> str:
     """Best-effort human label for an object from its log payload."""
     try:

@@ -1,4 +1,4 @@
-import { BifrostElement, html, nothing, api } from './core.js';
+import { BifrostElement, html, nothing, api, post } from './core.js';
 import { svg } from 'lit';
 
 const CLASSES = ['Person', 'Family', 'Event', 'Place',
@@ -6,10 +6,6 @@ const CLASSES = ['Person', 'Family', 'Event', 'Place',
 const LABELS = { Person: 'people', Family: 'families', Event: 'events',
                  Place: 'places', Citation: 'citations', Source: 'sources',
                  Note: 'notes', Media: 'media', Other: 'other' };
-const SINGULAR = { Person: 'person', Family: 'family', Event: 'event',
-                   Place: 'place', Citation: 'citation', Source: 'source',
-                   Note: 'note', Media: 'media', Other: 'other' };
-
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
                 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -46,6 +42,9 @@ class ActivityPage extends BifrostElement {
     hidden: { state: true },    // Set of toggled-off classes
     selected: { state: true },  // selected week iso
     tip: { state: true },       // {x, y, week, kind} hover tooltip
+    llm: { state: true },       // Anthropic key configured
+    interp: { state: true },    // LLM weekly interpretation text
+    interpBusy: { state: true },
   };
 
   constructor() {
@@ -60,6 +59,9 @@ class ActivityPage extends BifrostElement {
     this.hidden = new Set();
     this.selected = null;
     this.tip = null;
+    this.llm = false;
+    this.interp = null;
+    this.interpBusy = false;
   }
 
   connectedCallback() {
@@ -74,6 +76,8 @@ class ActivityPage extends BifrostElement {
     this.totals = r.totals || [];
     this.thisWeek = r.this_week;
     this.grampsUrl = r.gramps_url || '';
+    this.llm = !!r.llm;
+    this.interp = null;
     // chronological + fill empty weeks so the timeline is honest
     const byWeek = new Map(r.weeks.map((w) => [w.week, w.actions]));
     const weeks = [];
@@ -104,13 +108,6 @@ class ActivityPage extends BifrostElement {
     const h = new Set(this.hidden);
     h.has(cls) ? h.delete(cls) : h.add(cls);
     this.hidden = h;
-  }
-
-  objUrl(r) {
-    if (!this.grampsUrl || !r.gramps_id) return null;
-    return r.cls === 'Media'
-      ? `${this.grampsUrl}/media/${r.handle}`
-      : `${this.grampsUrl}/${r.cls.toLowerCase()}/${r.gramps_id}`;
   }
 
   // --- main chart ---
@@ -271,6 +268,16 @@ class ActivityPage extends BifrostElement {
   tooltip() {
     if (!this.tip) return nothing;
     const pos = `left:${this.tip.x + 14}px; top:${this.tip.y + 10}px`;
+    if (this.tip.kind === 'day') {
+      const d = (this.thisWeek?.days || []).find((x) => x.day === this.tip.week);
+      if (!d) return nothing;
+      return html`<div class="chart-tip" style=${pos}>
+        <div class="tiphead">${d.day}</div>
+        <div><span class="dot act-added"></span>added ${d.added}</div>
+        <div><span class="dot act-edited"></span>edited ${d.edited}</div>
+        <div><span class="dot act-deleted"></span>deleted ${d.deleted}</div>
+      </div>`;
+    }
     if (this.tip.kind === 'tot') {
       const t = this.totals.find((x) => x.week === this.tip.week);
       if (!t) return nothing;
@@ -326,49 +333,162 @@ class ActivityPage extends BifrostElement {
     </div>`;
   }
 
-  // --- "This week" view ---
+  // --- "This week" view: week-over-week analytics ---
 
-  objTable(title, rows, linkable = true) {
+  wTotal(w, action) {
+    return w ? CLASSES.reduce((n, c) => n + this.count(w, action, c), 0) : 0;
+  }
+
+  dayChart(tw) {
+    if (!tw.days.some((d) => d.added || d.edited || d.deleted)) return nothing;
+    const slot = 92, barW = 56, padL = 34, padT = 10, plotH = 130, padB = 22;
+    const width = padL + slot * 7 + 8;
+    const height = padT + plotH + padB;
+    const max = Math.max(1, ...tw.days.map((d) => d.added + d.edited + d.deleted));
+    const yMax = Math.ceil(max / 4) * 4;
+    const y = (n) => padT + plotH - (n / yMax) * plotH;
+    const grid = [0.5, 1].map((f) => {
+      const v = Math.round(yMax * f);
+      return svg`<line x1=${padL} x2=${width - 4} y1=${y(v)} y2=${y(v)} class="grid"/>
+        <text x=${padL - 5} y=${y(v) + 3.5} class="tick" text-anchor="end">${v}</text>`;
+    });
+    const bars = tw.days.map((d, i) => {
+      const x = padL + i * slot + (slot - barW) / 2;
+      const segs = [];
+      let acc = 0;
+      for (const [key, cls] of [['added', 'act-added'], ['edited', 'act-edited'], ['deleted', 'act-deleted']]) {
+        if (!d[key]) continue;
+        segs.push(svg`<rect x=${x} y=${y(acc + d[key])} width=${barW}
+          height=${Math.max(1, y(acc) - y(acc + d[key]))} class="seg ${cls}"/>`);
+        acc += d[key];
+      }
+      return svg`<g class="bar"
+          @mousemove=${(e) => (this.tip = { x: e.clientX, y: e.clientY, week: d.day, kind: 'day' })}
+          @mouseleave=${() => (this.tip = null)}>
+        <rect x=${x - 4} y=${padT} width=${barW + 8} height=${plotH + 4} class="hit"/>
+        ${segs}
+        <text x=${x} y=${height - 7} class="tick">${d.day}</text>
+      </g>`;
+    });
+    return html`<h2>By day</h2>
+      <div class="chart-wrap">
+        <svg class="chart" viewBox="0 0 ${width} ${height}" width=${width} height=${height}>
+          ${grid}${bars}
+        </svg>
+      </div>
+      <div class="legend">
+        <span class="legitem"><span class="dot act-added"></span>added</span>
+        <span class="legitem"><span class="dot act-edited"></span>edited</span>
+        <span class="legitem"><span class="dot act-deleted"></span>deleted</span>
+      </div>`;
+  }
+
+  classCompare(cur, prev) {
+    const touched = (w, cls) => ['added', 'edited', 'deleted']
+      .reduce((n, a) => n + (w ? this.count(w, a, cls) : 0), 0);
+    const rows = CLASSES
+      .map((cls) => ({ cls, now: touched(cur, cls), was: touched(prev, cls) }))
+      .filter((r) => r.now || r.was);
     if (!rows.length) return nothing;
-    return html`<h2>${title} <span class="hint">${rows.length}</span></h2>
-      <table class="results weekobjects">
-        <tr><th>type</th><th>id</th><th></th><th>day</th></tr>
-        ${rows.map((r) => {
-          const url = linkable ? this.objUrl(r) : null;
-          return html`<tr>
-            <td><span class="dot c-${r.cls.toLowerCase()}"></span>${SINGULAR[r.cls]}</td>
-            <td class="hint">${url
-              ? html`<a href=${url} target="_blank">${r.gramps_id}</a>`
-              : r.gramps_id || ''}</td>
-            <td>${r.label}</td>
-            <td class="hint">${r.day}</td>
-          </tr>`;
-        })}
-      </table>`;
+    const max = Math.max(...rows.map((r) => Math.max(r.now, r.was)));
+    const bar = (v, cssCls) => html`<div class="cmpbar">
+      <div class="fill ${cssCls}" style="width:${(100 * v) / max}%"></div>
+      <span class="num">${v || ''}</span></div>`;
+    return html`<h2>By type <span class="hint">this week vs last</span></h2>
+      <div class="cmp">
+        ${rows.map((r) => html`<div class="cmprow">
+          <span class="clabel"><span class="dot c-${r.cls.toLowerCase()}"></span>${LABELS[r.cls]}</span>
+          <div class="cmpbars">${bar(r.now, `c-${r.cls.toLowerCase()}`)}${bar(r.was, 'was')}</div>
+        </div>`)}
+      </div>`;
+  }
+
+  insights(tw, cur, prev) {
+    const out = [];
+    const tot = (w) => ['added', 'edited', 'deleted'].reduce((n, a) => n + this.wTotal(w, a), 0);
+    const now = tot(cur), was = tot(prev);
+    if (now && was) {
+      const pct = Math.round((100 * (now - was)) / was);
+      out.push(`${now} objects touched — ${pct >= 0 ? 'up' : 'down'} ${Math.abs(pct)}% on last week (${was}).`);
+    } else if (now) {
+      out.push(`${now} objects touched; last week had no activity.`);
+    }
+    const busiest = [...tw.days].sort((a, b) =>
+      (b.added + b.edited + b.deleted) - (a.added + a.edited + a.deleted))[0];
+    if (busiest && (busiest.added + busiest.edited + busiest.deleted)) {
+      out.push(`Busiest day: ${busiest.day} (${busiest.added + busiest.edited + busiest.deleted} objects).`);
+    }
+    const touched = (w, cls) => ['added', 'edited', 'deleted']
+      .reduce((n, a) => n + (w ? this.count(w, a, cls) : 0), 0);
+    const top = CLASSES.map((cls) => ({ cls, n: touched(cur, cls) }))
+      .sort((a, b) => b.n - a.n)[0];
+    if (top && top.n) out.push(`Most attention: ${LABELS[top.cls]} (${top.n}).`);
+    const c = this.cov[this.cov.length - 1], p = this.cov[this.cov.length - 2];
+    if (c && p) {
+      if (c.c0 !== p.c0) out.push(`Uncited events ${p.c0} → ${c.c0}.`);
+      if (c.c2 > p.c2) out.push(`${c.c2 - p.c2} more event${c.c2 - p.c2 === 1 ? '' : 's'} reached 2+ citations.`);
+    }
+    const t = this.totals[this.totals.length - 1], tp = this.totals[this.totals.length - 2];
+    if (t && tp) {
+      const sum = (x) => Object.values(x.counts).reduce((a, b) => a + b, 0);
+      const d = sum(t) - sum(tp);
+      if (d) out.push(`Database ${d > 0 ? 'grew' : 'shrank'} by ${Math.abs(d)} objects net.`);
+    }
+    return out.length ? html`<ul class="insights">${out.map((s) => html`<li>${s}</li>`)}</ul>` : nothing;
+  }
+
+  async interpret() {
+    this.interpBusy = true;
+    this.requestUpdate();
+    try {
+      const r = await post('/activity/api/interpret', {});
+      this.interp = r.text;
+    } catch (e) {
+      this.interp = `Failed: ${e.message}`;
+    } finally {
+      this.interpBusy = false;
+      this.requestUpdate();
+    }
   }
 
   weekView() {
     const tw = this.thisWeek;
     if (!tw) return html`<p class="hint">No data.</p>`;
-    const added = tw.added.length, edited = tw.edited.length, deleted = tw.deleted.length;
-    const c = this.cov[this.cov.length - 1];
-    const prev = this.cov[this.cov.length - 2];
-    const cell = (n) => (n ? n : '');
-    const activeDays = tw.days.filter((d) => d.added || d.edited || d.deleted);
+    const W = this.weeks;
+    const cur = W.find((w) => w.week === tw.week);
+    const prevIso = (() => {
+      const d = new Date(`${tw.week}T00:00:00`);
+      d.setDate(d.getDate() - 7);
+      return isoDate(d);
+    })();
+    const prev = W.find((w) => w.week === prevIso);
+    const delta = (n, p) => {
+      const d = n - p;
+      return html`<div class="delta">${d > 0 ? '+' : ''}${d} vs last week</div>`;
+    };
+    const card = (action) => {
+      const n = this.wTotal(cur, action), p = this.wTotal(prev, action);
+      return html`<div class="stat"><div class="value">${n}</div>
+        <div class="label">${action}</div>${delta(n, p)}</div>`;
+    };
+    const c = this.cov[this.cov.length - 1], p = this.cov[this.cov.length - 2];
     return html`
-      <h2>${weekLabel(tw.week)}, ${tw.week.slice(0, 4)}</h2>
-      <p class="hint">${added} added · ${edited} edited · ${deleted} deleted${
-        c ? html` · ${c.c0} events uncited${prev && prev.c0 !== c.c0 ? ` (was ${prev.c0} last week)` : ''}` : nothing}</p>
-      ${activeDays.length ? html`<table class="results weekdetail">
-        <tr><th></th><th>added</th><th>edited</th><th>deleted</th></tr>
-        ${tw.days.map((d) => html`<tr>
-          <td class="hint">${d.day}</td>
-          <td>${cell(d.added)}</td><td>${cell(d.edited)}</td><td>${cell(d.deleted)}</td>
-        </tr>`)}
-      </table>` : html`<p class="hint">No activity yet this week.</p>`}
-      ${this.objTable('Added', tw.added)}
-      ${this.objTable('Edited', tw.edited)}
-      ${this.objTable('Deleted', tw.deleted, false)}`;
+      <h2>${weekLabel(tw.week)}, ${tw.week.slice(0, 4)}
+        <span class="hint">vs ${weekLabel(prevIso)}</span></h2>
+      <div class="stats">
+        ${card('added')}${card('edited')}${card('deleted')}
+        ${c ? html`<div class="stat"><div class="value">${c.c0}</div>
+          <div class="label">uncited events</div>${p ? delta(c.c0, p.c0) : nothing}</div>` : nothing}
+      </div>
+      ${this.insights(tw, cur, prev)}
+      ${this.llm ? html`<div class="interpwrap">
+        ${this.interp
+          ? html`<p class="interp">${this.interp}</p>`
+          : html`<button ?disabled=${this.interpBusy} @click=${() => this.interpret()}>
+              ${this.interpBusy ? 'Interpreting…' : 'Interpret this week'}</button>`}
+      </div>` : nothing}
+      ${this.dayChart(tw)}
+      ${this.classCompare(cur, prev)}`;
   }
 
   render() {

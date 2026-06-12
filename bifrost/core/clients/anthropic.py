@@ -35,6 +35,20 @@ class AnthropicClient:
     async def close(self) -> None:
         await self._client.aclose()
 
+    async def complete_text(self, system: str, user: str, max_tokens: int = 1000) -> str:
+        """One-shot plain-text completion."""
+        resp = await self._client.post(API_URL, json={
+            "model": self._model,
+            "max_tokens": max_tokens,
+            "system": system,
+            "messages": [{"role": "user", "content": user}],
+        })
+        if resp.status_code >= 400:
+            raise AnthropicError(f"{resp.status_code}: {resp.text[:500]}")
+        return "".join(
+            b.get("text", "") for b in resp.json().get("content", [])
+            if b.get("type") == "text").strip()
+
     async def complete_structured(
         self, system: str, user: str, schema: dict, max_tokens: int = 4000
     ) -> dict:

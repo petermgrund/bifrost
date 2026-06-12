@@ -259,7 +259,8 @@ class ActivityPage extends BifrostElement {
             <svg viewBox="0 0 ${width} ${H}" preserveAspectRatio="none" height="${H}"
               @mouseleave=${() => (this.tip = null)}>
               <polyline points=${pts} class="c-${cls.toLowerCase()}"/>
-              <circle cx=${4 + (vals.length - 1) * w} cy=${y(last)} r="2.5" class="c-${cls.toLowerCase()}"/>
+              <path d="M ${4 + (vals.length - 1) * w} ${y(last).toFixed(1)} l .01 0"
+                class="endcap c-${cls.toLowerCase()}"/>
               ${T.map((t, i) => svg`<rect x=${i * w} y="0" width=${w} height=${H} class="hit"
                 @mousemove=${(e) => (this.tip = { x: e.clientX, y: e.clientY, week: t.week, kind: 'tot', cls })}/>`)}
             </svg>

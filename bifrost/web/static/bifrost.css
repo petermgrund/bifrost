@@ -402,3 +402,5 @@ table.weekdetail .totalrow td { font-weight: 700; border-top: 1px solid var(--bo
 .spark .c-source   { stroke: #9a7a62; }
 .spark .c-note     { stroke: #6aa06d; }
 .spark .c-media    { stroke: #62aecf; }
+.spark .endcap { stroke-width: 5; stroke-linecap: round; fill: none;
+                 vector-effect: non-scaling-stroke; }

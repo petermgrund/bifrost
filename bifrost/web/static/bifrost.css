@@ -381,3 +381,24 @@ table.weekdetail .totalrow td { font-weight: 700; border-top: 1px solid var(--bo
 .c-note     { fill: #6aa06d; background: #6aa06d; }
 .c-media    { fill: #62aecf; background: #62aecf; }
 .c-other    { fill: #8b939d; background: #8b939d; }
+
+/* database-size sparklines */
+.sparkgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+             gap: .6rem; margin-bottom: 1.2rem; }
+.spark { background: var(--surface); border: 1px solid var(--border);
+         border-radius: var(--radius); padding: .5rem .7rem .4rem; }
+.spark .head { display: flex; align-items: center; font-size: .78rem;
+               color: var(--muted); margin-bottom: .25rem; }
+.spark .head .now { margin-left: auto; font-family: 'Space Grotesk', sans-serif;
+                    font-weight: 700; font-size: 1.05rem; color: var(--text); }
+.spark svg { display: block; width: 100%; }
+.spark polyline { fill: none; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.spark .hit { fill: transparent; }
+.spark .c-person   { stroke: #4a7fb5; }
+.spark .c-family   { stroke: #8d77c0; }
+.spark .c-event    { stroke: #3a9a8e; }
+.spark .c-place    { stroke: #cf9a4a; }
+.spark .c-citation { stroke: #c66660; }
+.spark .c-source   { stroke: #9a7a62; }
+.spark .c-note     { stroke: #6aa06d; }
+.spark .c-media    { stroke: #62aecf; }

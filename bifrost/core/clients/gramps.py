@@ -162,6 +162,9 @@ class GrampsClient:
     async def list_events_min(self) -> list[dict]:
         return await self._paged("/events/", keys="handle,citation_list")
 
+    async def list_handles(self, path: str) -> set[str]:
+        return {o["handle"] for o in await self._paged(path, page_size=1000, keys="handle")}
+
     async def get_media_by_gramps_id(self, gramps_id: str) -> dict | None:
         # Gramps returns 404 (not an empty list) when no media has this id;
         # for a lookup that's "not found", not an error.

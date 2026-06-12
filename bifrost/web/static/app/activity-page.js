@@ -52,6 +52,7 @@ class ActivityPage extends BifrostElement {
     super();
     this.weeks = null;
     this.cov = [];
+    this.totals = [];
     this.thisWeek = null;
     this.grampsUrl = '';
     this.view = 'dash';
@@ -70,6 +71,7 @@ class ActivityPage extends BifrostElement {
     this.weeks = null;
     const r = await api(`/activity/api/weekly${refresh ? '?refresh=1' : ''}`);
     this.cov = r.coverage || [];
+    this.totals = r.totals || [];
     this.thisWeek = r.this_week;
     this.grampsUrl = r.gramps_url || '';
     // chronological + fill empty weeks so the timeline is honest
@@ -235,9 +237,49 @@ class ActivityPage extends BifrostElement {
       </div>`;
   }
 
+  // --- database size over time: one sparkline per class ---
+
+  sparkGrid() {
+    const T = this.totals;
+    if (!T.length) return nothing;
+    const classes = CLASSES.filter((c) => c !== 'Other');
+    const w = 8, padY = 5, H = 56;
+    const width = (T.length - 1) * w + 8;
+    return html`<h2>Database size</h2>
+      <div class="sparkgrid">
+        ${classes.map((cls) => {
+          const vals = T.map((t) => t.counts[cls] || 0);
+          const max = Math.max(1, ...vals);
+          const y = (v) => padY + (H - 2 * padY) * (1 - v / max);
+          const pts = vals.map((v, i) => `${4 + i * w},${y(v).toFixed(1)}`).join(' ');
+          const last = vals[vals.length - 1];
+          return html`<div class="spark">
+            <div class="head"><span class="dot c-${cls.toLowerCase()}"></span>${LABELS[cls]}
+              <span class="now">${last}</span></div>
+            <svg viewBox="0 0 ${width} ${H}" preserveAspectRatio="none" height="${H}"
+              @mouseleave=${() => (this.tip = null)}>
+              <polyline points=${pts} class="c-${cls.toLowerCase()}"/>
+              <circle cx=${4 + (vals.length - 1) * w} cy=${y(last)} r="2.5" class="c-${cls.toLowerCase()}"/>
+              ${T.map((t, i) => svg`<rect x=${i * w} y="0" width=${w} height=${H} class="hit"
+                @mousemove=${(e) => (this.tip = { x: e.clientX, y: e.clientY, week: t.week, kind: 'tot', cls })}/>`)}
+            </svg>
+          </div>`;
+        })}
+      </div>`;
+  }
+
   tooltip() {
     if (!this.tip) return nothing;
     const pos = `left:${this.tip.x + 14}px; top:${this.tip.y + 10}px`;
+    if (this.tip.kind === 'tot') {
+      const t = this.totals.find((x) => x.week === this.tip.week);
+      if (!t) return nothing;
+      const cls = this.tip.cls;
+      return html`<div class="chart-tip" style=${pos}>
+        <div class="tiphead">${weekLabel(t.week)}</div>
+        <div><span class="dot c-${cls.toLowerCase()}"></span>${t.counts[cls] || 0} ${LABELS[cls]}</div>
+      </div>`;
+    }
     if (this.tip.kind === 'cov') {
       const c = this.cov.find((x) => x.week === this.tip.week);
       if (!c) return nothing;
@@ -380,6 +422,7 @@ class ActivityPage extends BifrostElement {
             <span class="dot c-${c.toLowerCase()}"></span>${LABELS[c]}</button>`)}
         </div>
         ${this.covChart()}
+        ${this.sparkGrid()}
         ${this.detail()}`}
       ${this.tooltip()}`;
   }

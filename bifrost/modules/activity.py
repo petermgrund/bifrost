@@ -59,14 +59,21 @@ def current_week() -> str:
     return (today - timedelta(days=today.weekday())).isoformat()
 
 
+OBJ_ENDPOINTS = {"Person": "/people/", "Family": "/families/", "Event": "/events/",
+                 "Place": "/places/", "Citation": "/citations/", "Source": "/sources/",
+                 "Note": "/notes/", "Media": "/media/"}
+
+
 async def dashboard(gramps: GrampsClient) -> dict:
     txns = await gramps.list_transaction_history(payloads=True)
     txns.sort(key=lambda t: t.get("id") or 0)
     events_now = await gramps.list_events_min()
+    current = {cls: await gramps.list_handles(ep) for cls, ep in OBJ_ENDPOINTS.items()}
     return {
         "classes": CLASSES + ["Other"],
         "weeks": _weekly_counts(txns),
         "coverage": _event_coverage(txns, events_now),
+        "totals": _db_totals(txns, current),
         "this_week": _week_detail(txns, current_week()),
     }
 
@@ -183,6 +190,67 @@ def _event_coverage(txns: list[dict], events_now: list[dict]) -> list[dict]:
             if latest and iso >= START_WEEK:
                 total, c0, c1, c2 = latest
                 out.append({"week": iso, "total": total, "c0": c0, "c1": c1, "c2": c2})
+            if iso >= last_monday:
+                break
+            wk += timedelta(days=7)
+    return out
+
+
+def _db_totals(txns: list[dict], current: dict[str, set]) -> list[dict]:
+    """[{week, counts: {cls: n}}] — how many objects of each class existed in
+    the database at the end of each week, reconstructed from the log.
+
+    Pre-log population per class: current objects never logged as added, plus
+    objects whose first log appearance is an update or delete."""
+    added_in_log: dict[str, set] = {cls: set() for cls in OBJ_ENDPOINTS}
+    state: dict[str, set] = {cls: set() for cls in OBJ_ENDPOINTS}
+    for t in txns:
+        for ch in t.get("changes") or []:
+            cls = ch.get("obj_class")
+            if ch.get("ref_handle") or cls not in OBJ_ENDPOINTS:
+                continue
+            h = ch.get("obj_handle")
+            if ch.get("trans_type") == 0:
+                added_in_log[cls].add(h)
+            elif h not in added_in_log[cls]:    # first seen as update/delete → pre-log
+                state[cls].add(h)
+    for cls, handles in current.items():
+        state[cls] |= handles - added_in_log[cls]
+
+    snaps: dict[str, dict[str, int]] = {}
+    cur_week = None
+    for t in txns:                              # undo txns included — they change state
+        ts = _txn_ts(t)
+        if not ts:
+            continue
+        week = _week_of(ts)
+        if cur_week is None:
+            cur_week = week
+        elif week != cur_week:
+            snaps[cur_week] = {cls: len(s) for cls, s in state.items()}
+            cur_week = week
+        for ch in t.get("changes") or []:
+            cls = ch.get("obj_class")
+            if ch.get("ref_handle") or cls not in OBJ_ENDPOINTS:
+                continue
+            h, tt = ch.get("obj_handle"), ch.get("trans_type")
+            if tt in (0, 1):
+                state[cls].add(h)
+            elif tt == 2:
+                state[cls].discard(h)
+    if cur_week:
+        snaps[cur_week] = {cls: len(s) for cls, s in state.items()}
+
+    out: list[dict] = []
+    if snaps:
+        last_monday = current_week()
+        wk = datetime.strptime(min(snaps), "%Y-%m-%d").date()
+        latest: dict[str, int] | None = None
+        while True:
+            iso = wk.isoformat()
+            latest = snaps.get(iso, latest)
+            if latest and iso >= START_WEEK:
+                out.append({"week": iso, "counts": latest})
             if iso >= last_monday:
                 break
             wk += timedelta(days=7)

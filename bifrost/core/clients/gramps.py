@@ -153,9 +153,14 @@ class GrampsClient:
     async def list_places_full(self) -> list[dict]:
         return await self._paged("/places/")
 
-    async def list_transaction_history(self) -> list[dict]:
-        """The tree's full transaction log (adds/edits/deletes, timestamped)."""
-        return await self._paged("/transactions/history/", page_size=1000)
+    async def list_transaction_history(self, payloads: bool = False) -> list[dict]:
+        """The tree's full transaction log (adds/edits/deletes, timestamped).
+        With payloads=True each change carries old_data/new_data object JSON."""
+        params = {"old": 1, "new": 1} if payloads else {}
+        return await self._paged("/transactions/history/", page_size=1000, **params)
+
+    async def list_events_min(self) -> list[dict]:
+        return await self._paged("/events/", keys="handle,citation_list")
 
     async def get_media_by_gramps_id(self, gramps_id: str) -> dict | None:
         # Gramps returns 404 (not an empty list) when no media has this id;

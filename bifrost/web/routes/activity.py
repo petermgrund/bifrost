@@ -17,5 +17,9 @@ async def activity_page(request: Request):
 
 
 @router.get("/api/weekly")
-async def weekly(request: Request):
-    return await activity.weekly(request.app.state.gramps)
+async def weekly(request: Request, refresh: bool = False):
+    st = request.app.state
+    # the payload-bearing history fetch is a few MB — cache the computed result
+    if st.caches.get("activity") is None or refresh:
+        st.caches["activity"] = await activity.dashboard(st.gramps)
+    return st.caches["activity"]

@@ -340,7 +340,9 @@ svg.chart .tick { fill: var(--muted); font-size: 10px; font-family: 'Space Mono'
 svg.chart .hit { fill: transparent; cursor: pointer; }
 svg.chart .bar { cursor: pointer; }
 svg.chart .bar:hover .seg { opacity: .8; }
-svg.chart .selmark { stroke: var(--accent); stroke-width: 3; }
+svg.chart .selband { fill: color-mix(in srgb, var(--accent) 22%, transparent); }
+svg.chart .covseg { fill: #c66660; }
+h2 .hint { font-size: .78rem; font-weight: 400; margin-left: .6rem; }
 svg.chart .seg { shape-rendering: crispEdges; }
 
 .legend { display: flex; flex-wrap: wrap; gap: .15rem .4rem; margin: .5rem 0 1.2rem; }

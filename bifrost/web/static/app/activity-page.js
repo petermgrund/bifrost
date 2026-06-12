@@ -44,6 +44,7 @@ class ActivityPage extends BifrostElement {
   constructor() {
     super();
     this.weeks = null;
+    this.cov = [];
     this.action = 'added';
     this.hidden = new Set();
     this.selected = null;
@@ -55,9 +56,10 @@ class ActivityPage extends BifrostElement {
     this.load();
   }
 
-  async load() {
+  async load(refresh = false) {
     this.weeks = null;
-    const r = await api('/activity/api/weekly');
+    const r = await api(`/activity/api/weekly${refresh ? '?refresh=1' : ''}`);
+    this.cov = r.coverage || [];
     // chronological + fill empty weeks so the timeline is honest
     const byWeek = new Map(r.weeks.map((w) => [w.week, w.actions]));
     const weeks = [];
@@ -130,15 +132,15 @@ class ActivityPage extends BifrostElement {
         label = svg`<text x=${x} y=${height - 7} class="tick">${MONTHS[m]}${m === 0 || prevMonth === null ? ` ’${String(d.getFullYear()).slice(2)}` : ''}</text>`;
         prevMonth = m;
       }
-      return svg`<g class="bar ${w.week === this.selected ? 'sel' : ''}"
+      return svg`<g class="bar"
           @click=${() => (this.selected = w.week)}
           @mousemove=${(e) => (this.tip = { x: e.clientX, y: e.clientY, week: w.week })}
           @mouseleave=${() => (this.tip = null)}>
+        ${w.week === this.selected
+          ? svg`<rect x=${x - 2} y=${padT - 4} width=${barW + 4} height=${plotH + 8} class="selband"/>`
+          : nothing}
         <rect x=${x - 2} y=${padT} width=${barW + 4} height=${plotH + 4} class="hit"/>
         ${segs}
-        ${w.week === this.selected
-          ? svg`<line x1=${x - 1} x2=${x + barW + 1} y1=${padT + plotH + 3} y2=${padT + plotH + 3} class="selmark"/>`
-          : nothing}
         ${label}
       </g>`;
     });
@@ -150,14 +152,72 @@ class ActivityPage extends BifrostElement {
     </div>`;
   }
 
+  // --- citation-coverage chart: % of events without a citation, per week ---
+
+  covChart() {
+    const C = this.cov;
+    if (!C.length) return nothing;
+    const slot = Math.max(16, Math.min(44, Math.floor(860 / C.length)));
+    const barW = Math.max(8, slot - 6);
+    const padL = 34, padT = 8, plotH = 110, padB = 22;
+    const width = padL + slot * C.length + 8;
+    const height = padT + plotH + padB;
+    const y = (pct) => padT + plotH - (pct / 100) * plotH;
+
+    const grid = [25, 50, 75, 100].map((v) => svg`
+      <line x1=${padL} x2=${width - 4} y1=${y(v)} y2=${y(v)} class="grid"/>
+      ${v % 50 === 0 ? svg`<text x=${padL - 5} y=${y(v) + 3.5} class="tick" text-anchor="end">${v}%</text>` : nothing}`);
+
+    let prevMonth = null;
+    const bars = C.map((c, i) => {
+      const x = padL + i * slot;
+      const d = new Date(`${c.week}T00:00:00`);
+      const m = d.getMonth();
+      let label = nothing;
+      if (m !== prevMonth) {
+        label = svg`<text x=${x} y=${height - 7} class="tick">${MONTHS[m]}${m === 0 || prevMonth === null ? ` ’${String(d.getFullYear()).slice(2)}` : ''}</text>`;
+        prevMonth = m;
+      }
+      return svg`<g class="bar"
+          @click=${() => (this.selected = c.week)}
+          @mousemove=${(e) => (this.tip = { x: e.clientX, y: e.clientY, week: c.week, kind: 'cov' })}
+          @mouseleave=${() => (this.tip = null)}>
+        ${c.week === this.selected
+          ? svg`<rect x=${x - 2} y=${padT - 4} width=${barW + 4} height=${plotH + 8} class="selband"/>`
+          : nothing}
+        <rect x=${x - 2} y=${padT} width=${barW + 4} height=${plotH + 4} class="hit"/>
+        <rect x=${x} y=${y(c.pct)} width=${barW} height=${Math.max(1, (c.pct / 100) * plotH)} class="seg covseg"/>
+        ${label}
+      </g>`;
+    });
+
+    const cur = C[C.length - 1];
+    return html`<h2>Events without a citation
+        <span class="hint">now ${cur.pct}% (${cur.uncited} of ${cur.total})</span></h2>
+      <div class="chart-wrap">
+        <svg class="chart" viewBox="0 0 ${width} ${height}" width=${width} height=${height}>
+          ${grid}${bars}
+        </svg>
+      </div>`;
+  }
+
   tooltip() {
     if (!this.tip) return nothing;
+    const pos = `left:${this.tip.x + 14}px; top:${this.tip.y + 10}px`;
+    if (this.tip.kind === 'cov') {
+      const c = this.cov.find((x) => x.week === this.tip.week);
+      if (!c) return nothing;
+      return html`<div class="chart-tip" style=${pos}>
+        <div class="tiphead">${weekLabel(c.week)}</div>
+        <div>${c.pct}% uncited · ${c.uncited} of ${c.total} events</div>
+      </div>`;
+    }
     const w = this.weeks.find((x) => x.week === this.tip.week);
     if (!w) return nothing;
     const rows = CLASSES
       .filter((c) => !this.hidden.has(c) && this.count(w, this.action, c))
       .map((c) => html`<div><span class="dot c-${c.toLowerCase()}"></span>${LABELS[c]} ${this.count(w, this.action, c)}</div>`);
-    return html`<div class="chart-tip" style="left:${this.tip.x + 14}px; top:${this.tip.y + 10}px">
+    return html`<div class="chart-tip" style=${pos}>
       <div class="tiphead">${weekLabel(w.week)} · ${this.visTotal(w, this.action)} ${this.action}</div>
       ${rows}
     </div>`;
@@ -219,7 +279,7 @@ class ActivityPage extends BifrostElement {
       <div class="pagehead">
         <h1>Activity</h1>
         <span class="spacer"></span>
-        <button @click=${() => this.load()}>Refresh</button>
+        <button @click=${() => this.load(true)}>Refresh</button>
       </div>
       <div class="toolbar">
         ${chip('added', 'Added')}${chip('edited', 'Edited')}${chip('deleted', 'Deleted')}
@@ -231,6 +291,7 @@ class ActivityPage extends BifrostElement {
           @click=${() => this.toggleClass(c)}>
           <span class="dot c-${c.toLowerCase()}"></span>${LABELS[c]}</button>`)}
       </div>
+      ${this.covChart()}
       ${this.detail()}
       ${this.tooltip()}`;
   }

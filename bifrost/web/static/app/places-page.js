@@ -78,9 +78,9 @@ class PlacesPage extends BifrostElement {
       .filter((r) => !q || r.name.toLowerCase().includes(q) || r.gramps_id.toLowerCase().includes(q))
       .filter((r) =>
         this.filter === 'all' ||
-        (this.filter === 'relation' && r.relation) ||
-        (this.filter === 'missing' && r.relation && !r.has_boundary));
-    const missing = this.rows.filter((r) => r.relation && !r.has_boundary).length;
+        (this.filter === 'relation' && r.osm_id) ||
+        (this.filter === 'missing' && r.osm_id && !r.has_boundary));
+    const missing = this.rows.filter((r) => r.osm_id && !r.has_boundary).length;
     const chip = (f, label) => html`<button class="chip ${this.filter === f ? 'active' : ''}"
       @click=${() => (this.filter = f)}>${label}</button>`;
     return html`
@@ -92,30 +92,30 @@ class PlacesPage extends BifrostElement {
           ${this.busy === 'all' ? 'Generating…' : `Generate missing (${missing})`}</button>` : nothing}
         <button @click=${() => this.load(true)}>Refresh</button>
       </div>
-      <p class="hint">Boundary polygons from OpenStreetMap relations — the amber
-      outlines on the Gramps place minimaps. Add a relation URL to a place in
-      Gramps to make it eligible.</p>
+      <p class="hint">Boundary polygons from OpenStreetMap — the outlines on the
+      Gramps place minimaps. Relations cover admin areas (cities, counties);
+      ways cover building footprints (a house, a farm).</p>
       <div class="toolbar">
         <input type="search" placeholder="Search places…" .value=${this.query}
           @input=${(e) => (this.query = e.target.value)}>
-        ${chip('relation', 'With OSM relation')}${chip('missing', 'Missing boundary')}${chip('all', 'All places')}
+        ${chip('relation', 'With OSM link')}${chip('missing', 'Missing boundary')}${chip('all', 'All places')}
         <span class="hint">${filtered.length} shown</span>
         ${this.status ? html`<span class="hint action-failed">${this.status}</span>` : nothing}
       </div>
       <table class="results">
-        <tr><th>id</th><th>place</th><th>OSM relation</th><th>boundary</th><th></th></tr>
+        <tr><th>id</th><th>place</th><th>OSM</th><th>boundary</th><th></th></tr>
         ${filtered.map((r) => html`<tr>
           <td class="hint">${r.gramps_id}</td>
           <td>${this.grampsUrl
             ? html`<a href="${this.grampsUrl}/place/${r.gramps_id}" target="_blank">${r.name}</a>`
             : r.name}</td>
-          <td class="hint">${r.relation
-            ? html`<a href="https://www.openstreetmap.org/relation/${r.relation}" target="_blank">${r.relation}</a>`
-            : html`<input class="relinput" type="text" placeholder="relation id or URL"
+          <td class="hint">${r.osm_id
+            ? html`<a href="https://www.openstreetmap.org/${r.osm_type}/${r.osm_id}" target="_blank">${r.osm_type} ${r.osm_id}</a>`
+            : html`<input class="relinput" type="text" placeholder="relation/way id or URL"
                 @keydown=${(e) => { if (e.key === 'Enter') this.addRelation(r, e.target.value); }}
                 @change=${(e) => this.addRelation(r, e.target.value)}>`}</td>
           <td>${r.has_boundary ? iconYes : iconNo}</td>
-          <td>${r.relation ? html`<button class="applyone" ?disabled=${this.busy}
+          <td>${r.osm_id ? html`<button class="applyone" ?disabled=${this.busy}
             @click=${() => this.generate(r, r.has_boundary)}>
             ${this.busy === r.handle ? '…' : r.has_boundary ? 'Regenerate' : 'Generate'}</button>` : nothing}</td>
         </tr>`)}

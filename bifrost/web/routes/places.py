@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
@@ -34,19 +36,23 @@ async def list_places(request: Request, refresh: bool = False):
 
 class SetRelationBody(BaseModel):
     handle: str
-    relation: str  # raw id or a full openstreetmap.org/relation/N URL
+    relation: str  # raw id, "way/N", or a full openstreetmap.org/{relation|way}/N URL
 
 
 @router.post("/api/set-relation")
 async def set_relation(request: Request, body: SetRelationBody):
     st = _state(request)
     raw = body.relation.strip()
-    m = boundaries.RELATION_RE.search(raw)
-    rid = int(m.group(1)) if m else (int(raw) if raw.isdigit() else None)
-    if rid is None:
-        raise HTTPException(400, "give a numeric relation id or an openstreetmap.org/relation/… URL")
+    m = boundaries.OSM_REF_RE.search(raw) or re.search(r"^(relation|way)/(\d+)$", raw)
+    if m:
+        kind, oid = m.group(1), int(m.group(2))
+    elif raw.isdigit():
+        kind, oid = "relation", int(raw)  # bare number = relation (the common case)
+    else:
+        raise HTTPException(
+            400, "give a relation id, way/<id>, or an openstreetmap.org/{relation|way}/… URL")
     try:
-        result = await boundaries.set_relation(st.gramps, body.handle, rid)
+        result = await boundaries.set_relation(st.gramps, body.handle, kind, oid)
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
     st.caches.pop("places", None)

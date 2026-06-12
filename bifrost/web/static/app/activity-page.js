@@ -220,17 +220,16 @@ class ActivityPage extends BifrostElement {
     });
 
     const cur = C[C.length - 1];
-    return html`<p class="hint">Share of events by citation count, week by week —
-        now ${cur.c0} uncited · ${cur.c1} with one · ${cur.c2} with 2+ (of ${cur.total}).</p>
+    return html`<p class="hint">Share of events by citation count, week by week</p>
       <div class="chart-wrap">
         <svg class="chart" viewBox="0 0 ${width} ${height}" width=${width} height=${height}>
           ${grid}${bars}
         </svg>
       </div>
       <div class="legend">
-        <span class="legitem"><span class="dot cov0"></span>uncited</span>
-        <span class="legitem"><span class="dot cov1"></span>1 citation</span>
-        <span class="legitem"><span class="dot cov2"></span>2+ citations</span>
+        <span class="legitem"><span class="dot cov0"></span>uncited (${cur.c0})</span>
+        <span class="legitem"><span class="dot cov1"></span>1 citation (${cur.c1})</span>
+        <span class="legitem"><span class="dot cov2"></span>2+ citations (${cur.c2})</span>
       </div>`;
   }
 
@@ -409,7 +408,7 @@ class ActivityPage extends BifrostElement {
     const now = tot(cur), was = tot(prev);
     if (now && was) {
       const pct = Math.round((100 * (now - was)) / was);
-      out.push(`${now} objects touched — ${pct >= 0 ? 'up' : 'down'} ${Math.abs(pct)}% on last week (${was}).`);
+      out.push(`${now} objects touched, ${pct >= 0 ? 'up' : 'down'} ${Math.abs(pct)}% on last week (${was}).`);
     } else if (now) {
       out.push(`${now} objects touched; last week had no activity.`);
     }

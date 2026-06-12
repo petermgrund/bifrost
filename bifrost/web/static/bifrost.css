@@ -324,3 +324,50 @@ textarea:focus { outline: none; border-color: var(--accent); }
 #theme-toggle { border: none; background: transparent; font-size: 1.05rem; padding: .2rem .4rem; color: var(--muted); }
 #theme-toggle:hover { color: var(--accent); border: none; }
 .icon { vertical-align: -2px; } .icon.yes { color: var(--ok); } .icon.no { color: var(--err); opacity: .55; } .relinput { max-width: 9rem; font-size: .78rem; padding: .2rem .45rem; }
+
+/* --- activity dashboard --- */
+.stats { display: flex; gap: .6rem; margin: .4rem 0 1rem; flex-wrap: wrap; }
+.stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+        padding: .55rem .9rem; min-width: 7.5rem; }
+.stat .value { font-family: 'Space Grotesk', sans-serif; font-size: 1.5rem; font-weight: 700; line-height: 1.1; }
+.stat .label { color: var(--muted); font-size: .72rem; margin-top: .15rem; }
+
+.chart-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius);
+              background: var(--surface); padding: .6rem .4rem .2rem; }
+svg.chart { display: block; }
+svg.chart .grid { stroke: var(--border); stroke-width: 1; }
+svg.chart .tick { fill: var(--muted); font-size: 10px; font-family: 'Space Mono', monospace; }
+svg.chart .hit { fill: transparent; cursor: pointer; }
+svg.chart .bar { cursor: pointer; }
+svg.chart .bar:hover .seg { opacity: .8; }
+svg.chart .selmark { stroke: var(--accent); stroke-width: 3; }
+svg.chart .seg { shape-rendering: crispEdges; }
+
+.legend { display: flex; flex-wrap: wrap; gap: .15rem .4rem; margin: .5rem 0 1.2rem; }
+button.legitem { border: none; background: none; padding: .15rem .4rem; font-size: .78rem;
+                 color: var(--text); display: inline-flex; align-items: center; gap: .35rem; cursor: pointer; }
+button.legitem.off { opacity: .35; }
+button.legitem:hover { background: var(--surface-2); border-radius: 4px; }
+.dot { display: inline-block; width: .65rem; height: .65rem; border-radius: 3px;
+       vertical-align: -1px; margin-right: .4rem; flex: none; }
+button.legitem .dot { margin-right: 0; }
+
+.chart-tip { position: fixed; z-index: 50; background: var(--surface); border: 1px solid var(--border-strong);
+             border-radius: var(--radius); box-shadow: 0 2px 10px var(--shadow); padding: .45rem .65rem;
+             font-size: .76rem; pointer-events: none; line-height: 1.5; }
+.chart-tip .tiphead { font-weight: 700; margin-bottom: .25rem; }
+.chart-tip .dot { width: .55rem; height: .55rem; }
+
+table.weekdetail { width: auto; min-width: 22rem; }
+table.weekdetail .totalrow td { font-weight: 700; border-top: 1px solid var(--border-strong); }
+
+/* chart class palette — mid-tones legible on both themes */
+.c-person   { fill: #4a7fb5; background: #4a7fb5; }
+.c-family   { fill: #8d77c0; background: #8d77c0; }
+.c-event    { fill: #3a9a8e; background: #3a9a8e; }
+.c-place    { fill: #cf9a4a; background: #cf9a4a; }
+.c-citation { fill: #c66660; background: #c66660; }
+.c-source   { fill: #9a7a62; background: #9a7a62; }
+.c-note     { fill: #6aa06d; background: #6aa06d; }
+.c-media    { fill: #62aecf; background: #62aecf; }
+.c-other    { fill: #8b939d; background: #8b939d; }

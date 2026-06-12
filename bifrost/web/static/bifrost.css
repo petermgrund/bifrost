@@ -341,7 +341,15 @@ svg.chart .hit { fill: transparent; cursor: pointer; }
 svg.chart .bar { cursor: pointer; }
 svg.chart .bar:hover .seg { opacity: .8; }
 svg.chart .selband { fill: color-mix(in srgb, var(--accent) 22%, transparent); }
-svg.chart .covseg { fill: #c66660; }
+/* coverage buckets: red = uncited, orange = 1 citation, blue = 2+ */
+.cov0 { fill: #c45b55; background: #c45b55; }
+.cov1 { fill: #d29a4b; background: #d29a4b; }
+.cov2 { fill: #4a7fb5; background: #4a7fb5; }
+span.legitem { padding: .15rem .4rem; font-size: .78rem; display: inline-flex;
+               align-items: center; gap: .35rem; color: var(--muted); }
+span.legitem .dot { margin-right: 0; }
+table.weekobjects td:nth-child(3) { max-width: 30rem; overflow: hidden;
+                                    text-overflow: ellipsis; white-space: nowrap; }
 h2 .hint { font-size: .78rem; font-weight: 400; margin-left: .6rem; }
 svg.chart .seg { shape-rendering: crispEdges; }
 

@@ -245,8 +245,7 @@ class ActivityPage extends BifrostElement {
     const classes = CLASSES.filter((c) => c !== 'Other');
     const w = 8, padY = 5, H = 56;
     const width = (T.length - 1) * w + 8;
-    return html`<h2>Database size</h2>
-      <div class="sparkgrid">
+    return html`<div class="sparkgrid">
         ${classes.map((cls) => {
           const vals = T.map((t) => t.counts[cls] || 0);
           const max = Math.max(1, ...vals);
@@ -327,30 +326,6 @@ class ActivityPage extends BifrostElement {
     </div>`;
   }
 
-  // --- selected-week detail (all three actions) ---
-
-  detail() {
-    const w = this.weeks.find((x) => x.week === this.selected);
-    if (!w) return nothing;
-    const rows = CLASSES.filter((c) =>
-      ['added', 'edited', 'deleted'].some((a) => this.count(w, a, c)));
-    const cell = (n) => (n ? n : '');
-    return html`<h2>${weekLabel(w.week)}, ${w.week.slice(0, 4)}</h2>
-      ${rows.length ? html`<table class="results weekdetail">
-        <tr><th></th><th>added</th><th>edited</th><th>deleted</th></tr>
-        ${rows.map((c) => html`<tr>
-          <td><span class="dot c-${c.toLowerCase()}"></span>${LABELS[c]}</td>
-          <td>${cell(this.count(w, 'added', c))}</td>
-          <td>${cell(this.count(w, 'edited', c))}</td>
-          <td>${cell(this.count(w, 'deleted', c))}</td>
-        </tr>`)}
-        <tr class="totalrow"><td>total</td>
-          ${['added', 'edited', 'deleted'].map((a) => html`<td>${cell(
-            CLASSES.reduce((s, c) => s + this.count(w, a, c), 0))}</td>`)}
-        </tr>
-      </table>` : html`<p class="hint">No activity this week.</p>`}`;
-  }
-
   // --- "This week" view ---
 
   objTable(title, rows, linkable = true) {
@@ -409,9 +384,11 @@ class ActivityPage extends BifrostElement {
         <button @click=${() => this.load(true)}>Refresh</button>
       </div>
       <div class="toolbar">
-        ${viewtab('dash', 'Dashboard')}${viewtab('week', 'This week')}
+        ${viewtab('dash', 'Dashboard')}${viewtab('db', 'Database')}${viewtab('week', 'This week')}
       </div>
-      ${this.view === 'week' ? this.weekView() : html`
+      ${this.view === 'week' ? this.weekView()
+        : this.view === 'db' ? this.sparkGrid()
+        : html`
         <div class="toolbar">
           ${chip('added', 'Added')}${chip('edited', 'Edited')}${chip('deleted', 'Deleted')}
         </div>
@@ -422,9 +399,7 @@ class ActivityPage extends BifrostElement {
             @click=${() => this.toggleClass(c)}>
             <span class="dot c-${c.toLowerCase()}"></span>${LABELS[c]}</button>`)}
         </div>
-        ${this.covChart()}
-        ${this.sparkGrid()}
-        ${this.detail()}`}
+        ${this.covChart()}`}
       ${this.tooltip()}`;
   }
 }

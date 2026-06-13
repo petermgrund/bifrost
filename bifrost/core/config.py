@@ -76,7 +76,7 @@ class PlacesConfig:
 @dataclass(frozen=True)
 class AnthropicConfig:
     api_key: str = ""
-    model: str = "claude-fable-5"
+    model: str = "claude-opus-4-8"
 
 
 @dataclass(frozen=True)
@@ -153,7 +153,7 @@ def load_config(path: str | Path | None = None) -> Config:
         sync_paperless=sync_paperless,
         anthropic=AnthropicConfig(
             api_key=(raw.get("anthropic") or {}).get("api_key") or "",
-            model=(raw.get("anthropic") or {}).get("model") or "claude-fable-5",
+            model=(raw.get("anthropic") or {}).get("model") or "claude-opus-4-8",
         ),
         places=PlacesConfig(
             osm_service_url=((raw.get("places") or {}).get("osm_service_url") or "").rstrip("/"),

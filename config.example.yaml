@@ -49,7 +49,7 @@ anthropic:
   # Used by the citation generator to compose EE citation text (editable
   # before save; manual entry works without it).
   api_key: "REPLACE_ME"
-  model: "claude-fable-5"
+  model: "claude-opus-4-8"
 
 places:
   # osm-to-gramps boundary rendering service + the GeoJSON sidecar dir

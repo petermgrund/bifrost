@@ -210,8 +210,9 @@ class GrampsClient:
         )
         return resp.json().get("backlinks", {})
 
-    async def get_object(self, api_path: str, handle: str) -> dict:
-        resp = await self._request("GET", f"/{api_path}/{handle}")
+    async def get_object(self, api_path: str, handle: str, **params) -> dict:
+        resp = await self._request(
+            "GET", f"/{api_path}/{handle}", params=params or None)
         return resp.json()
 
     async def update_object(self, api_path: str, handle: str, obj: dict) -> dict:

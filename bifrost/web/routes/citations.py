@@ -28,7 +28,8 @@ async def get_context(request: Request):
     if st.caches.get("citations_context") is None:
         st.caches["citations_context"] = await citations.context(st.gramps)
     ctx = st.caches["citations_context"]
-    return {**ctx, "llm": st.anthropic.configured}
+    return {**ctx, "llm": st.anthropic.configured,
+            "gramps_url": st.cfg.sync_paperless.gramps_public_url}
 
 
 @router.get("/api/media")
@@ -38,6 +39,23 @@ async def get_media(request: Request, uncited: bool = False, refresh: bool = Fal
     if st.caches.get(key) is None or refresh:
         st.caches[key] = await citations.media_listing(st.gramps, uncited_only=uncited)
     return st.caches[key]
+
+
+@router.get("/api/uncited-events")
+async def get_uncited_events(request: Request, refresh: bool = False):
+    st = _state(request)
+    if st.caches.get("citations_uncited_events") is None or refresh:
+        st.caches["citations_uncited_events"] = await citations.uncited_events(st.gramps)
+    return st.caches["citations_uncited_events"]
+
+
+@router.get("/api/event/{handle}")
+async def get_event(request: Request, handle: str):
+    st = _state(request)
+    if st.caches.get("citations_cited_set") is None:
+        st.caches["citations_cited_set"] = await citations.cited_media_set(st.gramps)
+    return await citations.event_detail(
+        st.gramps, handle, st.caches["citations_cited_set"])
 
 
 class ComposeBody(BaseModel):
@@ -97,6 +115,7 @@ class SaveBody(BaseModel):
     media_handle: str | None = None
     repository_handle: str | None = None
     source_handle: str | None = None
+    event_handle: str | None = None
 
 
 @router.post("/api/save")
@@ -105,7 +124,8 @@ async def save(request: Request, body: SaveBody):
     try:
         created = await citations.save(
             st.gramps, st.conn, body.draft,
-            body.media_handle, body.repository_handle, body.source_handle)
+            body.media_handle, body.repository_handle, body.source_handle,
+            body.event_handle)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     for key in list(st.caches):

@@ -1,14 +1,25 @@
 import { BifrostElement, html, nothing, api, post } from './core.js';
 
-/* Citation generator: media → source → details → review/save. */
+const shuffle = (arr) => {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+};
+
+/* Citation generator: media → source → details → review/save.
+   Or event mode: cycle uncited events → pick related media → same composer. */
 class CitationsPage extends BifrostElement {
   static properties = {
-    step: { state: true },          // media | source | details | review
+    mode: { state: true },          // media | event
+    step: { state: true },          // event | media | describe | details | review
     ctx: { state: true },           // types, sources, repositories, llm
     media: { state: true },         // media listing
     mediaQuery: { state: true },
     originFilter: { state: true },
-    pick: { state: true },          // { media, source, repository, recordType }
+    pick: { state: true },          // { media, source, repository, recordType, event }
     fields: { state: true },        // entered field values
     draft: { state: true },         // composed/edited draft
     busy: { state: true },
@@ -19,16 +30,21 @@ class CitationsPage extends BifrostElement {
     matched: { state: true },
     wizard: { state: true },
     repoQuery: { state: true },
+    eventQueue: { state: true },    // shuffled light uncited-event list
+    eventPos: { state: true },
+    event: { state: true },         // current event detail
+    eventBusy: { state: true },
   };
 
   constructor() {
     super();
+    this.mode = 'media';
     this.step = 'media';
     this.ctx = null;
     this.media = [];
     this.mediaQuery = '';
     this.originFilter = 'paperless';
-    this.pick = { media: null, source: null, repository: null, recordType: null };
+    this.pick = { media: null, source: null, repository: null, recordType: null, event: null };
     this.fields = {};
     this.draft = null;
     this.busy = false;
@@ -39,6 +55,10 @@ class CitationsPage extends BifrostElement {
     this.matched = null;
     this.wizard = false;
     this.repoQuery = '';
+    this.eventQueue = null;
+    this.eventPos = 0;
+    this.event = null;
+    this.eventBusy = false;
   }
 
   connectedCallback() {
@@ -58,8 +78,8 @@ class CitationsPage extends BifrostElement {
   }
 
   reset() {
-    this.step = 'media';
-    this.pick = { media: null, source: null, repository: null, recordType: null };
+    this.step = this.mode === 'event' ? 'event' : 'media';
+    this.pick = { media: null, source: null, repository: null, recordType: null, event: null };
     this.fields = {};
     this.draft = null;
     this.error = '';
@@ -67,6 +87,67 @@ class CitationsPage extends BifrostElement {
     this.dump = '';
     this.matched = null;
     this.wizard = false;
+  }
+
+  /* ---- event-cite mode ---- */
+  async enterEventMode() {
+    this.mode = 'event';
+    this.reset();
+    if (!this.eventQueue) {
+      this.eventBusy = true;
+      try {
+        const evs = await api('/citations/api/uncited-events');
+        this.eventQueue = shuffle(evs);
+        this.eventPos = 0;
+        await this.loadEvent();
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.eventBusy = false;
+      }
+    }
+  }
+
+  enterMediaMode() {
+    this.mode = 'media';
+    this.reset();
+  }
+
+  async loadEvent() {
+    const row = this.eventQueue?.[this.eventPos];
+    if (!row) { this.event = null; return; }
+    this.eventBusy = true;
+    this.event = null;
+    try {
+      this.event = await api(`/citations/api/event/${row.handle}`);
+    } catch (e) {
+      this.error = e.message;
+    } finally {
+      this.eventBusy = false;
+    }
+  }
+
+  nextEvent() {
+    if (!this.eventQueue?.length) return;
+    this.eventPos = (this.eventPos + 1) % this.eventQueue.length;
+    this.loadEvent();
+  }
+
+  dropCurrentEvent() {
+    // remove the just-cited event from the queue so counts stay honest
+    if (!this.eventQueue) return;
+    this.eventQueue = this.eventQueue.filter((_, i) => i !== this.eventPos);
+    if (this.eventPos >= this.eventQueue.length) this.eventPos = 0;
+  }
+
+  startCitingEvent(media) {
+    this.pick = { ...this.pick, media: media || null, event: this.event,
+      source: null, repository: null, recordType: null };
+    this.dump = this.event?.context || '';
+    this.matched = null;
+    this.draft = null;
+    this.error = '';
+    this.step = 'describe';
   }
 
   /* ---- compose / save ---- */
@@ -130,7 +211,9 @@ class CitationsPage extends BifrostElement {
         media_handle: this.pick.media?.handle || null,
         repository_handle: this.pick.repository?.handle || null,
         source_handle: this.pick.source?.handle || null,
+        event_handle: this.pick.event?.handle || null,
       });
+      if (this.pick.event) this.dropCurrentEvent();
     } catch (e) {
       this.error = e.message;
     } finally {
@@ -141,7 +224,9 @@ class CitationsPage extends BifrostElement {
   /* ---- render ---- */
   render() {
     if (!this.ctx) return html`<h1>Citations</h1><div class="hint">${this.error || 'Loading…'}</div>`;
-    const steps = ['media', 'describe', 'details', 'review'];
+    const first = this.mode === 'event' ? 'event' : 'media';
+    const steps = [first, 'describe', 'details', 'review'];
+    const atStart = this.step === first;
     return html`
       <div class="pagehead">
         <h1>Citations</h1>
@@ -152,16 +237,61 @@ class CitationsPage extends BifrostElement {
             ${i + 1}. ${s}</button>`)}
         </div>
         <span class="spacer"></span>
-        ${this.step !== 'media' ? html`<button @click=${this.reset}>Start over</button>` : nothing}
+        ${!atStart ? html`<button @click=${this.reset}>Start over</button>` : nothing}
+      </div>
+      <div class="toolbar">
+        <button class="chip ${this.mode === 'media' ? 'active' : ''}"
+          @click=${this.enterMediaMode}>Cite media</button>
+        <button class="chip ${this.mode === 'event' ? 'active' : ''}"
+          @click=${this.enterEventMode}>Cite uncited events</button>
       </div>
       ${this.error ? html`<div class="alert">${this.error}</div>` : nothing}
       ${{
+        event: () => this.renderEvent(),
         media: () => this.renderMedia(),
         describe: () => this.renderDescribe(),
         details: () => this.renderDetails(),
         review: () => this.renderReview(),
       }[this.step]()}
     `;
+  }
+
+  renderEvent() {
+    if (this.eventBusy && !this.event) return html`<div class="hint">Loading…</div>`;
+    if (!this.eventQueue) return html`<div class="hint">Loading…</div>`;
+    if (!this.eventQueue.length) {
+      return html`<div class="syncpanel"><h2>All events cited</h2>
+        <p class="hint">No events are missing a citation. Nice.</p></div>`;
+    }
+    const e = this.event;
+    const pos = `${this.eventPos + 1} of ${this.eventQueue.length} uncited`;
+    return html`
+      <div class="toolbar">
+        <span class="hint">${pos}</span>
+        <span class="spacer"></span>
+        <button @click=${() => this.nextEvent()}>Skip — next random ↻</button>
+      </div>
+      ${!e ? html`<div class="hint">Loading event…</div>` : html`
+        <div class="syncpanel">
+          <h2>${e.summary || e.type}</h2>
+          <p class="hint">
+            ${e.type}${e.date ? html` · ${e.date}` : nothing}${e.place ? html` · ${e.place}` : nothing}
+            · <a href="${this.ctx.gramps_url || ''}/event/${e.gramps_id}" target="_blank">${e.gramps_id}</a>
+          </p>
+          ${e.participants.length ? html`<p class="hint">People:
+            ${e.participants.map((p, i) => html`${i ? ', ' : ''}${p.name}${p.role && p.role !== 'Primary' ? ` (${p.role.toLowerCase()})` : ''}`)}</p>` : nothing}
+        </div>
+        <h2>Cite from a related media object</h2>
+        ${e.media.length ? html`<div class="cardlist" style="max-height:46vh">
+          ${e.media.map((m) => html`<div class="card" @click=${() => this.startCitingEvent(m)}>
+            <span class="cid">${m.gramps_id}</span>
+            <span class="name">${m.title}</span>
+            ${m.cited ? html`<span class="badge unlinked">cited</span>` : nothing}
+          </div>`)}
+        </div>` : html`<p class="hint">No media attached to this event or its people.</p>`}
+        <div class="toolbar">
+          <button @click=${() => this.startCitingEvent(null)}>Cite without media</button>
+        </div>`}`;
   }
 
   renderMedia() {
@@ -189,9 +319,18 @@ class CitationsPage extends BifrostElement {
       </div>`;
   }
 
+  citingLine() {
+    const ev = this.pick.event, m = this.pick.media;
+    if (!ev && !m) return nothing;
+    return html`<p class="hint">Citing:
+      ${ev ? html`event <strong>${ev.summary || ev.type}</strong>` : nothing}
+      ${ev && m ? ' from ' : nothing}
+      ${m ? html`media <strong>${m.title}</strong>` : (ev ? nothing : '')}</p>`;
+  }
+
   renderDescribe() {
     return html`
-      <p class="hint">Citing: <strong>${this.pick.media?.title}</strong></p>
+      ${this.citingLine()}
       <div class="syncpanel">
         <h2>Describe the record</h2>
         <textarea rows="7" placeholder="Dump everything you know: what the record is, who's in it, dates, page/entry numbers, archive references, the URL you found it at…"
@@ -212,7 +351,7 @@ class CitationsPage extends BifrostElement {
     const matches = this.ctx.sources.filter((s) =>
       !q || s.title.toLowerCase().includes(q) || s.abbrev.toLowerCase().includes(q)).slice(0, 30);
     return html`
-      <p class="hint">Citing: <strong>${this.pick.media?.title}</strong></p>
+      ${this.citingLine()}
       <h2>Existing source</h2>
       <div class="toolbar">
         <input type="search" placeholder="Search sources…" .value=${this.sourceQuery}
@@ -247,8 +386,8 @@ class CitationsPage extends BifrostElement {
           @input=${(e) => (this.fields = { ...this.fields, [key]: e.target.value })}>
       </label>`;
     return html`
-      <p class="hint">Citing: <strong>${this.pick.media?.title}</strong>
-        ${src ? html` → ${src.abbrev || src.title}` : html` → new ${t.label}`}</p>
+      ${this.citingLine()}
+      <p class="hint">${src ? html`→ ${src.abbrev || src.title}` : html`→ new ${t.label}`}</p>
       <div class="fieldform">
         ${src ? html`
           ${fieldRow('locator', 'Locator within the source (page, entry, dwelling…)', true)}
@@ -273,7 +412,12 @@ class CitationsPage extends BifrostElement {
         <table class="results">
           ${Object.entries(this.saved).map(([k, v]) => html`<tr><td>${k}</td><td>${v}</td></tr>`)}
         </table>
-        <div class="toolbar"><button class="primary" @click=${this.reset}>New citation</button></div>
+        <div class="toolbar">
+          ${this.mode === 'event'
+            ? html`<button class="primary" @click=${() => { this.reset(); this.loadEvent(); }}>
+                Next event →</button>`
+            : html`<button class="primary" @click=${this.reset}>New citation</button>`}
+        </div>
       </div>`;
     }
     const d = this.draft;

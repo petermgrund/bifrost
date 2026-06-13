@@ -319,10 +319,12 @@ async def save(
     media_handle: str | None,
     repository_handle: str | None,
     source_handle: str | None,
+    event_handle: str | None = None,
 ) -> dict:
     """Create whatever is new (repository → source → note → citation), link
-    the media, and return the created/used ids. Partial-failure honest: each
-    created object is reported even if a later step fails."""
+    the media, optionally attach the citation to an event, and return the
+    created/used ids. Partial-failure honest: each created object is reported
+    even if a later step fails."""
     created: dict = {}
     now = int(datetime.utcnow().timestamp())
 
@@ -397,6 +399,16 @@ async def save(
     await gramps.create_object(cit_obj)
     created["citation"] = cit_gid
 
+    # Attach the citation to an event (event.citation_list) — the event-cite flow.
+    if event_handle:
+        ev = await gramps.get_object("events", event_handle)
+        cl = ev.get("citation_list") or []
+        if citation_handle not in cl:
+            cl.append(citation_handle)
+            ev["citation_list"] = cl
+            await gramps.update_object("events", event_handle, ev)
+        created["event"] = ev.get("gramps_id") or event_handle
+
     with conn:
         conn.execute(
             "INSERT INTO runs (job, status, started_at, finished_at, summary)"
@@ -428,13 +440,19 @@ async def context(gramps: GrampsClient) -> dict:
     }
 
 
-async def media_listing(gramps: GrampsClient, uncited_only: bool) -> list[dict]:
-    """All media, lightest useful shape, flagged with citation status."""
+async def cited_media_set(gramps: GrampsClient) -> set[str]:
+    """Handles of every media object that already has at least one citation."""
     cited: set[str] = set()
     for c in await gramps._paged("/citations/"):
         for mr in c.get("media_list", []):
             if mr.get("ref"):
                 cited.add(mr["ref"])
+    return cited
+
+
+async def media_listing(gramps: GrampsClient, uncited_only: bool) -> list[dict]:
+    """All media, lightest useful shape, flagged with citation status."""
+    cited = await cited_media_set(gramps)
     out = []
     for m in await gramps.list_media():
         is_cited = m["handle"] in cited
@@ -452,3 +470,94 @@ async def media_listing(gramps: GrampsClient, uncited_only: bool) -> list[dict]:
         })
     out.sort(key=lambda r: (r["cited"], r["title"].lower()))
     return out
+
+
+# ---------------------------------------------------------------------------
+# Event-cite flow — cycle uncited events, cite each from related media
+# ---------------------------------------------------------------------------
+
+def _event_date_text(ev: dict) -> str:
+    d = ev.get("date") or {}
+    return d.get("text") or (str(d.get("year")) if d.get("year") else "")
+
+
+async def uncited_events(gramps: GrampsClient) -> list[dict]:
+    """Light list of events with no citation attached — the cycler's queue."""
+    events = await gramps._paged(
+        "/events/", keys="handle,gramps_id,type,date,place,description,citation_list")
+    places = {
+        p["handle"]: ((p.get("name") or {}).get("value") or p.get("gramps_id", ""))
+        for p in await gramps._paged("/places/", keys="handle,gramps_id,name")}
+    out = [{
+        "handle": e["handle"], "gramps_id": e.get("gramps_id", ""),
+        "type": str(e.get("type") or "Event"),
+        "date": _event_date_text(e),
+        "place": places.get(e.get("place"), ""),
+        "description": e.get("description", ""),
+    } for e in events if not e.get("citation_list")]
+    out.sort(key=lambda r: (r["type"], r["date"]))
+    return out
+
+
+async def event_detail(
+    gramps: GrampsClient, handle: str, cited: set[str]
+) -> dict:
+    """Full detail for one event plus the media worth citing it from: media
+    attached to the event itself and to its participant people."""
+    e = await gramps.get_object("events", handle, profile="all", backlinks="true")
+    prof = e.get("profile") or {}
+    parts = (prof.get("participants") or {}).get("people") or []
+    participants, person_handles = [], []
+    for p in parts:
+        per = p.get("person") or {}
+        participants.append({
+            "name": per.get("name_display") or per.get("gramps_id") or "?",
+            "gramps_id": per.get("gramps_id", ""),
+            "role": p.get("role") or "",
+        })
+        if per.get("handle"):
+            person_handles.append(per["handle"])
+
+    # related media: the event's own, then each participant's
+    refs: list[str] = [mr["ref"] for mr in (e.get("media_list") or []) if mr.get("ref")]
+    for ph in person_handles:
+        try:
+            per = await gramps.get_object("people", ph)
+        except Exception:  # noqa: BLE001
+            continue
+        refs += [mr["ref"] for mr in (per.get("media_list") or []) if mr.get("ref")]
+
+    media, seen = [], set()
+    for ref in refs:
+        if ref in seen:
+            continue
+        seen.add(ref)
+        try:
+            m = await gramps.get_object("media", ref)
+        except Exception:  # noqa: BLE001
+            continue
+        media.append({
+            "handle": ref, "gramps_id": m.get("gramps_id", ""),
+            "title": m.get("desc") or m.get("gramps_id", ""),
+            "cited": ref in cited,
+        })
+
+    # seed text for the dump textarea (editable starting point)
+    ctx = [f"Event: {prof.get('type') or e.get('type') or 'Event'}"
+           + (f", {prof['date']}" if prof.get("date") else "")]
+    if prof.get("place"):
+        ctx.append(f"Place: {prof['place']}")
+    if participants:
+        ctx.append("People: " + "; ".join(p["name"] for p in participants))
+
+    return {
+        "handle": handle,
+        "gramps_id": e.get("gramps_id", ""),
+        "summary": prof.get("summary", ""),
+        "type": str(prof.get("type") or e.get("type") or ""),
+        "date": prof.get("date", "") or _event_date_text(e),
+        "place": prof.get("place", ""),
+        "participants": participants,
+        "media": media,
+        "context": "\n".join(ctx),
+    }

@@ -175,8 +175,14 @@ def build_compose_prompt(
     media: dict | None,
     existing_source: dict | None,
     today: str,
+    event_context: str | None = None,
 ) -> str:
     parts = [f"Today's date (for access dates): {today}\n"]
+    if event_context:
+        parts.append(
+            "EVENT this citation documents (the citation will be attached to it; "
+            "compose a citation for the record that evidences this event):\n"
+            + event_context)
     if existing_source:
         parts.append(
             "EXISTING SOURCE (compose a citation within it; keep its style):\n"
@@ -205,11 +211,12 @@ async def compose(
     fields: dict,
     media: dict | None,
     existing_source: dict | None,
+    event_context: str | None = None,
 ) -> dict:
     types = load_citation_types()["types"]
     rt = next((t for t in types if t["key"] == record_type_key), None)
     today = datetime.now().strftime("%-d %B %Y")
-    user = build_compose_prompt(rt, fields, media, existing_source, today)
+    user = build_compose_prompt(rt, fields, media, existing_source, today, event_context)
     draft = await anthropic.complete_structured(system_prompt(), user, COMPOSE_SCHEMA)
     if existing_source:
         draft["repository"] = None
@@ -238,18 +245,28 @@ DUMP_SCHEMA = {
     },
 }
 
-DUMP_INSTRUCTIONS = """The user has pasted a freeform description of a record \
-("the dump"). Extract every citation element from it.
+DUMP_LEAD = """The user has pasted a freeform description of a record \
+("the dump"). Extract every citation element from it."""
 
-MATCHING: a catalog of the tree's existing sources and repositories follows. \
-If the record clearly belongs to one of the existing sources (same record \
-series — e.g. another page of the same census county, another entry in the \
-same parish register volume), set matched_source_gramps_id and return null \
-for repository/source. If only the repository matches (new source held by a \
-known archive/platform), set matched_repository_gramps_id and draft the new \
-source. Match conservatively: a different county, volume, or year range is a \
-DIFFERENT source. When matched, compose the citation in that source's \
-established style."""
+EVENT_ONLY_LEAD = """No freeform description was provided — compose a citation \
+for the EVENT described above. Infer the standard source record that would \
+evidence an event of that type, place, and era (e.g. the civil or church \
+register, census, or vital record appropriate to the jurisdiction), and mark \
+every locator and identifier you cannot derive (page, entry, volume, \
+film/roll, access URL) as [NEEDED: …]. Never invent specifics."""
+
+DUMP_MATCHING = """MATCHING: a catalog of the tree's existing sources and \
+repositories follows. If the record clearly belongs to one of the existing \
+sources (same record series — e.g. another page of the same census county, \
+another entry in the same parish register volume), set matched_source_gramps_id \
+and return null for repository/source. If only the repository matches (new \
+source held by a known archive/platform), set matched_repository_gramps_id and \
+draft the new source. Match conservatively: a different county, volume, or year \
+range is a DIFFERENT source. When matched, compose the citation in that \
+source's established style."""
+
+# Back-compat alias (the full dump-mode instruction block).
+DUMP_INSTRUCTIONS = DUMP_LEAD + "\n\n" + DUMP_MATCHING
 
 
 def _catalog(sources: list[dict], repos: list[dict]) -> str:
@@ -276,15 +293,23 @@ async def compose_from_dump(
     media: dict | None,
     sources: list[dict],
     repos: list[dict],
+    event_context: str | None = None,
 ) -> dict:
     today = datetime.now().strftime("%-d %B %Y")
-    parts = [DUMP_INSTRUCTIONS, f"Today's date (for access dates): {today}"]
+    has_dump = bool(dump.strip())
+    lead = DUMP_LEAD if has_dump else EVENT_ONLY_LEAD
+    parts = [lead + "\n\n" + DUMP_MATCHING, f"Today's date (for access dates): {today}"]
+    if event_context:
+        parts.append(
+            "EVENT this citation documents (the citation will be attached to it):\n"
+            + event_context)
     if media:
         parts.append(f"MEDIA OBJECT this citation will be attached to:\n"
                      f"  title: {media.get('desc')}\n  gramps id: {media.get('gramps_id')}")
     parts.append(_catalog(sources, repos))
     parts.append(_type_guidance_digest())
-    parts.append(f"THE DUMP:\n{dump.strip()}")
+    if has_dump:
+        parts.append(f"THE DUMP:\n{dump.strip()}")
     parts.append("Compose the EE citation now.")
     draft = await anthropic.complete_structured(
         system_prompt(), "\n\n".join(parts), DUMP_SCHEMA)
@@ -510,10 +535,15 @@ async def event_detail(
     participants, person_handles = [], []
     for p in parts:
         per = p.get("person") or {}
+        b = (per.get("birth") or {}).get("date") or ""
+        d = (per.get("death") or {}).get("date") or ""
+        lifeparts = ([f"b. {b}"] if b else []) + ([f"d. {d}"] if d else [])
+        life = f" ({', '.join(lifeparts)})" if lifeparts else ""
         participants.append({
             "name": per.get("name_display") or per.get("gramps_id") or "?",
             "gramps_id": per.get("gramps_id", ""),
             "role": p.get("role") or "",
+            "life": life,
         })
         if per.get("handle"):
             person_handles.append(per["handle"])
@@ -542,13 +572,15 @@ async def event_detail(
             "cited": ref in cited,
         })
 
-    # seed text for the dump textarea (editable starting point)
+    # event facts passed to the composer as grounding (not the source desc)
     ctx = [f"Event: {prof.get('type') or e.get('type') or 'Event'}"
            + (f", {prof['date']}" if prof.get("date") else "")]
     if prof.get("place"):
         ctx.append(f"Place: {prof['place']}")
     if participants:
-        ctx.append("People: " + "; ".join(p["name"] for p in participants))
+        ctx.append("People: " + "; ".join(p["name"] + p["life"] for p in participants))
+    if e.get("description"):
+        ctx.append(f"Description: {e['description']}")
 
     return {
         "handle": handle,

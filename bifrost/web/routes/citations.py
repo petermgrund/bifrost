@@ -63,6 +63,7 @@ class ComposeBody(BaseModel):
     fields: dict = {}
     media_handle: str | None = None
     source_handle: str | None = None
+    event_context: str | None = None
 
 
 @router.post("/api/compose")
@@ -78,7 +79,8 @@ async def compose(request: Request, body: ComposeBody):
         existing_source = await st.gramps.get_object("sources", body.source_handle)
     try:
         draft = await citations.compose(
-            st.anthropic, body.record_type, body.fields, media, existing_source)
+            st.anthropic, body.record_type, body.fields, media, existing_source,
+            body.event_context)
     except AnthropicError as exc:
         raise HTTPException(502, f"composition failed: {exc}") from exc
     return draft
@@ -87,6 +89,7 @@ async def compose(request: Request, body: ComposeBody):
 class DumpBody(BaseModel):
     dump: str
     media_handle: str | None = None
+    event_context: str | None = None
 
 
 @router.post("/api/compose-dump")
@@ -94,8 +97,8 @@ async def compose_dump(request: Request, body: DumpBody):
     st = _state(request)
     if not st.anthropic.configured:
         raise HTTPException(400, "no Anthropic API key configured")
-    if not body.dump.strip():
-        raise HTTPException(400, "dump is empty")
+    if not body.dump.strip() and not (body.event_context or "").strip():
+        raise HTTPException(400, "nothing to compose from")
     if st.caches.get("citations_context") is None:
         st.caches["citations_context"] = await citations.context(st.gramps)
     ctx = st.caches["citations_context"]
@@ -104,7 +107,8 @@ async def compose_dump(request: Request, body: DumpBody):
         media = await st.gramps.get_object("media", body.media_handle)
     try:
         result = await citations.compose_from_dump(
-            st.anthropic, body.dump, media, ctx["sources"], ctx["repositories"])
+            st.anthropic, body.dump, media, ctx["sources"], ctx["repositories"],
+            body.event_context)
     except AnthropicError as exc:
         raise HTTPException(502, f"composition failed: {exc}") from exc
     return result

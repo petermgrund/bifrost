@@ -424,3 +424,10 @@ p.interp { background: var(--surface); border: 1px solid var(--border);
 .cmpbar .fill { height: 100%; border-radius: 2px; min-width: 1px; }
 .cmpbar .fill.was { background: var(--border-strong); }
 .cmpbar .num { font-size: .7rem; color: var(--muted); line-height: 1; }
+
+/* event-cite: facts panel shown in the describe step */
+.eventfacts { background: var(--surface-2); border: 1px solid var(--border);
+              border-radius: var(--radius); padding: .5rem .8rem; margin-bottom: .8rem;
+              font-size: .85rem; }
+.eventfacts > div { margin: .1rem 0; }
+.eventfacts .hint { margin-top: .3rem; }

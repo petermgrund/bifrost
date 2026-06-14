@@ -89,6 +89,7 @@ class IdgenPage extends BifrostElement {
           <tr><td><code>VGRN54_o</code></td><td>original — only when the Gramps copy is edited</td></tr>
           <tr><td><code>VGRN54_c##</code></td><td>crop / derived from the full image (files only)</td></tr>
           <tr><td><code>VGRN54_d##</code></td><td>duplicate of the full image (incl. extra physical prints)</td></tr>
+          <tr><td><code>VGRN54_v##</code></td><td>scan of the verso (back) of a physical print (files only)</td></tr>
           <tr><td><code>VGRN54_a##</code></td><td>AI-edited (files only)</td></tr>
         </table>
         <p class="hint">Verso: base id for the canonical print, <code>_d##</code> for

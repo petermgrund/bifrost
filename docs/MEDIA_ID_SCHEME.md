@@ -16,6 +16,7 @@ plus a uniform **2‑char code** from the same safe alphabet. The category lette
 | `VGRN54_o.jpg` | The **original**, unedited version. Only exists when the Gramps copy is *not* itself the original. | PC files; the physical original if Gramps shows an edited version |
 | `VGRN54_c##.jpg` | A version **cropped / derived** from the full image. | PC files only |
 | `VGRN54_d##.jpg` | A **duplicate** of the full image (same content, different file or print). | PC files; **additional physical prints** |
+| `VGRN54_v##.jpg` | A **scan of the verso** (back side) of a physical print — handwriting, stamps, dates. | PC files only |
 | `VGRN54_a##.jpg` | An **AI‑edited** version (only that it was AI‑edited — the kind of edit is not tracked). | PC files only |
 
 `##` = 2 characters from the safe alphabet, just enough to keep a handful of
@@ -31,8 +32,9 @@ crops/dupes per image distinct.
   original alongside it.
 - **Verso labeling.** A physical photo's back gets the **base id** for the
   canonical print, or `_d##` for each additional physical copy of the same
-  image. Crops (`_c##`) and AI edits (`_a##`) are digital‑only and never appear
-  on a verso.
+  image. Crops (`_c##`), verso *scans* (`_v##`), and AI edits (`_a##`) are
+  digital files and never appear written on a verso — what you write on the
+  back is the base id (or `_d##`); a scan of that back is then filed as `_v##`.
 - **Combos.** A file that is several things at once takes the dominant
   transformation's letter (rare; not worth a combinatorial scheme).
 

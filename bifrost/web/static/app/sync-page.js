@@ -5,16 +5,31 @@ const GROUPS = [
   ['face', 'Faces'], ['place', 'Places'],
 ];
 
+// Same media-id shape the generator and backend enforce.
+const MANUAL_RE = /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{6}$/;
+
 /* One sync panel: preview -> review -> apply. Source + optional fixed body. */
 class SyncPanel extends BifrostElement {
   static properties = {
     label: {}, source: {}, body: { type: Object }, blurb: {}, maintenance: { type: Boolean },
     result: { state: true }, status: { state: true }, canApply: { state: true }, running: { state: true },
+    manualMode: { state: true },
   };
   constructor() {
     super();
     this.body = {}; this.maintenance = false;
     this.result = null; this.status = ''; this.canApply = false; this.running = false;
+    this.manualMode = false;
+  }
+
+  // Read manual id inputs straight from the DOM (avoids per-keystroke re-render).
+  collectManualIds() {
+    const out = {};
+    for (const el of this.renderRoot.querySelectorAll('input.manualid')) {
+      const v = el.value.trim();
+      if (v) out[el.dataset.sid] = v;
+    }
+    return out;
   }
 
   async run(apply) {
@@ -22,7 +37,9 @@ class SyncPanel extends BifrostElement {
     this.status = apply ? 'Applying…' : 'Previewing…';
     if (!apply) this.result = null;
     try {
-      const payload = await post(`/sync/api/${this.source}/${apply ? 'apply' : 'preview'}`, this.body);
+      const body = (apply && this.manualMode)
+        ? { ...this.body, manual_ids: this.collectManualIds() } : this.body;
+      const payload = await post(`/sync/api/${this.source}/${apply ? 'apply' : 'preview'}`, body);
       this.result = payload;
       const counts = (payload.events.find((e) => e.kind === 'summary') || {}).data;
       if (apply) {
@@ -41,6 +58,7 @@ class SyncPanel extends BifrostElement {
   }
 
   render() {
+    const isPreview = this.result && !this.result.error && !this.result.apply;
     return html`<section class="syncpanel ${this.maintenance ? 'maintenance' : ''}">
       <h2>${this.label}</h2>
       ${this.blurb ? html`<p class="hint">${this.blurb}</p>` : nothing}
@@ -49,9 +67,16 @@ class SyncPanel extends BifrostElement {
           @click=${() => this.run(false)}>Preview</button>
         <button class="${this.canApply ? 'primary' : ''}" ?disabled=${!this.canApply || this.running}
           @click=${() => this.run(true)}>Apply</button>
+        ${!this.maintenance ? html`<label class="hint manualtoggle">
+          <input type="checkbox" .checked=${this.manualMode}
+            @change=${(e) => (this.manualMode = e.target.checked)}>
+          Assign my own Gramps IDs</label>` : nothing}
         ${this.status ? html`<span class="hint">${this.status}</span>` : nothing}
       </div>
-      ${this.result ? renderResult(this.result) : nothing}
+      ${this.manualMode && isPreview ? html`<p class="hint">Type a 6-char id (safe
+        alphabet) for any new item; blanks get an auto id. A taken id is rejected on
+        apply and that item is skipped.</p>` : nothing}
+      ${this.result ? renderResult(this.result, this.manualMode && isPreview) : nothing}
     </section>`;
   }
 }
@@ -105,7 +130,17 @@ class ResyncPanel extends BifrostElement {
 }
 customElements.define('resync-panel', ResyncPanel);
 
-function renderResult(payload) {
+function manualCell(e) {
+  return html`<input class="manualid" type="text" maxlength="6" placeholder="auto"
+    data-sid=${e.source_id} spellcheck="false"
+    @input=${(ev) => {
+      const v = ev.target.value.toUpperCase();
+      ev.target.value = v;
+      ev.target.classList.toggle('invalid', !!v && !MANUAL_RE.test(v));
+    }}>`;
+}
+
+function renderResult(payload, manual = false) {
   if (payload.error) return html`<div class="results"><div class="action-failed">${payload.error}</div></div>`;
   const items = payload.events.filter((e) => e.kind === 'item');
   const errors = payload.events.filter((e) => e.kind === 'error');
@@ -118,16 +153,23 @@ function renderResult(payload) {
       // in first-seen order; plain detail column only as fallback
       const colKeys = [...new Set(rows.flatMap((e) => Object.keys(e.data?.cols || {})))];
       const hasDetail = !colKeys.length && rows.some((e) => e.detail);
+      const showManual = manual && rows.some((e) => e.action === 'would_create' && e.source_id);
       return html`<h3>${label} <span class="hint">(${rows.length})</span></h3>
         <table class="results">
           <tr><th>action</th><th>what</th>
+            ${showManual ? html`<th>my id</th>` : nothing}
             ${colKeys.map((k) => html`<th>${k}</th>`)}
             ${hasDetail ? html`<th>detail</th>` : nothing}</tr>
-          ${rows.map((e) => html`<tr>
+          ${rows.map((e) => {
+            const canManual = manual && e.action === 'would_create' && e.source_id;
+            return html`<tr>
             <td class="action-${e.action}">${e.action.replace('_', ' ')}</td>
-            <td>${e.title || e.source_id}${e.gramps_id ? html` <span class="hint">${e.gramps_id}</span>` : nothing}</td>
+            <td>${e.title || e.source_id}${e.gramps_id && !canManual
+              ? html` <span class="hint">${e.gramps_id}</span>` : nothing}</td>
+            ${showManual ? html`<td>${canManual ? manualCell(e) : nothing}</td>` : nothing}
             ${colKeys.map((k) => html`<td class="hint">${e.data?.cols?.[k] ?? ''}</td>`)}
-            ${hasDetail ? html`<td class="hint">${e.detail || ''}</td>` : nothing}</tr>`)}
+            ${hasDetail ? html`<td class="hint">${e.detail || ''}</td>` : nothing}</tr>`;
+          })}
         </table>`;
     })}
     ${errors.length ? html`<h3 class="action-failed">Errors</h3>${errors.map((e) => html`<div class="action-failed">${e.detail}</div>`)}` : nothing}

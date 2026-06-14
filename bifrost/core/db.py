@@ -75,6 +75,18 @@ MIGRATIONS: list[str] = [
         PRIMARY KEY (gramps_handle, asset_id)
     );
     """,
+    # 3 — UI-generated media-id reservations. Codes minted ahead of time in the
+    # ID-generator tab are reserved here so the auto-generator never reuses them;
+    # manual id entry at sync time DOES accept a reserved id. minted_at flips when
+    # the id is actually created in Gramps.
+    """
+    CREATE TABLE reserved_ids (
+        gramps_id  TEXT PRIMARY KEY,
+        created_at TEXT NOT NULL,
+        minted_at  TEXT,
+        note       TEXT
+    );
+    """,
 ]
 
 

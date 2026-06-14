@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 import secrets
 import sqlite3
 from datetime import datetime
@@ -212,6 +213,38 @@ def generate_handle() -> str:
     return "".join(secrets.choice(CHARSET) for _ in range(16))
 
 
+MANUAL_ID_RE = re.compile(rf"^[{CHARSET}]{{6}}$")
+
+
+def validate_manual_ids(
+    manual_ids: dict | None, taken: set[str]
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Split a {source_id: chosen_id} map into (valid, rejected{source_id: reason}).
+
+    A valid id matches the media-id format (6 chars of the safe alphabet), is not
+    already in Gramps, and is unique within the batch. Blank entries are ignored
+    (that asset just gets an auto id). Reserved-but-unminted ids are accepted —
+    `taken` is the set of ids already realized in Gramps, not the reservation pool.
+    """
+    valid: dict[str, str] = {}
+    rejected: dict[str, str] = {}
+    claimed: set[str] = set()
+    for sid, raw in (manual_ids or {}).items():
+        gid = (raw or "").strip()
+        if not gid:
+            continue
+        if not MANUAL_ID_RE.match(gid):
+            rejected[sid] = f"invalid id '{gid}' — need 6 chars from {CHARSET}"
+        elif gid in taken:
+            rejected[sid] = f"id '{gid}' is already in use"
+        elif gid in claimed:
+            rejected[sid] = f"id '{gid}' assigned to more than one asset"
+        else:
+            claimed.add(gid)
+            valid[sid] = gid
+    return valid, rejected
+
+
 # ---------------------------------------------------------------------------
 # The sync generator
 # ---------------------------------------------------------------------------
@@ -222,6 +255,7 @@ async def sync(
     conn: sqlite3.Connection,
     cfg: SyncImmichConfig,
     apply: bool,
+    manual_ids: dict[str, str] | None = None,
 ) -> AsyncIterator[SyncEvent]:
     counts = {"created": 0, "skipped": 0, "faces_linked": 0,
               "dates_updated": 0, "places_linked": 0, "descs_updated": 0,
@@ -253,6 +287,13 @@ async def sync(
 
     synced = await faces_mod.synced_immich_media(gramps)
     existing_ids = await gramps.list_media_gramps_ids()
+    # Manual ids: validate against what's really in Gramps, then keep the auto
+    # generator away from both reserved ids and the chosen manual ids.
+    from . import idgen  # lazy: idgen imports generate_gramps_id from this module
+    taken = set(existing_ids)
+    valid_manual, rejected_manual = validate_manual_ids(manual_ids, taken)
+    existing_ids |= idgen.unminted_reserved(conn)
+    existing_ids |= set(valid_manual.values())
     links = faces_mod.list_links(conn)
     by_immich = {e["immich_person_id"]: e for e in links}
 
@@ -268,12 +309,19 @@ async def sync(
         detail=f"{len(synced)} already synced; {len(places_with_coords)} linkable places",
     )
 
-    # --- New assets → Media ---
+    # --- New assets → Media (manual-id assets first, so auto ids never race them) ---
+    assets.sort(key=lambda a: 0 if a["id"] in valid_manual else 1)
     for asset in assets:
         asset_id = asset["id"]
         filename = asset.get("originalFileName") or f"Immich {asset_id[:8]}"
         if asset_id in synced:
             counts["skipped"] += 1
+            continue
+        if asset_id in rejected_manual:
+            counts["errors"] += 1
+            yield SyncEvent(kind="item", entity="media", action="failed",
+                            source_id=asset_id, title=filename,
+                            detail=rejected_manual[asset_id])
             continue
 
         tags = get_asset_tag_values(asset)
@@ -281,7 +329,7 @@ async def sync(
         if TAG_SYNC_DESCRIPTION in tags:
             desc_text = ((asset.get("exifInfo") or {}).get("description") or "").strip()
         title = desc_text or filename
-        gramps_id = generate_gramps_id(existing_ids)
+        gramps_id = valid_manual.get(asset_id) or generate_gramps_id(existing_ids)
         handle = generate_handle()
         gramps_path = translate_path(asset.get("originalPath", ""), cfg.path_mappings)
         mime = asset.get("originalMimeType") or MIME_FALLBACKS.get(
@@ -334,6 +382,7 @@ async def sync(
                                 source_id=asset_id, title=title, detail=str(exc))
                 continue
             synced[asset_id] = media_obj
+            idgen.mark_minted(conn, gramps_id)  # no-op unless it was a reserved id
             with conn:
                 conn.execute(
                     "INSERT OR REPLACE INTO minted_media"

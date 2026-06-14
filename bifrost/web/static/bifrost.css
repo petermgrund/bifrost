@@ -431,3 +431,24 @@ p.interp { background: var(--surface); border: 1px solid var(--border);
               font-size: .85rem; }
 .eventfacts > div { margin: .1rem 0; }
 .eventfacts .hint { margin-top: .3rem; }
+
+/* ID generator tab */
+.idgrid { display: flex; flex-wrap: wrap; gap: .5rem; margin: .2rem 0 1rem; }
+button.idchip { font-family: 'Space Mono', monospace; font-size: 1.15rem; font-weight: 700;
+                letter-spacing: .05em; padding: .5rem .9rem; border: 1px solid var(--accent);
+                background: var(--accent-soft); color: var(--accent-dark); border-radius: var(--radius);
+                cursor: pointer; }
+button.idchip:hover { background: var(--accent); color: var(--surface); }
+button.idlink { font-family: 'Space Mono', monospace; font-size: .95rem; background: none;
+                border: none; color: var(--text); cursor: pointer; padding: 0; }
+button.idlink:hover { color: var(--accent-dark); text-decoration: underline; }
+details.scheme { margin: 0 0 1rem; }
+details.scheme summary { cursor: pointer; }
+details.scheme table { margin-top: .4rem; }
+details.scheme code { font-family: 'Space Mono', monospace; }
+
+/* manual gramps-id inputs on the sync preview */
+label.manualtoggle { display: inline-flex; align-items: center; gap: .3rem; cursor: pointer; }
+input.manualid { font-family: 'Space Mono', monospace; text-transform: uppercase;
+                 width: 6.5rem; letter-spacing: .04em; }
+input.manualid.invalid { border-color: var(--err); color: var(--err); }

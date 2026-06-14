@@ -31,10 +31,16 @@ async def immich_preview(request: Request):
     return {"run_id": run_id, "apply": False, "events": [e.__dict__ for e in events]}
 
 
+class ImmichBody(BaseModel):
+    # Manual gramps-id assignments for NEW assets: {immich_asset_id: chosen_id}.
+    manual_ids: dict[str, str] = {}
+
+
 @router.post("/api/immich/apply")
-async def immich_apply(request: Request):
+async def immich_apply(request: Request, body: ImmichBody = ImmichBody()):
     st = _state(request)
-    gen = sync_immich.sync(st.gramps, st.immich, st.conn, st.cfg.sync_immich, apply=True)
+    gen = sync_immich.sync(st.gramps, st.immich, st.conn, st.cfg.sync_immich,
+                           apply=True, manual_ids=body.manual_ids)
     run_id, events = await record_run(st.conn, "sync.immich", gen)
     # Media and faces changed — every cached view is stale.
     st.caches.clear()
@@ -44,6 +50,8 @@ async def immich_apply(request: Request):
 class PaperlessBody(BaseModel):
     force_transcriptions: bool = False
     transcriptions_only: bool = False
+    # Manual gramps-id assignments for NEW docs: {paperless_doc_id: chosen_id}.
+    manual_ids: dict[str, str] = {}
 
 
 def _paperless_job(body: PaperlessBody, preview: bool) -> str:
@@ -69,7 +77,7 @@ async def paperless_apply(request: Request, body: PaperlessBody):
     gen = sync_paperless.sync(
         st.paperless, st.gramps, st.conn, st.cfg.sync_paperless,
         apply=True, force_transcriptions=body.force_transcriptions,
-        transcriptions_only=body.transcriptions_only,
+        transcriptions_only=body.transcriptions_only, manual_ids=body.manual_ids,
     )
     run_id, events = await record_run(st.conn, _paperless_job(body, False), gen)
     st.caches.clear()

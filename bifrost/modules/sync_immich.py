@@ -465,7 +465,10 @@ async def sync(
         if media is None:
             continue
         tags = get_asset_tag_values(asset)
-        title = asset.get("originalFileName") or asset_id[:8]
+        # Label the row by the media's current Gramps title (its description),
+        # like the create rows do — the filename is rarely how Peter thinks of it.
+        filename = asset.get("originalFileName") or asset_id[:8]
+        title = (media.get("desc") or "").strip() or filename
         gramps_id = media.get("gramps_id", "?")
 
         # Sync/Date refresh

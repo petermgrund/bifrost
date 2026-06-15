@@ -153,7 +153,9 @@ function renderResult(payload, manual = false) {
       // in first-seen order; plain detail column only as fallback
       const colKeys = [...new Set(rows.flatMap((e) => Object.keys(e.data?.cols || {})))];
       const hasDetail = !colKeys.length && rows.some((e) => e.detail);
-      const showManual = manual && rows.some((e) => e.action === 'would_create' && e.source_id);
+      // Only media/doc rows mint a media id; faces/notes/places never do.
+      const mintsId = entity === 'media' || entity === 'doc';
+      const showManual = manual && mintsId && rows.some((e) => e.action === 'would_create' && e.source_id);
       return html`<h3>${label} <span class="hint">(${rows.length})</span></h3>
         <table class="results">
           <tr><th>action</th><th>what</th>
@@ -161,7 +163,7 @@ function renderResult(payload, manual = false) {
             ${colKeys.map((k) => html`<th>${k}</th>`)}
             ${hasDetail ? html`<th>detail</th>` : nothing}</tr>
           ${rows.map((e) => {
-            const canManual = manual && e.action === 'would_create' && e.source_id;
+            const canManual = showManual && e.action === 'would_create' && e.source_id;
             return html`<tr>
             <td class="action-${e.action}">${e.action.replace('_', ' ')}</td>
             <td>${e.title || e.source_id}${e.gramps_id && !canManual

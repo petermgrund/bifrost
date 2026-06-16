@@ -118,3 +118,8 @@ class PaperlessClient:
         """Overwrite the document's searchable text (content) field in place."""
         await self._request(
             "PATCH", f"/api/documents/{doc_id}/", json={"content": content})
+
+    async def patch_tags(self, doc_id: int, tag_ids: list[int]) -> None:
+        """Set the document's full tag list (pass existing + new to add one)."""
+        await self._request(
+            "PATCH", f"/api/documents/{doc_id}/", json={"tags": tag_ids})

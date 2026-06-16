@@ -148,10 +148,26 @@ async def run(
             continue
 
         _set_ocr(conn, doc_id, gem_cfg.model, len(text))
+        cols = {"current text": f"{cur_chars} chars", "transcribed": f"{len(text)} chars"}
+
+        # Stamp the transcription tag so the Gramps transcription sync turns the
+        # new text into a note — no manual step. Best-effort: OCR already
+        # succeeded, so a tagging hiccup is a note, not a failure.
+        tt = cfg.transcription_tag_id
+        if tt:
+            cur_tags = doc.get("tags") or []
+            if tt in cur_tags:
+                cols["transcription tag"] = "already set"
+            else:
+                try:
+                    await paperless.patch_tags(doc_id, sorted(set(cur_tags) | {tt}))
+                    cols["transcription tag"] = "added"
+                except Exception as exc:  # noqa: BLE001
+                    cols["transcription tag"] = f"add failed: {exc}"
+
         counts["transcribed"] += 1
         yield SyncEvent(kind="item", entity="doc", action="updated",
                         source_id=str(doc_id), gramps_id=None, title=title,
-                        data={"cols": {"current text": f"{cur_chars} chars",
-                                       "transcribed": f"{len(text)} chars"}})
+                        data={"cols": cols})
 
     yield SyncEvent(kind="summary", data=counts)

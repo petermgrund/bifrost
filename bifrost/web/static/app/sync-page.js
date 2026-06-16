@@ -188,7 +188,7 @@ class SyncPage extends BifrostElement {
       <sync-panel source="immich" label="Immich → Gramps"
         blurb="Tagged photos become Gramps media, with dates, places, descriptions and faces."></sync-panel>
       <sync-panel source="ocr" label="Gemini OCR → Paperless"
-        blurb="Documents you tag are transcribed by Gemini and written into the same Paperless document's text (in place), then flow to Gramps via the transcription sync. Preview is free; Apply calls Gemini."></sync-panel>
+        blurb="Documents you tag are transcribed by Gemini and written into the same Paperless document's text (in place) and tagged for transcription, so the next Gramps sync turns it into a note automatically. Preview is free; Apply calls Gemini."></sync-panel>
       <resync-panel></resync-panel>
       <sync-panel source="paperless" label="Rewrite all transcription notes" maintenance
         blurb="Re-writes every transcription note from current Paperless content, ignoring change hashes."

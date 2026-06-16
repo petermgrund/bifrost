@@ -52,8 +52,13 @@ class GeminiClient:
                                 "data": base64.b64encode(data).decode()}},
             ]}],
         }
+        # Generous output cap so a long transcription is never silently cut;
+        # with thinking on, the budget is shared, so this must comfortably
+        # exceed thinking + the document's text.
+        gen_cfg: dict = {"maxOutputTokens": 65536}
         if thinking_budget is not None:
-            body["generationConfig"] = {"thinkingConfig": {"thinkingBudget": thinking_budget}}
+            gen_cfg["thinkingConfig"] = {"thinkingBudget": thinking_budget}
+        body["generationConfig"] = gen_cfg
         resp = await self._client.post(
             f"{API_BASE}/models/{self._model}:generateContent",
             params={"key": self._key}, json=body)
@@ -64,5 +69,12 @@ class GeminiClient:
         if not cands:
             fb = payload.get("promptFeedback") or {}
             raise GeminiError(f"no candidates returned ({fb or 'empty response'})")
-        parts = ((cands[0].get("content") or {}).get("parts") or [])
-        return "".join(p.get("text", "") for p in parts).strip()
+        cand = cands[0]
+        parts = ((cand.get("content") or {}).get("parts") or [])
+        text = "".join(p.get("text", "") for p in parts).strip()
+        reason = cand.get("finishReason")
+        if reason == "MAX_TOKENS":
+            raise GeminiError("transcription truncated at MAX_TOKENS — raise maxOutputTokens")
+        if not text:
+            raise GeminiError(f"empty response (finishReason={reason or 'unknown'})")
+        return text

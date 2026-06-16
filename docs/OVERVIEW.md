@@ -1,257 +1,213 @@
 # Bifrost — Project Overview
 
-A complete, plain-language description of what Bifrost is, how it fits into the
-surrounding self-hosted stack, how it is built, and why it exists. For the
-architecture rationale and phased build history see `DESIGN.md`; for the media
-copy/label convention see `MEDIA_ID_SCHEME.md`.
+A complete description of what Bifrost is, the services it connects to your
+Gramps tree, how it works, and why you'd use it. This is written for someone who
+knows **Gramps** but not the other tools involved — each is introduced below.
+For deeper build notes see `DESIGN.md`; for the photo labelling convention see
+`MEDIA_ID_SCHEME.md`.
 
 ---
 
 ## 1. What Bifrost is, in one paragraph
 
-Bifrost is a single self-hosted web application that curates a **Gramps Web**
-genealogy database by pulling together everything that used to be a pile of
-separate scripts and services. It connects a photo manager (**Immich**), a
-document archive (**Paperless-ngx**), a boundary renderer (**osm-to-gramps**),
-and two LLMs (**Anthropic Claude** for citations, **Google Gemini** for OCR),
-and gives one consistent "preview, then apply" interface for getting people,
-photos, documents, places, citations, transcriptions, and IDs into Gramps
-correctly. It runs as one Docker container on a Raspberry Pi ("eir"), reachable
-only over the Tailscale tailnet at `http://100.89.34.77:8800/`.
+Bifrost is a companion web app for your **Gramps Web** family tree. On its own,
+Gramps holds people, families, events, places, sources, and media — but the
+*material* for those records usually lives in other places: your photos, your
+scanned documents, maps, and so on. Bifrost connects those other services to
+Gramps and lets you bring their content in cleanly: photos become media with
+faces and dates, scanned records become media with transcriptions and citations,
+places get real map boundaries, and so on. Everything works the same way —
+**preview what would change, then apply it** — so you always see the result
+before it touches your tree. It runs as a single small web app you open in a
+browser.
 
 ---
 
-## 2. Why it exists (the problem it solves)
+## 2. The services Bifrost connects (introduced)
 
-Before Bifrost, the same family tree was fed by a handful of independent tools —
-`immich-to-gramps`, `paper-to-gramps`, a face-linker GUI, `osm-to-gramps`, and a
-"control-center" job runner — each with its own state files (`person_map.yaml`,
-two `minted.csv`s, `versions.json`, `transcriptions.json`), its own UI or no UI,
-and its own assumptions. That created three recurring pains:
+You only need to know Gramps to use Bifrost; here's what the other pieces are and
+what each one contributes.
 
-- **Dual-writer state.** More than one tool could write the same state, risking
-  drift and duplicate work.
-- **No single review surface.** Each tool ran blind or in its own window; there
-  was no one place to see "what would change" before it changed.
-- **Manual gluing.** Getting a photo or document fully into Gramps — media
-  object, faces, place link, date, citation, transcription — meant running
-  several tools by hand in the right order.
+- **Gramps Web** — the web/server edition of Gramps: your family tree, in a
+  browser. This is the **destination** for everything Bifrost does.
+- **Immich** — a self-hosted photo & video library (think of a private Google
+  Photos). It organizes your images and can detect and group faces. Bifrost
+  turns tagged Immich photos into Gramps media, and turns Immich's face groups
+  into links to the right Gramps people.
+- **Paperless-ngx** — a self-hosted document archive. You scan or upload
+  documents (vital records, letters, certificates, deeds), and it stores, tags,
+  and text-searches them. Bifrost turns tagged Paperless documents into Gramps
+  media, brings their text in as transcription notes, and keeps them current.
+- **OpenStreetMap boundaries** — a small rendering service fetches the real
+  geographic *outline* of a place (a county, a parish, even a single building)
+  from OpenStreetMap. Bifrost uses it so a place's minimap in Gramps shows its
+  actual shape instead of just a single pin.
+- **Anthropic Claude** — an AI language model. Bifrost uses it to draft properly
+  formatted genealogical source citations (and to write a short weekly summary of
+  your activity).
+- **Google Gemini** — an AI model that can *read images*. Bifrost uses it to
+  transcribe handwriting, old print, and photographed records that ordinary OCR
+  can't make sense of.
 
-Bifrost replaces that with **one app, one mental model, one source of truth**.
-Its guiding principle is *preview everything, apply deliberately*: every
-operation can be run read-only first to show exactly what it would do, then
-applied. State that must be authoritative lives in the **target systems**
-(Gramps attributes, Paperless custom fields); Bifrost's own SQLite database is a
-rebuildable cache and audit log.
-
----
-
-## 3. The systems it integrates
-
-| System | Role | How Bifrost reaches it |
-|---|---|---|
-| **Gramps Web** | The genealogy database — the destination for everything. | REST API (`/api/...`), token auth with 429 retry + 401 re-auth; `follow_redirects` (POST `/objects` 308-redirects). |
-| **Immich** | Photo library; people/face clusters; EXIF dates & GPS. | REST API, `x-api-key`. |
-| **Paperless-ngx** | Document archive (records, letters, certificates) with OCR text, tags, custom fields, and 3.0 document versioning. | REST API, Token auth; `content` field is writable; custom fields carry the Gramps link. |
-| **osm-to-gramps** | Renders OpenStreetMap admin boundaries / building footprints to GeoJSON. | HTTP service at `:82`; Bifrost orchestrates, it renders. |
-| **Anthropic Claude** | Composes Evidence-Explained citations and the weekly Activity narrative. | Messages API; model `claude-opus-4-8`. |
-| **Google Gemini** | LLM OCR — transcribes hard documents (handwriting, old print, photos) far better than Tesseract. | Generative Language API; model `gemini-3-flash-preview`. |
-
-Everything binds to the Tailscale IP + loopback only — never `eth0` — matching
-the host's "private by network discipline" posture.
+You don't have to use all of them — each surface in Bifrost simply lights up the
+services it needs.
 
 ---
 
-## 4. Architecture
+## 3. The core idea: preview, then apply
 
-Three clean layers, plus a thin CLI:
+Every operation in Bifrost can be run in two modes from the same screen:
 
-- **`bifrost/core/clients/`** — one async HTTP client per external service
-  (`gramps`, `immich`, `paperless`, `anthropic`, `gemini`). Each wraps auth and
-  the service's quirks; methods are grown as modules need them.
-- **`bifrost/modules/`** — the domain logic. Each module is an **async
-  generator** that yields typed `SyncEvent`s. The same generator runs in preview
-  (`apply=False`, emitting `would_create`/`would_update`) or apply
-  (`apply=True`). Modules: `faces`, `sync_immich`, `sync_paperless`, `boundaries`,
-  `citations`, `activity`, `idgen`, `ocr`, plus `import_legacy`.
-- **`bifrost/web/`** — FastAPI app (`app.py`) holding the clients, the SQLite
-  connection, config, and a cache dict on `app.state`. One router per surface
-  under `routes/`; Jinja templates render a shell; the real UI is **Lit web
-  components** (one `*-page.js` per surface) under `static/app/`.
+- **Preview** shows exactly what *would* happen — which media would be created,
+  which dates would change, which documents would be transcribed — and changes
+  nothing.
+- **Apply** performs it.
 
-**Frontend stack:** Lit 3 web components rendering into **light DOM** (so one
-global stylesheet themes everything), a vendored Lit bundle + self-hosted fonts
-(Space Grotesk headings / Space Mono body), an importmap, and **no build step**.
-Visual language is Scandinavian-minimal with a light/dark theme. SVG icons are
-used instead of glyphs for status (shape + color, for legibility).
+This means you're never surprised: you review a clear, itemized list, and only
+then commit. Each run is also recorded, so there's a history of what was done.
 
-**The event model.** `SyncEvent(kind, entity, action, source_id, gramps_id,
-title, detail, data)` is the universal unit. `kind` ∈ started/item/summary/error;
-`action` ∈ created/updated/skipped/failed and the `would_*` preview variants;
-`data.cols` is a dict that the frontend renders as per-row table columns. Every
-run is recorded to the `runs` / `run_events` tables for the audit trail.
+A second design rule keeps your data safe: **Bifrost remembers what it's already
+done by writing a marker into Gramps and the source systems themselves** — for
+example, a Gramps media object records which Immich photo or Paperless document
+it came from, and a Paperless document records its Gramps id. Because the
+"memory" lives in those systems, Bifrost's own small database is just a cache and
+an audit log that can be rebuilt if needed.
 
 ---
 
-## 5. The surfaces (what each tab does)
+## 4. The surfaces (what each tab does)
 
-Reachable from the top nav at `:8800`:
-
-- **Inbox (`/`)** — the home dashboard. Pending-work cards: faces to link,
-  Paperless documents not yet synced, recent runs.
-- **Faces (`/faces`)** — links Immich face clusters to Gramps people. Uses a
-  per-(person, photo) padding model (a slider, default 15%) instead of
-  operation buttons; the photo grid/detail draws rectangles on the image; one
-  "Apply pending" bulk action. `person_links` (SQLite) is the source of truth,
-  with a write-through `person_map.yaml` shim kept only until the legacy
-  face-linker is retired.
-- **Sync (`/sync`)** — the import engines, each a preview→apply panel:
-  - *Paperless → Gramps*: tagged documents become Gramps media; a four-phase
-    pipeline keeps media, versions, titles/dates, and transcriptions current.
-  - *Immich → Gramps*: tagged photos become Gramps media with dates, GPS-based
-    place links (closest tagged place ≤ 250 m), descriptions, and faces.
-  - *Gemini OCR → Paperless*: documents you tag are transcribed by Gemini and
-    written into the same Paperless document's text **in place**, then
-    auto-tagged for transcription so the text flows on to a Gramps note.
-  - A single-object transcription resync, and a "rewrite all transcription
-    notes" maintenance pass.
-  - On the preview, an optional **"Assign my own Gramps IDs"** checkbox lets you
-    hand-pick the media id for new items.
-- **Places (`/places`)** — OSM boundary management. Lists places, lets you add a
-  relation/way URL inline, and generates the GeoJSON boundary (single or bulk)
-  that the Gramps place-minimap overlay draws.
-- **Citations (`/citations`)** — the Evidence-Explained citation generator.
-  Start from a media object **or** cycle through uncited events; describe the
-  record (freeform "dump" or a structured wizard); Claude composes the EE layers
-  to the house style; review/edit; save creates the Repository→Source→Note→
-  Citation chain and links it to the media and/or event.
-- **Activity (`/activity`)** — an interactive productivity dashboard built from
-  the Gramps transaction log: a stacked weekly chart of objects added/edited/
-  deleted, a "This week" analytics view (with an optional Claude-written
-  narrative), an event-citation-coverage chart, and per-class "Database size"
-  sparklines.
-- **IDs (`/idgen`)** — mints random-6 media ids ahead of time, **reserves** them
-  (the sync auto-generator never reuses a reserved id, but you can type one in as
-  a manual id), and tracks which were eventually minted. Supports the photo
-  copy/verso naming scheme.
+- **Inbox** — the home dashboard: how much work is waiting (faces to link,
+  documents not yet brought in) and a list of recent runs.
+- **Faces** — connects the face groups Immich has detected to the matching people
+  in your Gramps tree. You confirm the link once; from then on those faces are
+  marked in your photos. A simple slider controls how much padding each face box
+  gets, and one button applies all pending links.
+- **Sync** — the import engines, each with the preview→apply flow:
+  - *Paperless → Gramps*: tagged documents become Gramps media; their versions,
+    titles, dates, and transcription text are kept up to date.
+  - *Immich → Gramps*: tagged photos become Gramps media, complete with dates,
+    a place link based on where the photo was taken, descriptions, and the faces
+    of people you've linked.
+  - *Gemini OCR → Paperless*: documents you tag are transcribed by Gemini and the
+    text is written back into the document, then flows on into a Gramps note.
+  - Plus small tools to re-run a single document's transcription or rebuild all
+    transcription notes.
+  - On the preview you can optionally hand-pick the id a new media object will
+    get.
+- **Places** — gives your places real map boundaries. Paste an OpenStreetMap link
+  for a place (a county, parish, or building) and Bifrost fetches its outline so
+  the place's minimap in Gramps shows the actual shape.
+- **Citations** — an assistant for building genealogical source citations. Start
+  from a media object, or step through events that have no citation yet; describe
+  the record (in free text or a guided form); Claude drafts the citation in a
+  consistent house style; you review and edit; saving creates the source,
+  repository, note, and citation and links them up — all following Gramps'
+  conventions.
+- **Activity** — a dashboard of your research progress, built from Gramps' own
+  change history: how many people/events/places/etc. you added, edited, or
+  deleted each week; a "this week" view with an optional AI-written summary; how
+  citation coverage of your events is trending; and how the size of your database
+  has grown over time.
+- **IDs** — generates and reserves media id codes ahead of time, so you can label
+  physical photos or name files before importing them, and later type those exact
+  ids in when the media is created.
 
 ---
 
-## 6. Data model (SQLite)
+## 5. How material flows in (two examples)
 
-The database (append-only migrations in `core/db.py`, currently at version 4) is
-a rebuildable cache + audit log — never the authoritative copy of anything that
-also lives in a target system.
+**A photograph.** You mark a photo in Immich for syncing (and, if you like, for
+date or location). In Bifrost's Sync screen you Preview, see "would create 1
+media," and Apply. The photo becomes a Gramps media object with its date, a link
+to the closest place it was taken, and rectangles around the faces of the people
+you've linked — all in one step.
 
-| Table | Purpose |
-|---|---|
-| `person_links` | Gramps person ↔ Immich face-cluster links (faces source of truth). |
-| `face_pads` | Per-(person, photo) face bounding-box padding. |
-| `minted_media` | Audit of every media id created, with its source system/id. |
-| `doc_versions` | Paperless document checksums → change/version detection. |
-| `transcription_state` | Transcription/translation notes tracked by content hash. |
-| `reserved_ids` | UI-generated media ids reserved ahead of minting. |
-| `ocr_state` | Documents already Gemini-OCR'd (so a run doesn't re-spend). |
-| `runs` / `run_events` | Full history of every preview/apply run and its events. |
-
-**Idempotency keys live in the target systems**, not here: Gramps media carry an
-"Immich ID" / "Paperless ID" attribute; Paperless documents carry the Gramps id
-in a custom field. That makes the SQLite cache disposable and reconstructable.
+**A handwritten record.** You upload a scan to Paperless and tag it. Ordinary OCR
+can't read the handwriting, so you also tag it for Gemini OCR; Bifrost has Gemini
+transcribe it and writes the text back into the document. On the next Paperless
+sync, that document becomes a Gramps media object and its transcription becomes a
+note attached to it. Then, from the Citations screen, you build a proper source
+citation for it.
 
 ---
 
-## 7. Key conventions Bifrost enforces
+## 6. Conventions Bifrost keeps
 
-- **Media ID convention.** Bare random 6-character ids (safe alphabet, no
-  I/O/L/0/1) are used **exclusively** for media objects — for deletion-collision
-  safety and so a physical photo's verso can be labeled with six characters.
-  Everything else (Citations, Sources, Repositories, Notes) mints sequentially in
-  the tree's native pattern (C0001, S0001, …).
-- **Copy / verso naming scheme.** Files and physical labels are named off the
-  base media id with a category letter + 2-char code: `_o` original, `_c##` crop,
-  `_d##` duplicate, `_v##` verso scan, `_a##` AI-edited. (See
-  `MEDIA_ID_SCHEME.md`.)
-- **Citation house style.** Composition follows Peter's US + Swedish style guides
-  (data files appended to the LLM system prompt): two layers only (First/Short
-  Reference Note), never a Source List Entry, citation date always blank,
-  bracketed English glosses on foreign series names in the First Reference Note
-  only, GPS-quality → Gramps confidence 0–4, `[NEEDED: …]` placeholders.
-- **Transcriptions.** OCR text becomes a Gramps "Transcription" note; an English
-  translation, when present, is separated by the delimiter
-  `======== ENGLISH TRANSLATION ========`.
+- **Media ids.** Media objects get a short random 6-character id (from an
+  unambiguous alphabet) so the code is safe to handwrite on the back of a
+  physical photo. Other new objects (citations, sources, repositories, notes)
+  are numbered in Gramps' normal sequential style (C0001, S0001, …).
+- **Photo copies & versos.** Copies, crops, and scans of a photo's back are named
+  off that base id with a short suffix (`_o` original, `_c##` crop, `_d##`
+  duplicate, `_v##` verso scan, `_a##` AI-edited). See `MEDIA_ID_SCHEME.md`.
+- **Citation style.** Citations follow a fixed house style (two reference-note
+  layers, no source-list entry, blank citation date, bracketed English glosses on
+  foreign-language record names, a confidence rating, and `[NEEDED: …]` markers
+  for anything missing).
+- **Transcriptions & translations.** A document's text becomes a "Transcription"
+  note; when an English translation is included it's separated by a clear
+  delimiter line.
 
 ---
 
-## 8. Notable integration mechanics
+## 7. Under the hood
 
-- **Paperless document versioning (3.0).** A document keeps its id and serves the
-  *selected* version's file, so its checksum changes when you switch versions.
-  Bifrost's version-sync detects that and repoints the Gramps media path, so
-  Gramps renders the selected version. A cron wrapper (`versions_sync.sh`, every
-  10 min) runs the versions-only pass unattended.
-- **Gemini OCR in place.** Because Paperless's `content` field is API-writable,
-  Bifrost transcribes a document and writes the text straight back into the same
-  document (same id, no new document, no broken links), then stamps the
-  transcription tag so the note flows to Gramps on the next sync. Preview is
-  free; only apply calls Gemini.
-- **Boundary overlay.** `osm-to-gramps` writes a GeoJSON sidecar per place; the
-  same directory is mounted read-only into Gramps Web, whose place minimap draws
-  the polygon via an injected `config.js`/`overlay.js`.
-- **Gramps API quirks handled:** POST `/objects` 308-redirects (need
-  `follow_redirects`); DELETE returns HTTP 500 but succeeds (a post-delete index
-  error); token endpoint rate-limits (429 retry). After a delete, the search
-  index is reconciled.
+Bifrost is a single web application (FastAPI) with a small browser UI (Lit web
+components, one global stylesheet, no build step). Internally it has three tidy
+layers: a **client** for each external service (Gramps, Immich, Paperless, the
+boundary renderer, Claude, Gemini); **domain modules** that do the actual work
+(faces, photo sync, document sync, boundaries, citations, OCR, activity, ids);
+and the **web layer** that exposes each as a screen. Every module produces a
+stream of typed events, and the very same code runs a preview or a real apply by
+toggling one flag — which is why the two always agree.
 
----
+A small local database keeps a few working tables (face links, document
+versions, transcription state, reserved ids, OCR history, and a full run log).
+None of it is the authoritative copy of anything — the authoritative markers live
+in Gramps and the source systems — so it can be rebuilt.
 
-## 9. Migration story (strangler fig)
+A few integration details worth knowing:
 
-Bifrost is replacing the legacy tools one module at a time, leaving each legacy
-tool untouched until its replacement is validated against it (a "golden-master"
-gate: legacy `--dry-run` output must match Bifrost's preview on the same live
-data). Phases: 0 foundation → 1 faces → 2 Immich sync → 3 Paperless +
-transcriptions → 4 boundaries + citations → 5 retire the control-center. All
-surfaces are live; the remaining cutover steps (disabling the systemd
-face-linker, removing legacy jobs and the `person_map.yaml` shim, retiring
-control-center) are deliberately held until Peter validates them, to avoid
-dual-writer state in the meantime.
+- **Document versions.** Paperless lets a document have multiple versions and
+  serve whichever you select. Bifrost notices when the selected version changes
+  and repoints the Gramps media to it, so Gramps always shows the version you
+  picked. A small scheduled job keeps this current automatically.
+- **In-place OCR.** Gemini's transcription is written straight back into the same
+  Paperless document (same document, no duplicate), so it shows up in Paperless
+  search and flows on to a Gramps note with no extra step.
+- **Map boundaries.** The boundary outline is rendered to a small geometry file
+  that Gramps reads, so the place minimap draws the polygon.
 
 ---
 
-## 10. Deployment & operations
+## 8. Running it
 
-- **Runtime:** one Docker container (`bifrost`), built from the repo, port 8800
-  bound to the tailnet IP + loopback only.
-- **Config:** a single `config.yaml` at the repo root (mode 600, gitignored)
-  holds every credential and setting — Gramps/Immich/Paperless/Anthropic/Gemini
-  keys, sync tags, Paperless custom-field ids, the OCR tag, place service URL.
-  A redacted `config.example.yaml` is committed. **Config is read at startup, so
-  any change needs `docker compose restart`.**
-- **Mounts:** `config.yaml` (ro), `./data` (the SQLite db), the GeoJSON
-  boundaries dir (ro), and the legacy `person_map.yaml` (the Phase-1 shim).
-- **Scheduled jobs (host cron):** `versions_sync.sh` every 10 min to propagate
-  selected Paperless versions into Gramps.
-- **CLI:** `bifrost doctor` (connectivity/auth check against all services) and
-  `bifrost import-legacy` (load legacy state files into SQLite).
-- **Repo:** `github.com/petermgrund/bifrost`.
+- It runs as one container you open in a browser, reachable only over the
+  private network — it is not exposed to the public internet.
+- All settings and service credentials live in one config file (which keys to use
+  for Gramps, Immich, Paperless, Claude, Gemini; which tags to watch; the place
+  service address). The file is read at startup, so a change takes effect after a
+  restart.
+- A scheduled job runs periodically to keep selected document versions in sync.
+- A built-in `doctor` check verifies it can reach and authenticate to every
+  connected service.
 
 ---
 
-## 11. Why it is used (the payoff)
+## 9. Why use it
 
-Bifrost turns a fragile, multi-tool, manual process into a single reviewable
-workflow:
+- **One place** to review and approve every change before it touches your tree.
+- **Better records with less effort:** AI reads documents ordinary OCR can't; AI
+  drafts citations in a consistent style; photos arrive with faces, dates, and
+  places already attached; places show real map boundaries — each as a simple
+  preview→apply step.
+- **Safe by design:** it never overwrites — a clash is flagged and skipped, not
+  clobbered; mistakes are easy to see; and because its memory lives in Gramps and
+  the source systems, nothing important depends on Bifrost's own database.
+- **One consistent experience** instead of juggling several separate tools.
 
-- **One place** to see and approve every change before it touches the tree.
-- **Better data, less effort:** Gemini reads documents Tesseract can't; Claude
-  drafts house-style citations; GPS auto-links places; faces link from Immich;
-  boundaries render on place maps — each as a preview→apply step.
-- **Safe by construction:** idempotency keys in the target systems, a disposable
-  SQLite cache, a full run audit log, honest error reporting, and a no-overwrite
-  stance (a taken id is skipped, not clobbered).
-- **One coherent UI** with a single mental model, consistent preview/apply
-  semantics, and an accessibility-minded design.
-
-It is the **curation half** of a longer-term goal — a unified ancestry
-experience combining Immich, Paperless, and Gramps — and its core client library
-is intended to feed the future presentation half as well.
+In short, Bifrost is the place you *curate* your family history: it gathers the
+photos, documents, faces, places, transcriptions, and citations from the services
+where they live and gets them into Gramps correctly, with you reviewing every
+step.

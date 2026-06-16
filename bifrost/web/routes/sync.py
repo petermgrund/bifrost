@@ -50,12 +50,18 @@ async def immich_apply(request: Request, body: ImmichBody = ImmichBody()):
 class PaperlessBody(BaseModel):
     force_transcriptions: bool = False
     transcriptions_only: bool = False
+    versions_only: bool = False
     # Manual gramps-id assignments for NEW docs: {paperless_doc_id: chosen_id}.
     manual_ids: dict[str, str] = {}
 
 
 def _paperless_job(body: PaperlessBody, preview: bool) -> str:
-    name = "sync.paperless.transcriptions" if body.transcriptions_only else "sync.paperless"
+    if body.transcriptions_only:
+        name = "sync.paperless.transcriptions"
+    elif body.versions_only:
+        name = "sync.paperless.versions"
+    else:
+        name = "sync.paperless"
     return f"{name}.preview" if preview else name
 
 
@@ -66,6 +72,7 @@ async def paperless_preview(request: Request, body: PaperlessBody):
         st.paperless, st.gramps, st.conn, st.cfg.sync_paperless,
         apply=False, force_transcriptions=body.force_transcriptions,
         transcriptions_only=body.transcriptions_only,
+        versions_only=body.versions_only,
     )
     run_id, events = await record_run(st.conn, _paperless_job(body, True), gen)
     return {"run_id": run_id, "apply": False, "events": [e.__dict__ for e in events]}
@@ -78,6 +85,7 @@ async def paperless_apply(request: Request, body: PaperlessBody):
         st.paperless, st.gramps, st.conn, st.cfg.sync_paperless,
         apply=True, force_transcriptions=body.force_transcriptions,
         transcriptions_only=body.transcriptions_only, manual_ids=body.manual_ids,
+        versions_only=body.versions_only,
     )
     run_id, events = await record_run(st.conn, _paperless_job(body, False), gen)
     st.caches.clear()

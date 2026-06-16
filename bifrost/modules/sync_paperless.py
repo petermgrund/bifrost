@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import mimetypes
 import sqlite3
 from datetime import datetime
 from typing import AsyncIterator
@@ -254,7 +255,11 @@ async def sync(
     transcriptions_only: bool = False,
     single_doc_id: int | None = None,
     manual_ids: dict[str, str] | None = None,
+    versions_only: bool = False,
 ) -> AsyncIterator[SyncEvent]:
+    # versions_only: run ONLY phase 2 (repoint media to the selected Paperless
+    # version). No create / title / date / transcription work — safe for an
+    # unattended scheduled run.
     counts = {"created": 0, "skipped": 0, "versions_updated": 0, "baselined": 0,
               "titles_updated": 0, "dates_updated": 0,
               "tx_created": 0, "tx_updated": 0, "tx_skipped": 0, "errors": 0}
@@ -321,7 +326,7 @@ async def sync(
 
     # ============ Phase 1: media sync (manual-id docs first) ============
     documents.sort(key=lambda d: 0 if str(d["id"]) in valid_manual else 1)
-    for doc in documents:
+    for doc in (documents if not versions_only else []):
         doc_id = doc["id"]
         title = doc.get("title", f"Untitled (Paperless #{doc_id})")
         if _doc_gramps_id(doc, cfg.gramps_id_field_id):
@@ -450,7 +455,10 @@ async def sync(
 
         # Version changed
         new_path = f"paperless/{metadata['media_filename']}"
-        new_mime = doc.get("mime_type", "application/octet-stream")
+        # mime follows the actual (selected-version) file, not the root doc's
+        # original mime — versions can be a different format (e.g. png vs jpg).
+        guessed, _ = mimetypes.guess_type(metadata["media_filename"])
+        new_mime = guessed or doc.get("mime_type", "application/octet-stream")
         media = await gramps.get_media_by_gramps_id(gramps_id)
         if not media:
             counts["errors"] += 1
@@ -498,13 +506,13 @@ async def sync(
     # ============ Phase 3: date/title sync ============
     # (q_options / m_options were resolved up front, before phase 1)
     skip_tag_handle = None
-    if documents:
+    if documents and not versions_only:
         try:
             skip_tag_handle = await gramps.get_tag_handle(SKIP_TITLE_SYNC_TAG)
         except Exception:  # noqa: BLE001
             skip_tag_handle = None
 
-    for doc in documents:
+    for doc in (documents if not versions_only else []):
         doc_id = doc["id"]
         title = doc.get("title", f"Untitled (Paperless #{doc_id})")
         gramps_id = _doc_gramps_id(doc, cfg.gramps_id_field_id)
@@ -569,7 +577,7 @@ async def sync(
                             data={"cols": mcols})
 
     # ============ Phase 4: transcriptions ============
-    if cfg.transcription_tag_id:
+    if cfg.transcription_tag_id and not versions_only:
         tx_docs = await paperless.list_documents_by_tag(cfg.transcription_tag_id)
         if single_doc_id is not None:
             tx_docs = [d for d in tx_docs if d["id"] == single_doc_id]

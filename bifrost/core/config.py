@@ -62,6 +62,8 @@ class SyncPaperlessConfig:
     date_meaning_field_id: int | None = None
     # Paperless tag id marking documents with a transcription to sync.
     transcription_tag_id: int | None = None
+    # Paperless tag NAME marking documents to (re-)OCR with Gemini in place.
+    ocr_tag: str = ""
 
 
 @dataclass(frozen=True)
@@ -77,6 +79,14 @@ class PlacesConfig:
 class AnthropicConfig:
     api_key: str = ""
     model: str = "claude-opus-4-8"
+
+
+@dataclass(frozen=True)
+class GeminiConfig:
+    api_key: str = ""
+    model: str = "gemini-3-flash-preview"
+    # Optional reasoning budget for thinking-capable models (None = default).
+    thinking_budget: int | None = None
 
 
 @dataclass(frozen=True)
@@ -98,6 +108,7 @@ class Config:
     sync_immich: SyncImmichConfig = SyncImmichConfig()
     sync_paperless: SyncPaperlessConfig = SyncPaperlessConfig()
     anthropic: AnthropicConfig = AnthropicConfig()
+    gemini: GeminiConfig = GeminiConfig()
     places: PlacesConfig = PlacesConfig()
 
 
@@ -141,7 +152,9 @@ def load_config(path: str | Path | None = None) -> Config:
         date_qualifier_field_id=sp_raw.get("date_qualifier_field_id"),
         date_meaning_field_id=sp_raw.get("date_meaning_field_id"),
         transcription_tag_id=sp_raw.get("transcription_tag_id"),
+        ocr_tag=sp_raw.get("ocr_tag") or "",
     )
+    gem_raw = raw.get("gemini") or {}
     return Config(
         gramps=GrampsConfig(**section("gramps", ["base_url", "username", "password"])),
         immich=ImmichConfig(**section("immich", ["base_url", "api_key"])),
@@ -154,6 +167,11 @@ def load_config(path: str | Path | None = None) -> Config:
         anthropic=AnthropicConfig(
             api_key=(raw.get("anthropic") or {}).get("api_key") or "",
             model=(raw.get("anthropic") or {}).get("model") or "claude-opus-4-8",
+        ),
+        gemini=GeminiConfig(
+            api_key=gem_raw.get("api_key") or "",
+            model=gem_raw.get("model") or "gemini-3-flash-preview",
+            thinking_budget=gem_raw.get("thinking_budget"),
         ),
         places=PlacesConfig(
             osm_service_url=((raw.get("places") or {}).get("osm_service_url") or "").rstrip("/"),

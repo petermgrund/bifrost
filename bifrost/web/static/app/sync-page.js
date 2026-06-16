@@ -67,7 +67,7 @@ class SyncPanel extends BifrostElement {
           @click=${() => this.run(false)}>Preview</button>
         <button class="${this.canApply ? 'primary' : ''}" ?disabled=${!this.canApply || this.running}
           @click=${() => this.run(true)}>Apply</button>
-        ${!this.maintenance ? html`<label class="hint manualtoggle">
+        ${!this.maintenance && this.source !== 'ocr' ? html`<label class="hint manualtoggle">
           <input type="checkbox" .checked=${this.manualMode}
             @change=${(e) => (this.manualMode = e.target.checked)}>
           Assign my own Gramps IDs</label>` : nothing}
@@ -187,6 +187,8 @@ class SyncPage extends BifrostElement {
         blurb="Tagged documents become Gramps media; versions, titles, dates and transcriptions stay current."></sync-panel>
       <sync-panel source="immich" label="Immich → Gramps"
         blurb="Tagged photos become Gramps media, with dates, places, descriptions and faces."></sync-panel>
+      <sync-panel source="ocr" label="Gemini OCR → Paperless"
+        blurb="Documents you tag are transcribed by Gemini and written into the same Paperless document's text (in place), then flow to Gramps via the transcription sync. Preview is free; Apply calls Gemini."></sync-panel>
       <resync-panel></resync-panel>
       <sync-panel source="paperless" label="Rewrite all transcription notes" maintenance
         blurb="Re-writes every transcription note from current Paperless content, ignoring change hashes."

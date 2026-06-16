@@ -1,0 +1,157 @@
+"""Gemini OCR — transcribe a Paperless document in place.
+
+Tag a document with the configured OCR tag; this downloads its original file,
+sends it to Gemini for a faithful transcription, and writes the text straight
+into the SAME Paperless document's `content` field. Same document id, so it
+shows in Paperless search and flows to Gramps via the existing transcription
+sync — no new documents, no broken links.
+
+Preview is free (it only lists what would run); the Gemini call — and the
+spend — happens only on apply. The ocr_state table stops a run from
+re-transcribing (and re-paying) docs already done, unless force.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+from datetime import datetime
+from typing import AsyncIterator
+
+from ..core.clients import GeminiClient, GeminiError, PaperlessClient
+from ..core.config import GeminiConfig, SyncPaperlessConfig
+from ..core.events import SyncEvent
+
+OCR_PROMPT = """You are transcribing a historical or genealogical document \
+image (it may be handwritten, old printed type, or a photograph of a record).
+
+Transcribe ALL text exactly as it appears. Preserve the original spelling, \
+capitalization, punctuation, diacritics, line breaks, and LANGUAGE — do not \
+translate or modernize. Include both handwritten and printed text. For a \
+genuinely illegible word write [illegible]; for an uncertain reading write the \
+best guess followed by a question mark in brackets, e.g. Andersson[?].
+
+Output ONLY the transcription — no preamble, no commentary, no markdown."""
+
+# Gemini accepts these inline; anything else we send as-is and let it try.
+_OK_MIME = {"image/jpeg", "image/png", "image/webp", "image/heic", "image/heif",
+            "application/pdf"}
+
+
+def _ocr_done(conn: sqlite3.Connection, doc_id: int) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM ocr_state WHERE paperless_id = ?", (doc_id,)).fetchone() is not None
+
+
+def _set_ocr(conn: sqlite3.Connection, doc_id: int, model: str, chars: int) -> None:
+    with conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO ocr_state (paperless_id, model, chars, ocr_at)"
+            " VALUES (?, ?, ?, ?)",
+            (doc_id, model, chars, datetime.now().isoformat(timespec="seconds")))
+
+
+async def pending_count(
+    paperless: PaperlessClient, conn: sqlite3.Connection, cfg: SyncPaperlessConfig
+) -> int:
+    if not cfg.ocr_tag:
+        return 0
+    tag_id = await paperless.resolve_tag_id(cfg.ocr_tag)
+    if not tag_id:
+        return 0
+    docs = await paperless.list_documents_by_tag(tag_id)
+    return sum(1 for d in docs if not _ocr_done(conn, d["id"]))
+
+
+async def run(
+    paperless: PaperlessClient,
+    gemini: GeminiClient,
+    conn: sqlite3.Connection,
+    cfg: SyncPaperlessConfig,
+    gem_cfg: GeminiConfig,
+    apply: bool,
+    force: bool = False,
+    single_doc_id: int | None = None,
+) -> AsyncIterator[SyncEvent]:
+    counts = {"transcribed": 0, "skipped": 0, "errors": 0}
+
+    if not cfg.ocr_tag:
+        yield SyncEvent(kind="error", detail="no OCR tag configured (sync.paperless.ocr_tag)")
+        yield SyncEvent(kind="summary", data=counts)
+        return
+    if apply and not gemini.configured:
+        yield SyncEvent(kind="error", detail="no Gemini API key configured")
+        yield SyncEvent(kind="summary", data=counts)
+        return
+
+    tag_id = await paperless.resolve_tag_id(cfg.ocr_tag)
+    if not tag_id:
+        yield SyncEvent(kind="error", detail=f"OCR tag '{cfg.ocr_tag}' not found in Paperless")
+        yield SyncEvent(kind="summary", data=counts)
+        return
+
+    docs = await paperless.list_documents_by_tag(tag_id)
+    if single_doc_id is not None:
+        docs = [d for d in docs if d["id"] == single_doc_id]
+    yield SyncEvent(kind="started", detail=f"{len(docs)} document(s) tagged '{cfg.ocr_tag}'")
+
+    for doc in docs:
+        doc_id = doc["id"]
+        title = doc.get("title", f"Untitled (Paperless #{doc_id})")
+        if not force and _ocr_done(conn, doc_id):
+            counts["skipped"] += 1
+            continue
+
+        cur_chars = len((doc.get("content") or "").strip())
+        if not apply:
+            counts["transcribed"] += 1
+            yield SyncEvent(kind="item", entity="doc", action="would_update",
+                            source_id=str(doc_id), title=title,
+                            data={"cols": {"current text": f"{cur_chars} chars"}})
+            continue
+
+        try:
+            data, mime = await paperless.download_original(doc_id)
+        except Exception as exc:  # noqa: BLE001
+            counts["errors"] += 1
+            yield SyncEvent(kind="item", entity="doc", action="failed",
+                            source_id=str(doc_id), title=title,
+                            detail=f"download failed: {exc}")
+            continue
+        if mime not in _OK_MIME:
+            counts["errors"] += 1
+            yield SyncEvent(kind="item", entity="doc", action="failed",
+                            source_id=str(doc_id), title=title,
+                            detail=f"unsupported file type for OCR: {mime}")
+            continue
+
+        try:
+            text = await gemini.transcribe(data, mime, OCR_PROMPT, gem_cfg.thinking_budget)
+        except GeminiError as exc:
+            counts["errors"] += 1
+            yield SyncEvent(kind="item", entity="doc", action="failed",
+                            source_id=str(doc_id), title=title, detail=f"Gemini: {exc}")
+            continue
+        if not text:
+            counts["errors"] += 1
+            yield SyncEvent(kind="item", entity="doc", action="failed",
+                            source_id=str(doc_id), title=title,
+                            detail="Gemini returned no text")
+            continue
+
+        try:
+            await paperless.patch_content(doc_id, text)
+        except Exception as exc:  # noqa: BLE001
+            counts["errors"] += 1
+            yield SyncEvent(kind="item", entity="doc", action="failed",
+                            source_id=str(doc_id), title=title,
+                            detail=f"content write-back failed: {exc}")
+            continue
+
+        _set_ocr(conn, doc_id, gem_cfg.model, len(text))
+        counts["transcribed"] += 1
+        yield SyncEvent(kind="item", entity="doc", action="updated",
+                        source_id=str(doc_id), gramps_id=None, title=title,
+                        data={"cols": {"current text": f"{cur_chars} chars",
+                                       "transcribed": f"{len(text)} chars"}})
+
+    yield SyncEvent(kind="summary", data=counts)

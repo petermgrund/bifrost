@@ -100,3 +100,21 @@ class PaperlessClient:
             "PATCH", f"/api/documents/{doc_id}/",
             json={"custom_fields": custom_fields},
         )
+
+    async def get_document(self, doc_id: int) -> dict:
+        resp = await self._request("GET", f"/api/documents/{doc_id}/")
+        return resp.json()
+
+    async def download_original(self, doc_id: int) -> tuple[bytes, str]:
+        """The document's ORIGINAL file bytes + content-type (the selected
+        version's file under 3.0 versioning). `original=true` skips the
+        archive PDF so OCR sees what the user actually uploaded."""
+        resp = await self._request(
+            "GET", f"/api/documents/{doc_id}/download/", params={"original": "true"})
+        mime = resp.headers.get("content-type", "application/octet-stream").split(";")[0].strip()
+        return resp.content, mime
+
+    async def patch_content(self, doc_id: int, content: str) -> None:
+        """Overwrite the document's searchable text (content) field in place."""
+        await self._request(
+            "PATCH", f"/api/documents/{doc_id}/", json={"content": content})

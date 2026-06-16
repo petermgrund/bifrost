@@ -44,12 +44,21 @@ sync:
     date_meaning_field_id: null
     # Paperless tag id marking documents with a transcription to sync
     transcription_tag_id: null
+    # Paperless tag NAME marking docs to transcribe in place with Gemini OCR
+    ocr_tag: "Gemini OCR"
 
 anthropic:
   # Used by the citation generator to compose EE citation text (editable
   # before save; manual entry works without it).
   api_key: "REPLACE_ME"
   model: "claude-opus-4-8"
+
+gemini:
+  # Google AI Studio API key — used for in-place document OCR. Optional unless
+  # you use the Gemini OCR panel.
+  api_key: "REPLACE_ME"
+  model: "gemini-3-flash-preview"
+  # thinking_budget: 8192   # optional, for thinking-capable models
 
 places:
   # osm-to-gramps boundary rendering service + the GeoJSON sidecar dir

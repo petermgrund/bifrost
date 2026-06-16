@@ -35,6 +35,7 @@ const ACTION_WORDS = {
   places_linked: ['link', 'linked', 'place'],
   tx_created: ['add', 'added', 'transcription'],
   tx_updated: ['rewrite', 'rewrote', 'transcription'],
+  transcribed: ['transcribe', 'transcribed', 'document'],
 };
 const QUIET = new Set(['skipped', 'tx_skipped', 'baselined', 'errors']);
 

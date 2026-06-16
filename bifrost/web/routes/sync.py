@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from ...modules import sync_immich, sync_paperless
+from ...modules import ocr, sync_immich, sync_paperless
 from ...modules.sync_paperless import _doc_gramps_id
 from ..runs import record_run
 
@@ -119,6 +119,38 @@ async def paperless_resync_media(request: Request, body: ResyncMediaBody):
         st.caches.clear()
     return {"run_id": run_id, "apply": body.apply, "media_id": media_id,
             "doc_id": doc_id, "events": [e.__dict__ for e in events]}
+
+
+class OcrBody(BaseModel):
+    force: bool = False
+    single_doc_id: int | None = None
+
+
+@router.post("/api/ocr/preview")
+async def ocr_preview(request: Request, body: OcrBody = OcrBody()):
+    st = _state(request)
+    gen = ocr.run(st.paperless, st.gemini, st.conn, st.cfg.sync_paperless,
+                  st.cfg.gemini, apply=False, force=body.force,
+                  single_doc_id=body.single_doc_id)
+    run_id, events = await record_run(st.conn, "ocr.gemini.preview", gen)
+    return {"run_id": run_id, "apply": False, "events": [e.__dict__ for e in events]}
+
+
+@router.post("/api/ocr/apply")
+async def ocr_apply(request: Request, body: OcrBody = OcrBody()):
+    st = _state(request)
+    gen = ocr.run(st.paperless, st.gemini, st.conn, st.cfg.sync_paperless,
+                  st.cfg.gemini, apply=True, force=body.force,
+                  single_doc_id=body.single_doc_id)
+    run_id, events = await record_run(st.conn, "ocr.gemini", gen)
+    st.caches.clear()  # content changed → downstream views/transcriptions stale
+    return {"run_id": run_id, "apply": True, "events": [e.__dict__ for e in events]}
+
+
+@router.get("/api/ocr/pending")
+async def ocr_pending(request: Request):
+    st = _state(request)
+    return {"count": await ocr.pending_count(st.paperless, st.conn, st.cfg.sync_paperless)}
 
 
 @router.get("/api/paperless/pending")

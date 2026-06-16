@@ -87,6 +87,16 @@ MIGRATIONS: list[str] = [
         note       TEXT
     );
     """,
+    # 4 — Gemini OCR ledger. A doc is (re-)OCR'd only when not already recorded
+    # here (or on force), so a run doesn't re-spend Gemini on every pass.
+    """
+    CREATE TABLE ocr_state (
+        paperless_id INTEGER PRIMARY KEY,
+        model        TEXT NOT NULL,
+        chars        INTEGER NOT NULL,
+        ocr_at       TEXT NOT NULL
+    );
+    """,
 ]
 
 

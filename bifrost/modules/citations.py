@@ -62,6 +62,29 @@ def next_sequential_id(prefix: str, existing: set[str]) -> str:
 COMPOSE_SCHEMA = {
     "type": "object",
     "properties": {
+        "analysis": {
+            "type": "string",
+            "description": (
+                "FILL THIS FIRST — reason on paper before drafting any other "
+                "field. Work through, in order: (1) the record's country, era and "
+                "exact type, and WHICH house-style guide section governs it (a "
+                "Norwegian 1875 census → the Norwegian guide, NOT the Swedish "
+                "one); quote the specific worked-example template you will "
+                "follow. (2) The correct JURISDICTION hierarchy for THIS record "
+                "type — use the source's own administrative path and never borrow "
+                "a different system by analogy (an urban census follows amt → "
+                "kjøpstad → census district, NOT the ecclesiastical prestegjeld), "
+                "and never repeat the same place name across levels. (3) The exact "
+                "locator/district token format the guide specifies (e.g. its "
+                "'district [N] [name]' form), copying its punctuation and order, "
+                "omitting anything the source title already implies. (4) The "
+                "FRN-vs-abstract split: the First Reference Note LOCATES the "
+                "record and names the subject and co-residents by relationship "
+                "only — extracted facts (birth years, birthplaces, occupations) "
+                "go in the abstract, NEVER the FRN. Then draft the fields to "
+                "match this analysis."
+            ),
+        },
         "repository": {
             "type": ["object", "null"],
             "description": "Null when an existing repository was chosen.",
@@ -117,7 +140,7 @@ COMPOSE_SCHEMA = {
             "required": ["source_type", "information_type", "evidence_type", "note"],
         },
     },
-    "required": ["citation", "notes", "quality"],
+    "required": ["analysis", "citation", "notes", "quality"],
 }
 
 SYSTEM_PROMPT_CORE = """You construct Evidence Explained (EE) citations for \
@@ -148,10 +171,25 @@ never USPS two-letter codes.
 original+primary+direct=4; original+primary+indirect or clean image of an \
 original=3; derivative+primary or original+secondary=2; \
 derivative+secondary or compiled-without-images=1; hearsay/undetermined=0.
-- For record kinds without a dedicated guide (Norwegian, Danish, Italian…), \
-apply the nearest guide's principles — the Swedish guide for Nordic records \
-(collection-led titles, native series names, glosses, NAD-style call \
-numbers), the US guide for English-language records.
+- Use the dedicated house-style guide that matches the record's country and \
+type — Norwegian, Swedish, US, and published/personal records EACH have their \
+own guide section; follow that section's jurisdiction paths, locator tokens, \
+title forms and worked examples exactly. Only for kinds with NO dedicated \
+section (e.g. Danish, Italian, German) fall back to the nearest guide's \
+principles (the Swedish guide for other Nordic records, the US guide for other \
+English-language records).
+
+Before emitting, re-read your draft against the mistakes that recur:
+- Jurisdiction: the place hierarchy must follow the record's OWN administrative \
+path, not a different system borrowed by analogy (an urban census uses amt → \
+kjøpstad → census district, never the ecclesiastical prestegjeld), with no \
+place name repeated across levels.
+- Locator: matches the guide's token format exactly (including forms like \
+"district [N] [name]") and omits anything the source title already implies.
+- First Reference Note: birth years, birthplaces, occupations and other facts \
+extracted FROM the record are kept OUT of it — the FRN locates the record and \
+names the subject and co-residents by relationship only; extracted detail \
+belongs in the abstract.
 
 When an existing Source was chosen, return null for repository and source \
 and compose only the citation locator, confidence, notes and quality \
@@ -243,7 +281,8 @@ async def compose(
     rt = next((t for t in types if t["key"] == record_type_key), None)
     today = datetime.now().strftime("%-d %B %Y")
     user = build_compose_prompt(rt, fields, media, existing_source, today, event_context)
-    draft = await anthropic.complete_structured(system_prompt(), user, COMPOSE_SCHEMA)
+    draft = await anthropic.complete_structured(
+        system_prompt(), user, COMPOSE_SCHEMA, max_tokens=8000)
     if existing_source:
         draft["repository"] = None
         draft["source"] = None
@@ -338,7 +377,7 @@ async def compose_from_dump(
         parts.append(f"THE DUMP:\n{dump.strip()}")
     parts.append("Compose the EE citation now.")
     draft = await anthropic.complete_structured(
-        system_prompt(), "\n\n".join(parts), DUMP_SCHEMA)
+        system_prompt(), "\n\n".join(parts), DUMP_SCHEMA, max_tokens=8000)
 
     # Resolve matches server-side; a hallucinated id degrades to "new".
     matched_source = next(

@@ -125,6 +125,11 @@ class GrampsClient:
     async def list_media(self) -> list[dict]:
         return await self._paged("/media/")
 
+    async def count(self, path: str) -> int:
+        """Total objects at an endpoint, from the X-Total-Count header (cheap)."""
+        resp = await self._request("GET", path, params={"pagesize": 1, "page": 1})
+        return int(resp.headers.get("X-Total-Count", 0))
+
     async def list_media_gramps_ids(self) -> set[str]:
         items = await self._paged("/media/", keys="gramps_id")
         return {m["gramps_id"] for m in items if m.get("gramps_id")}

@@ -1,4 +1,4 @@
-import { BifrostElement, html, nothing, api, post, iconYes, iconNo } from './core.js';
+import { BifrostElement, html, nothing, api, post, iconYes, iconNo, iconNa } from './core.js';
 
 class PlacesPage extends BifrostElement {
   static properties = {
@@ -8,6 +8,7 @@ class PlacesPage extends BifrostElement {
     filter: { state: true },     // all | relation | missing
     busy: { state: true },       // handle currently generating, or 'all'
     status: { state: true },
+    failures: { state: true },   // [{gramps_id, title, detail}] from last bulk run
   };
 
   constructor() {
@@ -18,6 +19,7 @@ class PlacesPage extends BifrostElement {
     this.filter = 'relation';
     this.busy = null;
     this.status = '';
+    this.failures = [];
   }
 
   connectedCallback() {
@@ -58,11 +60,15 @@ class PlacesPage extends BifrostElement {
   async generateMissing() {
     this.busy = 'all';
     this.status = 'Generating…';
+    this.failures = [];
     try {
       const r = await post('/places/api/generate-missing', {});
       const c = (r.events.find((e) => e.kind === 'summary') || {}).data || {};
+      this.failures = r.events
+        .filter((e) => e.kind === 'item' && e.action === 'failed')
+        .map((e) => ({ gramps_id: e.gramps_id, title: e.title, detail: e.detail }));
       this.status = `Generated ${c.generated || 0}` +
-        (c.errors ? `, ${c.errors} error(s)` : '');
+        (c.errors ? `, ${c.errors} failed` : '');
       await this.load(true);
     } catch (e) {
       this.status = e.message;
@@ -114,12 +120,19 @@ class PlacesPage extends BifrostElement {
             : html`<input class="relinput" type="text" placeholder="relation/way id or URL"
                 @keydown=${(e) => { if (e.key === 'Enter') this.addRelation(r, e.target.value); }}
                 @change=${(e) => this.addRelation(r, e.target.value)}>`}</td>
-          <td>${r.has_boundary ? iconYes : iconNo}</td>
+          <td title=${!r.osm_id ? 'no OSM link yet' : r.has_boundary ? 'boundary present' : 'no boundary — generate'}>
+            ${!r.osm_id ? iconNa : r.has_boundary ? iconYes : iconNo}</td>
           <td>${r.osm_id ? html`<button class="applyone" ?disabled=${this.busy}
             @click=${() => this.generate(r, r.has_boundary)}>
             ${this.busy === r.handle ? '…' : r.has_boundary ? 'Regenerate' : 'Generate'}</button>` : nothing}</td>
         </tr>`)}
-      </table>`;
+      </table>
+      ${this.failures.length ? html`<h3 class="action-failed">Failed (${this.failures.length})</h3>
+        <table class="results">
+          ${this.failures.map((f) => html`<tr>
+            <td class="hint">${f.gramps_id}</td><td>${f.title}</td>
+            <td class="hint action-failed">${f.detail}</td></tr>`)}
+        </table>` : nothing}`;
   }
 }
 customElements.define('places-page', PlacesPage);

@@ -15,6 +15,7 @@ from ..core import db
 from ..core.clients import GeminiClient, GrampsClient, ImmichClient, PaperlessClient
 from ..core.clients.anthropic import AnthropicClient
 from ..core.config import load_config
+from ..modules import inbox as inbox_mod
 
 WEB_DIR = Path(__file__).parent
 templates = Jinja2Templates(directory=WEB_DIR / "templates")
@@ -72,6 +73,21 @@ async def recent_runs(request: Request, limit: int = 10):
         (min(limit, 50),),
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+@app.get("/api/inbox")
+async def inbox(request: Request, refresh: bool = False):
+    """One tolerant call for the home page: pending work, snapshot, recent runs."""
+    st = request.app.state
+    if st.caches.get("inbox") is None or refresh:
+        st.caches["inbox"] = await inbox_mod.gather(
+            st.gramps, st.immich, st.paperless, st.conn, st.cfg)
+    data = dict(st.caches["inbox"])
+    rows = st.conn.execute(
+        "SELECT id, job, status, started_at, summary FROM runs ORDER BY id DESC LIMIT 8"
+    ).fetchall()
+    data["runs"] = [dict(r) for r in rows]
+    return data
 
 
 @app.get("/", response_class=HTMLResponse)

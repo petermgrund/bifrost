@@ -142,7 +142,10 @@ button.primary {
 }
 button.primary:hover:not(:disabled) { background: var(--accent-dark); color: #fff; }
 button.chip { border-radius: 999px; padding: .22rem .85rem; font-size: .8rem; border-color: var(--border); }
-button.chip.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-dark); }
+/* Active carries weight + a leading dot (shape), not colour alone. */
+button.chip.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-dark); font-weight: 700; }
+button.chip.active::before { content: ""; display: inline-block; width: .42rem; height: .42rem;
+  border-radius: 50%; background: var(--accent); margin-right: .4rem; vertical-align: middle; }
 
 input[type="search"], input[type="text"] {
   font: inherit; font-size: .9rem;
@@ -323,7 +326,9 @@ textarea:focus { outline: none; border-color: var(--accent); }
 
 #theme-toggle { border: none; background: transparent; font-size: 1.05rem; padding: .2rem .4rem; color: var(--muted); }
 #theme-toggle:hover { color: var(--accent); border: none; }
-.icon { vertical-align: -2px; } .icon.yes { color: var(--ok); } .icon.no { color: var(--err); opacity: .55; } .relinput { max-width: 9rem; font-size: .78rem; padding: .2rem .45rem; }
+.icon { vertical-align: -2px; } .icon.yes { color: var(--ok); } .icon.no { color: var(--err); opacity: .55; }
+.icon.pend { color: var(--accent); } .icon.na { color: var(--muted); opacity: .6; }
+.relinput { max-width: 9rem; font-size: .78rem; padding: .2rem .45rem; }
 
 /* --- activity dashboard --- */
 .stats { display: flex; gap: .6rem; margin: .4rem 0 1rem; flex-wrap: wrap; }
@@ -452,3 +457,26 @@ label.manualtoggle { display: inline-flex; align-items: center; gap: .3rem; curs
 input.manualid { font-family: 'Space Mono', monospace; text-transform: uppercase;
                  width: 6.5rem; letter-spacing: .04em; }
 input.manualid.invalid { border-color: var(--err); color: var(--err); }
+
+/* home page (hybrid) */
+.attn { display: flex; flex-direction: column; gap: .3rem; margin: .3rem 0 1.4rem; max-width: 42rem; }
+a.attn-row { display: flex; align-items: center; gap: .8rem; padding: .55rem .85rem; border: 1px solid var(--border);
+  border-radius: var(--radius); background: var(--surface); color: var(--text); text-decoration: none; }
+a.attn-row:hover { background: var(--surface-2); border-color: var(--border-strong); }
+.attn-n { font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 1.25rem;
+  min-width: 2.4rem; text-align: right; color: var(--accent-dark); }
+.attn-n.na { color: var(--muted); }
+.attn-label { flex: 1; }
+.attn-go { color: var(--muted); }
+.snapshot { font-family: 'Space Mono', monospace; color: var(--muted); margin: .2rem 0 1.4rem; }
+
+/* manual-id validity marker (shape + colour, not just red border) */
+.manualwrap { display: inline-flex; align-items: center; gap: .3rem; }
+.manualwrap .icon { display: none; }
+.manualwrap.valid .icon.yes { display: inline; }
+.manualwrap.bad .icon.no { display: inline; }
+
+/* faces apply-pending result banner */
+.applyresult { background: var(--accent-soft); border: 1px solid var(--accent);
+  border-radius: var(--radius); padding: .5rem .8rem; margin: .2rem 0 1rem; }
+.applyresult .failures { margin: .3rem 0 0; padding-left: 1.1rem; }

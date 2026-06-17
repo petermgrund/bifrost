@@ -1,4 +1,4 @@
-import { BifrostElement, html, nothing, api, post } from './core.js';
+import { BifrostElement, html, nothing, api, post, summarize } from './core.js';
 
 class FacesPage extends BifrostElement {
   static properties = {
@@ -15,6 +15,10 @@ class FacesPage extends BifrostElement {
     immichQuery: { state: true },
     openAsset: { state: true },
     busy: { state: true },
+    loading: { state: true },
+    loaded: { state: true },
+    error: { state: true },
+    applyResult: { state: true },
   };
 
   constructor() {
@@ -32,6 +36,10 @@ class FacesPage extends BifrostElement {
     this.immichQuery = '';
     this.openAsset = null;
     this.busy = false;
+    this.loading = false;
+    this.loaded = false;
+    this.error = '';
+    this.applyResult = null;
   }
 
   connectedCallback() {
@@ -43,6 +51,7 @@ class FacesPage extends BifrostElement {
 
   async load(refresh = false) {
     const r = refresh ? '?refresh=1' : '';
+    this.loading = true; this.error = '';
     try {
       [this.gramps, this.immich, this.links] = await Promise.all([
         api(`/faces/api/gramps-people${r}`),
@@ -51,7 +60,9 @@ class FacesPage extends BifrostElement {
       ]);
       this.listing = await api(`/faces/api/photos${r}`);
     } catch (e) {
-      this.listing = { photos: [], pending_total: 0, error: e.message };
+      this.error = e.message;
+    } finally {
+      this.loading = false; this.loaded = true;
     }
   }
 
@@ -68,17 +79,27 @@ class FacesPage extends BifrostElement {
   /* ---- links ---- */
   async createLink() {
     if (!this.selGramps || !this.selImmich) return;
-    this.links = await post('/faces/api/links', {
-      gramps_handle: this.selGramps,
-      immich_person_id: this.selImmich,
-      label: this.renderRoot.querySelector('#link-label')?.value || null,
-    });
-    this.selGramps = this.selImmich = null;
-    await this.load();
+    this.error = '';
+    try {
+      this.links = await post('/faces/api/links', {
+        gramps_handle: this.selGramps,
+        immich_person_id: this.selImmich,
+        label: this.renderRoot.querySelector('#link-label')?.value || null,
+      });
+      this.selGramps = this.selImmich = null;
+      await this.load();
+    } catch (e) {
+      this.error = e.message;
+    }
   }
   async unlink(handle) {
-    this.links = await api(`/faces/api/links/${handle}`, { method: 'DELETE' });
-    await this.load();
+    this.error = '';
+    try {
+      this.links = await api(`/faces/api/links/${handle}`, { method: 'DELETE' });
+      await this.load();
+    } catch (e) {
+      this.error = e.message;
+    }
   }
 
   /* ---- faces ---- */
@@ -97,21 +118,40 @@ class FacesPage extends BifrostElement {
         pending_total: this.listing.photos.reduce((n, x) => n + x.pending_count, 0),
       };
     } catch (e) {
-      alert(e.message);
+      this.error = e.message;
     }
   }
   async applyPending() {
     this.busy = true;
+    this.error = '';
+    this.applyResult = null;
     try {
-      await post('/faces/api/apply-pending', {});
+      const r = await post('/faces/api/apply-pending', {});
+      const counts = (r.events.find((e) => e.kind === 'summary') || {}).data;
+      const failed = r.events.filter((e) => e.kind === 'item' && e.action === 'failed');
+      this.applyResult = { counts, failed };
       await this.load(true);
+    } catch (e) {
+      this.error = e.message;
     } finally {
       this.busy = false;
     }
   }
 
   /* ---- render ---- */
+  applyResultBanner() {
+    const r = this.applyResult;
+    if (!r) return nothing;
+    const line = summarize(r.counts, true);
+    return html`<div class="applyresult">
+      <span>${line}${r.failed && r.failed.length ? ` · ${r.failed.length} failed` : ''}</span>
+      ${r.failed && r.failed.length ? html`<ul class="failures">
+        ${r.failed.map((f) => html`<li class="hint action-failed">${f.title || f.source_id}: ${f.detail}</li>`)}</ul>` : nothing}
+    </div>`;
+  }
+
   render() {
+    if (!this.loaded) return html`<h1>Faces</h1><div class="hint">Loading…</div>`;
     return html`
       <div class="pagehead">
         <h1>Faces</h1>
@@ -126,8 +166,11 @@ class FacesPage extends BifrostElement {
           ? html`<button class="primary" ?disabled=${this.busy} @click=${this.applyPending}>
               ${this.busy ? 'Applying…' : `Apply pending (${this.listing.pending_total})`}</button>`
           : nothing}
-        <button @click=${() => this.load(true)}>Refresh</button>
+        <button @click=${() => this.load(true)} ?disabled=${this.loading}>
+          ${this.loading ? 'Refreshing…' : 'Refresh'}</button>
       </div>
+      ${this.error ? html`<div class="alert">${this.error}</div>` : nothing}
+      ${this.applyResultBanner()}
       ${this.tab === 'photos' ? this.renderPhotos() : this.renderPeople()}
       ${this.openAsset ? this.renderDetail() : nothing}
     `;
@@ -235,11 +278,16 @@ class FacesPage extends BifrostElement {
   }
 
   async saveLabel(link, label) {
-    this.links = await post('/faces/api/links', {
-      gramps_handle: link.gramps_handle,
-      immich_person_id: link.immich_person_id,
-      label: label.trim() || null,
-    });
+    this.error = '';
+    try {
+      this.links = await post('/faces/api/links', {
+        gramps_handle: link.gramps_handle,
+        immich_person_id: link.immich_person_id,
+        label: label.trim() || null,
+      });
+    } catch (e) {
+      this.error = e.message;
+    }
   }
 
   renderPeople() {

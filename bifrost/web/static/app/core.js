@@ -62,3 +62,18 @@ export const iconYes = html`<svg class="icon yes" viewBox="0 0 16 16" width="15"
   <path d="M2.5 8.5 L6.5 12.5 L13.5 4" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 export const iconNo = html`<svg class="icon no" viewBox="0 0 16 16" width="15" height="15" aria-label="no">
   <path d="M4 4 L12 12 M12 4 L4 12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>`;
+/* Third state: in-progress / pending / reserved / not-applicable — a hollow ring,
+   a shape distinct from check and cross (not just a colour). */
+export const iconPending = html`<svg class="icon pend" viewBox="0 0 16 16" width="15" height="15" aria-label="pending">
+  <circle cx="8" cy="8" r="5" fill="none" stroke="currentColor" stroke-width="2.2"/></svg>`;
+/* n/a — a dash, for "not applicable yet" (distinct from a real failure). */
+export const iconNa = html`<svg class="icon na" viewBox="0 0 16 16" width="15" height="15" aria-label="n/a">
+  <path d="M4 8 L12 8" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>`;
+
+/* Map a run/status string to a shape+colour icon. ok→check, error/failed→cross,
+   else (running/pending)→ring. */
+export function statusIcon(status) {
+  if (status === 'ok' || status === 'done') return iconYes;
+  if (status === 'error' || status === 'failed' || status === 'interrupted') return iconNo;
+  return iconPending;
+}

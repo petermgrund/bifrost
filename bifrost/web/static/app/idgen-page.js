@@ -1,4 +1,4 @@
-import { BifrostElement, html, nothing, api, post } from './core.js';
+import { BifrostElement, html, nothing, api, post, iconYes, iconPending } from './core.js';
 
 /* Mint random-6 media ids ahead of time, reserve them, and track which were
    actually minted. Reserved ids are excluded from the sync auto-generator but
@@ -119,7 +119,7 @@ class IdgenPage extends BifrostElement {
         ${shown.map((r) => html`<tr>
           <td><button class="idlink" @click=${() => this.copy(r.gramps_id)}
             title="copy">${r.gramps_id}</button></td>
-          <td class="${r.minted ? 'action-created' : 'hint'}">${r.minted ? 'minted' : 'reserved'}</td>
+          <td class="${r.minted ? 'action-created' : 'hint'}">${r.minted ? iconYes : iconPending} ${r.minted ? 'minted' : 'reserved'}</td>
           <td class="hint">${r.minted && r.source_system
             ? `${r.source_system}${r.source_title ? ` · ${r.source_title}` : ''}` : ''}</td>
           <td class="hint">${(r.created_at || '').slice(0, 10)}</td>

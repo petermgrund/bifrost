@@ -1,4 +1,4 @@
-import { BifrostElement, html, nothing, post, summarize, hasWork } from './core.js';
+import { BifrostElement, html, nothing, post, summarize, hasWork, iconYes, iconNo } from './core.js';
 
 const GROUPS = [
   ['doc', 'Documents'], ['media', 'Media'], ['note', 'Transcriptions'],
@@ -131,13 +131,19 @@ class ResyncPanel extends BifrostElement {
 customElements.define('resync-panel', ResyncPanel);
 
 function manualCell(e) {
-  return html`<input class="manualid" type="text" maxlength="6" placeholder="auto"
-    data-sid=${e.source_id} spellcheck="false"
-    @input=${(ev) => {
-      const v = ev.target.value.toUpperCase();
-      ev.target.value = v;
-      ev.target.classList.toggle('invalid', !!v && !MANUAL_RE.test(v));
-    }}>`;
+  // Validity is shown by an icon (shape + colour), not just a red border.
+  return html`<span class="manualwrap">
+    <input class="manualid" type="text" maxlength="6" placeholder="auto"
+      data-sid=${e.source_id} spellcheck="false"
+      @input=${(ev) => {
+        const v = ev.target.value.toUpperCase();
+        ev.target.value = v;
+        const has = !!v, ok = MANUAL_RE.test(v);
+        ev.target.classList.toggle('invalid', has && !ok);
+        const w = ev.target.parentElement;
+        w.classList.toggle('valid', has && ok);
+        w.classList.toggle('bad', has && !ok);
+      }}>${iconYes}${iconNo}</span>`;
 }
 
 function renderResult(payload, manual = false) {
@@ -152,7 +158,9 @@ function renderResult(payload, manual = false) {
       // structured columns: union of cols keys across the group's rows,
       // in first-seen order; plain detail column only as fallback
       const colKeys = [...new Set(rows.flatMap((e) => Object.keys(e.data?.cols || {})))];
-      const hasDetail = !colKeys.length && rows.some((e) => e.detail);
+      // Show the detail column whenever ANY row has a detail (e.g. a failed
+      // row's reason), even alongside rows that have structured columns.
+      const hasDetail = rows.some((e) => e.detail);
       // Only media/doc rows mint a media id; faces/notes/places never do.
       const mintsId = entity === 'media' || entity === 'doc';
       const showManual = manual && mintsId && rows.some((e) => e.action === 'would_create' && e.source_id);

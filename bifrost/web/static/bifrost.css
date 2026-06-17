@@ -265,7 +265,7 @@ table.results { width: 100%; border-collapse: collapse; font-size: .85rem; margi
 table.results th, table.results td { text-align: left; padding: .35rem .5rem; border-bottom: 1px solid var(--border); }
 table.results th { color: var(--muted); font-weight: 700; }
 .action-created, .action-updated { color: var(--ok); }
-.action-would_create, .action-would_update { color: var(--warn); }
+.action-would_create, .action-would_update, .action-assigned { color: var(--warn); }
 .action-failed { color: var(--err); }
 .summary-line { margin-top: .6rem; font-size: .88rem; }
 
@@ -328,6 +328,7 @@ textarea:focus { outline: none; border-color: var(--accent); }
 #theme-toggle:hover { color: var(--accent); border: none; }
 .icon { vertical-align: -2px; } .icon.yes { color: var(--ok); } .icon.no { color: var(--err); opacity: .55; }
 .icon.pend { color: var(--accent); } .icon.na { color: var(--muted); opacity: .6; }
+.icon.half { color: var(--warn); }
 .relinput { max-width: 9rem; font-size: .78rem; padding: .2rem .45rem; }
 
 /* --- activity dashboard --- */

@@ -69,6 +69,12 @@ export const iconPending = html`<svg class="icon pend" viewBox="0 0 16 16" width
 /* n/a — a dash, for "not applicable yet" (distinct from a real failure). */
 export const iconNa = html`<svg class="icon na" viewBox="0 0 16 16" width="15" height="15" aria-label="n/a">
   <path d="M4 8 L12 8" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>`;
+/* Half-filled ring — "partway there": used for an id that's been physically
+   assigned (written on a photo) but not yet minted in Gramps. Shape sits between
+   the hollow ring (reserved) and the check (minted). */
+export const iconHalf = html`<svg class="icon half" viewBox="0 0 16 16" width="15" height="15" aria-label="assigned">
+  <circle cx="8" cy="8" r="5" fill="none" stroke="currentColor" stroke-width="2.2"/>
+  <path d="M8 3.6 A4.4 4.4 0 0 1 8 12.4 Z" fill="currentColor"/></svg>`;
 
 /* Map a run/status string to a shape+colour icon. ok→check, error/failed→cross,
    else (running/pending)→ring. */

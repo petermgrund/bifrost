@@ -97,6 +97,13 @@ MIGRATIONS: list[str] = [
         ocr_at       TEXT NOT NULL
     );
     """,
+    # 5 — manual "assigned" step between reserved and minted. Set when Peter has
+    # physically labelled a photo (verso) with a reserved id but hasn't yet synced
+    # it into Gramps. Purely a Bifrost-side flag; cleared on unassign, moot once
+    # minted_at flips.
+    """
+    ALTER TABLE reserved_ids ADD COLUMN assigned_at TEXT;
+    """,
 ]
 
 

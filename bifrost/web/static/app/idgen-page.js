@@ -1,4 +1,4 @@
-import { BifrostElement, html, nothing, api, post, iconYes, iconPending } from './core.js';
+import { BifrostElement, html, nothing, api, post, iconYes, iconPending, iconHalf } from './core.js';
 
 /* Mint random-6 media ids ahead of time, reserve them, and track which were
    actually minted. Reserved ids are excluded from the sync auto-generator but
@@ -58,29 +58,47 @@ class IdgenPage extends BifrostElement {
     }
   }
 
+  // assigned = "I've labelled a photo with this id" — an intermediate step
+  // before the sync actually mints it into Gramps.
+  async setAssigned(id, on) {
+    this.status = '';
+    try {
+      const r = await post(`/idgen/api/${on ? 'assign' : 'unassign'}`, { gramps_id: id });
+      this.rows = r.ids;
+    } catch (e) {
+      this.status = `${id}: ${e.message}`;
+    }
+  }
+
   copy(text) {
     navigator.clipboard?.writeText(text);
     this.status = `copied ${text}`;
   }
 
+  // Three-state lifecycle: reserved → assigned (written on a photo) → minted
+  // (created in Gramps). `assigned` is only ever true while still un-minted.
+  state(r) { return r.minted ? 'minted' : r.assigned ? 'assigned' : 'reserved'; }
+
   render() {
     if (!this.rows) return html`<h1>IDs</h1><div class="hint">Loading…</div>`;
-    const reserved = this.rows.filter((r) => !r.minted).length;
-    const minted = this.rows.length - reserved;
+    const minted = this.rows.filter((r) => r.minted).length;
+    const assigned = this.rows.filter((r) => r.assigned).length;
+    const reserved = this.rows.length - minted - assigned;
     const shown = this.rows.filter((r) =>
-      this.filter === 'all' || (this.filter === 'reserved' && !r.minted)
-      || (this.filter === 'minted' && r.minted));
+      this.filter === 'all' || this.filter === this.state(r));
     const chip = (f, label) => html`<button class="chip ${this.filter === f ? 'active' : ''}"
       @click=${() => (this.filter = f)}>${label}</button>`;
     return html`
       <div class="pagehead">
         <h1>IDs</h1>
         <span class="spacer"></span>
-        <span class="hint">${reserved} reserved · ${minted} minted</span>
+        <span class="hint">${reserved} reserved · ${assigned} assigned · ${minted} minted</span>
       </div>
       <p class="hint">Random-6 media ids minted ahead of time — write them on photo
         versos or name files. Reserved ids are never auto-assigned by a sync, but
-        you can type one in as a manual id on the Sync preview.</p>
+        you can type one in as a manual id on the Sync preview. Mark an id
+        <b>assigned</b> once you've labelled a photo with it; it becomes
+        <b>minted</b> when a sync actually creates it in Gramps.</p>
       <details class="scheme">
         <summary class="hint">Copy / verso naming scheme</summary>
         <table class="results">
@@ -111,22 +129,37 @@ class IdgenPage extends BifrostElement {
       </div>` : nothing}
 
       <div class="toolbar">
-        ${chip('all', 'All')}${chip('reserved', 'Reserved')}${chip('minted', 'Minted')}
+        ${chip('all', 'All')}${chip('reserved', 'Reserved')}${chip('assigned', 'Assigned')}${chip('minted', 'Minted')}
         <span class="hint">${shown.length} shown</span>
       </div>
       <table class="results">
         <tr><th>id</th><th>status</th><th>minted as</th><th>generated</th><th></th></tr>
-        ${shown.map((r) => html`<tr>
-          <td><button class="idlink" @click=${() => this.copy(r.gramps_id)}
-            title="copy">${r.gramps_id}</button></td>
-          <td class="${r.minted ? 'action-created' : 'hint'}">${r.minted ? iconYes : iconPending} ${r.minted ? 'minted' : 'reserved'}</td>
-          <td class="hint">${r.minted && r.source_system
-            ? `${r.source_system}${r.source_title ? ` · ${r.source_title}` : ''}` : ''}</td>
-          <td class="hint">${(r.created_at || '').slice(0, 10)}</td>
-          <td>${r.minted ? nothing : html`<button class="applyone"
-            @click=${() => this.release(r.gramps_id)}>Release</button>`}</td>
-        </tr>`)}
+        ${shown.map((r) => this.row(r))}
       </table>`;
+  }
+
+  row(r) {
+    const s = this.state(r);
+    const STATUS = {
+      reserved: [iconPending, 'reserved', 'hint'],
+      assigned: [iconHalf, 'assigned', 'action-assigned'],
+      minted: [iconYes, 'minted', 'action-created'],
+    }[s];
+    return html`<tr>
+      <td><button class="idlink" @click=${() => this.copy(r.gramps_id)}
+        title="copy">${r.gramps_id}</button></td>
+      <td class="${STATUS[2]}">${STATUS[0]} ${STATUS[1]}</td>
+      <td class="hint">${r.minted && r.source_system
+        ? `${r.source_system}${r.source_title ? ` · ${r.source_title}` : ''}` : ''}</td>
+      <td class="hint">${(r.created_at || '').slice(0, 10)}</td>
+      <td>${s === 'minted' ? nothing : html`
+        ${s === 'reserved'
+          ? html`<button class="applyone" title="Mark as written on a photo"
+              @click=${() => this.setAssigned(r.gramps_id, true)}>Assign</button>`
+          : html`<button class="applyone" title="Back to reserved"
+              @click=${() => this.setAssigned(r.gramps_id, false)}>Unassign</button>`}
+        <button class="applyone" @click=${() => this.release(r.gramps_id)}>Release</button>`}</td>
+    </tr>`;
   }
 }
 customElements.define('idgen-page', IdgenPage);

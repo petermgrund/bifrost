@@ -38,13 +38,29 @@ async def generate(request: Request, body: GenerateBody):
     return {"generated": new_ids, "ids": await idgen.listing(st.conn, st.gramps)}
 
 
-class ReleaseBody(BaseModel):
+class IdBody(BaseModel):
     gramps_id: str
 
 
 @router.post("/api/release")
-async def release(request: Request, body: ReleaseBody):
+async def release(request: Request, body: IdBody):
     st = _state(request)
     if not idgen.release(st.conn, body.gramps_id.strip()):
         raise HTTPException(409, "already minted — cannot release")
+    return {"ids": await idgen.listing(st.conn, st.gramps)}
+
+
+@router.post("/api/assign")
+async def assign(request: Request, body: IdBody):
+    st = _state(request)
+    if not idgen.assign(st.conn, body.gramps_id.strip()):
+        raise HTTPException(409, "already minted — cannot assign")
+    return {"ids": await idgen.listing(st.conn, st.gramps)}
+
+
+@router.post("/api/unassign")
+async def unassign(request: Request, body: IdBody):
+    st = _state(request)
+    if not idgen.unassign(st.conn, body.gramps_id.strip()):
+        raise HTTPException(409, "already minted — cannot unassign")
     return {"ids": await idgen.listing(st.conn, st.gramps)}

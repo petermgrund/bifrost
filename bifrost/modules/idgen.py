@@ -67,6 +67,29 @@ def release(conn: sqlite3.Connection, gramps_id: str) -> bool:
     return cur.rowcount > 0
 
 
+def assign(conn: sqlite3.Connection, gramps_id: str) -> bool:
+    """Mark a reserved id as physically assigned (e.g. written on a photo verso)
+    but not yet minted. No-op once minted; returns False if the id isn't an
+    un-minted reservation."""
+    with conn:
+        cur = conn.execute(
+            "UPDATE reserved_ids SET assigned_at = ? "
+            "WHERE gramps_id = ? AND minted_at IS NULL",
+            (_now(), gramps_id))
+    return cur.rowcount > 0
+
+
+def unassign(conn: sqlite3.Connection, gramps_id: str) -> bool:
+    """Clear the assigned flag, returning an id to plain reserved. No-op once
+    minted; returns False if the id isn't an un-minted reservation."""
+    with conn:
+        cur = conn.execute(
+            "UPDATE reserved_ids SET assigned_at = NULL "
+            "WHERE gramps_id = ? AND minted_at IS NULL",
+            (gramps_id,))
+    return cur.rowcount > 0
+
+
 async def listing(conn: sqlite3.Connection, gramps: GrampsClient) -> list[dict]:
     """All reservations with live minted-status reconciliation and, for minted
     ones, what they became (from minted_media)."""
@@ -77,7 +100,7 @@ async def listing(conn: sqlite3.Connection, gramps: GrampsClient) -> list[dict]:
     }
     rows = []
     for r in conn.execute(
-            "SELECT gramps_id, created_at, minted_at FROM reserved_ids "
+            "SELECT gramps_id, created_at, minted_at, assigned_at FROM reserved_ids "
             "ORDER BY created_at DESC, gramps_id"):
         gid = r["gramps_id"]
         is_minted = bool(r["minted_at"]) or gid in live
@@ -87,6 +110,9 @@ async def listing(conn: sqlite3.Connection, gramps: GrampsClient) -> list[dict]:
             "created_at": r["created_at"],
             "minted": is_minted,
             "minted_at": r["minted_at"],
+            # "assigned" only matters while still un-minted; minting supersedes it.
+            "assigned": bool(r["assigned_at"]) and not is_minted,
+            "assigned_at": r["assigned_at"],
             "source_system": src[0] if src else None,
             "source_title": src[1] if src else None,
         })

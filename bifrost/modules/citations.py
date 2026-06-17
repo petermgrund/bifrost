@@ -13,6 +13,7 @@ FIRST/SHORT REFERENCE NOTE blocks; confidence as Gramps 0-4; dual-layer
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import sqlite3
@@ -269,6 +270,46 @@ def build_compose_prompt(
     return "\n\n".join(parts)
 
 
+CRITIQUE_LEAD = """A DRAFT citation (JSON below) was produced for the record \
+described below. Review it ADVERSARIALLY against the HOUSE STYLE GUIDES above \
+and return a CORRECTED draft. Assume there is at least one thing to fix; only \
+conclude "no changes needed" after actually checking each point.
+
+Check, in order:
+- Guide selection: is the draft built from the guide section matching the \
+record's country and exact type — not a neighbouring guide applied by analogy?
+- Jurisdiction: does the place hierarchy follow the record's OWN administrative \
+path (an urban census is amt → kjøpstad → census district, NEVER the \
+ecclesiastical prestegjeld), with no place name repeated across levels?
+- Locator / title: the guide's exact token format (e.g. "district [N] [name]"), \
+nothing the source title already implies, native series names with the bracketed \
+English gloss in the First Reference Note only.
+- First Reference Note: birth years, birthplaces, occupations and other facts \
+extracted FROM the record must NOT appear here — the FRN locates the record and \
+names the subject and co-residents by relationship only.
+- Mechanics: dual-layer "citing" for platform records, the citation date left \
+blank, confidence per the GPS tables, and [NEEDED: …] for anything genuinely \
+absent rather than an invented value.
+
+In the analysis field, list each issue found and the fix you applied (or "no \
+changes needed"). Then return the FULL corrected draft, keeping every \
+already-correct field verbatim."""
+
+
+async def _critique(anthropic: AnthropicClient, record_context: str,
+                    draft: dict) -> dict:
+    """Second adversarial pass: re-read the draft against the guides and return a
+    corrected one. Reviews the citation text/notes only — dump-mode matching ids
+    are stripped first and re-attached by the caller."""
+    review = {k: v for k, v in draft.items() if not k.startswith("matched_")}
+    user = (CRITIQUE_LEAD
+            + "\n\n===== THE RECORD =====\n" + record_context
+            + "\n\n===== DRAFT TO REVIEW (JSON) =====\n"
+            + json.dumps(review, ensure_ascii=False, indent=2))
+    return await anthropic.complete_structured(
+        system_prompt(), user, COMPOSE_SCHEMA, max_tokens=8000)
+
+
 async def compose(
     anthropic: AnthropicClient,
     record_type_key: str | None,
@@ -276,6 +317,7 @@ async def compose(
     media: dict | None,
     existing_source: dict | None,
     event_context: str | None = None,
+    critique: bool = True,
 ) -> dict:
     types = load_citation_types()["types"]
     rt = next((t for t in types if t["key"] == record_type_key), None)
@@ -283,6 +325,8 @@ async def compose(
     user = build_compose_prompt(rt, fields, media, existing_source, today, event_context)
     draft = await anthropic.complete_structured(
         system_prompt(), user, COMPOSE_SCHEMA, max_tokens=8000)
+    if critique:
+        draft = await _critique(anthropic, user, draft)
     if existing_source:
         draft["repository"] = None
         draft["source"] = None
@@ -359,6 +403,7 @@ async def compose_from_dump(
     sources: list[dict],
     repos: list[dict],
     event_context: str | None = None,
+    critique: bool = True,
 ) -> dict:
     today = datetime.now().strftime("%-d %B %Y")
     has_dump = bool(dump.strip())
@@ -378,6 +423,21 @@ async def compose_from_dump(
     parts.append("Compose the EE citation now.")
     draft = await anthropic.complete_structured(
         system_prompt(), "\n\n".join(parts), DUMP_SCHEMA, max_tokens=8000)
+
+    if critique:
+        ctx = []
+        if event_context:
+            ctx.append("EVENT this citation documents:\n" + event_context)
+        if media:
+            ctx.append(f"MEDIA: {media.get('desc')} ({media.get('gramps_id')})")
+        ctx.append(f"Today's date (for access dates): {today}")
+        ctx.append(f"THE DUMP:\n{dump.strip()}" if has_dump else EVENT_ONLY_LEAD)
+        revised = await _critique(anthropic, "\n\n".join(ctx), draft)
+        # The critique reviews citation text, not matching — keep the first
+        # pass's match decision so server-side resolution below is unaffected.
+        revised["matched_source_gramps_id"] = draft.get("matched_source_gramps_id")
+        revised["matched_repository_gramps_id"] = draft.get("matched_repository_gramps_id")
+        draft = revised
 
     # Resolve matches server-side; a hallucinated id degrades to "new".
     matched_source = next(

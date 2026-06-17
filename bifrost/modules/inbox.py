@@ -86,3 +86,33 @@ async def gather(
 
 async def _uncited(gramps: GrampsClient) -> int:
     return len(await citations.uncited_events(gramps))
+
+
+# Home snapshot key -> Gramps object class (matches activity._db_totals counts).
+SNAP_CLASS = {
+    "people": "Person", "events": "Event", "places": "Place",
+    "citations": "Citation", "media": "Media", "sources": "Source",
+}
+
+
+def trends(dash: dict, weeks_tail: int = 18) -> dict:
+    """Compact per-class history for the interactive home snapshot, derived from
+    the (cached) activity dashboard. Returns the last `weeks_tail` weeks of
+    cumulative counts per snapshot class plus event-citation coverage."""
+    totals = (dash.get("totals") or [])[-weeks_tail:]
+    series = {
+        key: [t["counts"].get(cls, 0) for t in totals]
+        for key, cls in SNAP_CLASS.items()
+    }
+    cov = (dash.get("coverage") or [])[-weeks_tail:]
+    coverage_series = [
+        round(100 * (c.get("total", 0) - c.get("c0", 0)) / c["total"])
+        if c.get("total") else 0
+        for c in cov
+    ]
+    return {
+        "weeks": [t["week"] for t in totals],
+        "series": series,
+        "coverage_pct": coverage_series[-1] if coverage_series else None,
+        "coverage_series": coverage_series,
+    }

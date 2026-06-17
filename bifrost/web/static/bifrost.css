@@ -482,7 +482,26 @@ a.attn-row:hover { background: var(--surface-2); border-color: var(--border-stro
 .attn-n.na { color: var(--muted); }
 .attn-label { flex: 1; }
 .attn-go { color: var(--muted); }
-.snapshot { font-family: 'Space Mono', monospace; color: var(--muted); margin: .2rem 0 1.4rem; }
+/* Home snapshot — interactive stat cards (count + sparkline + weekly delta) */
+.snapgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr));
+  gap: .7rem; margin: .3rem 0 1.4rem; }
+.snapcard { display: block; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: .55rem .7rem; color: inherit; text-decoration: none;
+  transition: border-color .15s, transform .1s, box-shadow .15s; }
+.snapcard:hover { border-color: var(--accent); transform: translateY(-1px); box-shadow: var(--shadow); }
+.snaptop { display: flex; align-items: baseline; justify-content: space-between; gap: .5rem; }
+.snaplabel { color: var(--muted); font-size: .74rem; }
+.snapval { font-family: 'Space Grotesk', sans-serif; font-size: 1.5rem; font-weight: 700; line-height: 1; }
+.snapspark { display: block; width: 100%; height: 34px; margin: .35rem 0 .1rem; }
+.snapspark polyline { fill: none; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.snapspark .endcap { stroke-width: 5; stroke-linecap: round; fill: none; }
+.snapspark .c-person { stroke: #4a7fb5; } .snapspark .c-event { stroke: #3a9a8e; }
+.snapspark .c-place { stroke: #cf9a4a; } .snapspark .c-citation { stroke: #c66660; }
+.snapspark .c-media { stroke: #62aecf; } .snapspark .c-source { stroke: #9a7a62; }
+.snapfoot { display: flex; align-items: center; justify-content: space-between; gap: .4rem; min-height: .9rem; }
+.snapdelta { font-size: .68rem; color: var(--muted); }
+.snapdelta.up { color: var(--ok); } .snapdelta.down { color: var(--warn); }
+.snapcov { font-size: .68rem; color: var(--accent-dark); }
 
 /* manual-id validity marker (shape + colour, not just red border) */
 .manualwrap { display: inline-flex; align-items: center; gap: .3rem; }

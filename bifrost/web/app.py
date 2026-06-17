@@ -15,6 +15,7 @@ from ..core import db
 from ..core.clients import GeminiClient, GrampsClient, ImmichClient, PaperlessClient
 from ..core.clients.anthropic import AnthropicClient
 from ..core.config import load_config
+from ..modules import activity as activity_mod
 from ..modules import inbox as inbox_mod
 
 WEB_DIR = Path(__file__).parent
@@ -90,6 +91,20 @@ async def inbox(request: Request, refresh: bool = False):
     ).fetchall()
     data["runs"] = [dict(r) for r in rows]
     return data
+
+
+@app.get("/api/inbox/trends")
+async def inbox_trends(request: Request, refresh: bool = False):
+    """Per-class history for the home snapshot cards. Reuses (and warms) the same
+    'activity' cache the Activity page uses; tolerant — returns empties on error
+    so the snapshot still renders its live counts."""
+    st = request.app.state
+    try:
+        if st.caches.get("activity") is None or refresh:
+            st.caches["activity"] = await activity_mod.dashboard(st.gramps)
+        return inbox_mod.trends(st.caches["activity"])
+    except Exception:  # noqa: BLE001 — trends are a progressive enhancement
+        return {"weeks": [], "series": {}, "coverage_pct": None, "coverage_series": []}
 
 
 @app.get("/", response_class=HTMLResponse)

@@ -127,6 +127,19 @@ COMPOSE_SCHEMA = {
             "properties": {
                 "first_reference": {"type": "string"},
                 "short_reference": {"type": "string"},
+                "abstract": {
+                    "type": ["string", "null"],
+                    "description": (
+                        "Research abstract of what THIS record entry states — the "
+                        "facts extracted from the record that do NOT belong in the "
+                        "reference notes: the subject's and co-residents' stated "
+                        "details (ages/birth years, birthplaces, occupations, "
+                        "marital status, relationships) and any other content the "
+                        "record gives. Plain prose. Null ONLY when the record "
+                        "carries no extractable detail (e.g. an event-only draft "
+                        "of [NEEDED] placeholders)."
+                    ),
+                },
             },
             "required": ["first_reference", "short_reference"],
         },
@@ -151,6 +164,11 @@ practice wherever they differ.
 
 - Two citation layers only: First Reference Note (full, specific-to-general) \
 and Short Reference Note. Never produce a Source List Entry.
+- Also produce an ABSTRACT note: plain-prose summary of what the record \
+actually states (ages/birth years, birthplaces, occupations, marital status, \
+relationships, and any other content). Extracted facts go in the abstract, \
+NEVER in the reference notes — the notes only locate the record and name the \
+subject and co-residents by relationship.
 - Punctuation: commas within a layer, semicolons between major layers, \
 colons for sub-elements, parentheses for publication details.
 - Records accessed through a digital platform get a dual-layer citation: \
@@ -287,6 +305,9 @@ English gloss in the First Reference Note only.
 - First Reference Note: birth years, birthplaces, occupations and other facts \
 extracted FROM the record must NOT appear here — the FRN locates the record and \
 names the subject and co-residents by relationship only.
+- Abstract: those extracted facts (ages/birth years, birthplaces, occupations, \
+relationships) belong in the abstract note — it must capture them and must not \
+be empty when the record states such detail.
 - Mechanics: dual-layer "citing" for platform records, the citation date left \
 blank, confidence per the GPS tables, and [NEEDED: …] for anything genuinely \
 absent rather than an invented value.
@@ -521,8 +542,14 @@ async def save(
     if source_handle is None:
         raise ValueError("no source chosen and none drafted")
 
+    # Citation reference note (FRN/SRN) + optional research abstract note. Mint
+    # both N ids from one query so a lagging Gramps index can't duplicate them.
+    existing_notes = {i["gramps_id"] for i
+                      in await gramps._paged("/notes/", keys="gramps_id")
+                      if i.get("gramps_id")}
     note_handle = generate_handle()
-    note_gid = await mint("notes", "N")
+    note_gid = next_sequential_id("N", existing_notes)
+    existing_notes.add(note_gid)
     await gramps.create_object({
         "_class": "Note", "handle": note_handle, "gramps_id": note_gid,
         "text": {"_class": "StyledText", "string": _note_text(draft["notes"]), "tags": []},
@@ -531,6 +558,20 @@ async def save(
     })
     created["note"] = note_gid
 
+    note_list = [note_handle]
+    abstract = (draft["notes"].get("abstract") or "").strip()
+    if abstract:
+        abstract_handle = generate_handle()
+        abstract_gid = next_sequential_id("N", existing_notes)
+        await gramps.create_object({
+            "_class": "Note", "handle": abstract_handle, "gramps_id": abstract_gid,
+            "text": {"_class": "StyledText", "string": abstract, "tags": []},
+            "type": "Abstract", "format": 0, "change": now,
+            "tag_list": [], "private": False,
+        })
+        created["abstract_note"] = abstract_gid
+        note_list.append(abstract_handle)
+
     c = draft["citation"]
     citation_handle = generate_handle()
     cit_gid = await mint("citations", "C")
@@ -538,7 +579,7 @@ async def save(
         "_class": "Citation", "handle": citation_handle, "gramps_id": cit_gid,
         "source_handle": source_handle, "page": c["page"],
         "confidence": int(c["confidence"]), "change": now,
-        "note_list": [note_handle], "media_list": [], "attribute_list": [],
+        "note_list": note_list, "media_list": [], "attribute_list": [],
         "tag_list": [], "private": False,
     }
     if media_handle:

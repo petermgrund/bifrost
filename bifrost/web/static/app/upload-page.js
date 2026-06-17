@@ -472,7 +472,8 @@ class UploadPage extends BifrostElement {
             </select></label>`) : nothing}
         ${d.notes ? panel('Notes', html`
           <label class="fieldrow"><span>First reference</span>${bind(d.notes, 'first_reference', true)}</label>
-          <label class="fieldrow"><span>Short reference</span>${bind(d.notes, 'short_reference', true)}</label>`) : nothing}
+          <label class="fieldrow"><span>Short reference</span>${bind(d.notes, 'short_reference', true)}</label>
+          <label class="fieldrow"><span>Abstract</span>${bind(d.notes, 'abstract', true)}</label>`) : nothing}
       </div>
       ${this.renderEventPicker()}
       <div class="toolbar">

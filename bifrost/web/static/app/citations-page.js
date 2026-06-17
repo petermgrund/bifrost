@@ -205,7 +205,7 @@ class CitationsPage extends BifrostElement {
       call_number: '',
       source: this.pick.source ? null : { title: '', author: '', pubinfo: '', abbrev: '' },
       citation: { page: '', confidence: 2 },
-      notes: { first_reference: '', short_reference: '' },
+      notes: { first_reference: '', short_reference: '', abstract: '' },
       quality: null,
     };
     this.reviewFrom = this.step;
@@ -493,6 +493,7 @@ class CitationsPage extends BifrostElement {
         <div class="syncpanel"><h2>Notes</h2>
           <label class="fieldrow"><span>First reference</span>${bind(d.notes, 'first_reference', true)}</label>
           <label class="fieldrow"><span>Short reference</span>${bind(d.notes, 'short_reference', true)}</label>
+          <label class="fieldrow"><span>Abstract</span>${bind(d.notes, 'abstract', true)}</label>
         </div>
       </div>
       <div class="toolbar">

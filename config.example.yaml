@@ -42,10 +42,17 @@ sync:
     gramps_url_field_id: 0
     date_qualifier_field_id: null
     date_meaning_field_id: null
+    # Custom field ids used by the upload wizard's metadata form
+    family_group_field_id: null
+    source_url_field_id: null
+    source_url_access_field_id: null
     # Paperless tag id marking documents with a transcription to sync
     transcription_tag_id: null
     # Paperless tag NAME marking docs to transcribe in place with Gemini OCR
     ocr_tag: "Gemini OCR"
+    # House-style master doc (path inside the container); the upload wizard feeds
+    # its Paperless section to the LLM for metadata autofill
+    house_style_path: "/app/house_style_master.md"
 
 anthropic:
   # Used by the citation generator to compose EE citation text (editable

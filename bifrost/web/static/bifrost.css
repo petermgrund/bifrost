@@ -147,13 +147,26 @@ button.chip.active { background: var(--accent-soft); border-color: var(--accent)
 button.chip.active::before { content: ""; display: inline-block; width: .42rem; height: .42rem;
   border-radius: 50%; background: var(--accent); margin-right: .4rem; vertical-align: middle; }
 
-input[type="search"], input[type="text"] {
+input[type="search"], input[type="text"], input[type="date"], select {
   font: inherit; font-size: .9rem;
   background: var(--surface); color: var(--text);
   border: 1px solid var(--border-strong); border-radius: var(--radius);
   padding: .42rem .7rem; width: 100%;
 }
-input:focus { outline: none; border-color: var(--accent); }
+input:focus, select:focus { outline: none; border-color: var(--accent); }
+select { cursor: pointer; }
+
+/* Upload wizard: drop zone + preview pane */
+.dropzone {
+  border: 2px dashed var(--border-strong); border-radius: 12px;
+  padding: 2.5rem 1.5rem; text-align: center; cursor: pointer;
+  background: var(--surface); transition: border-color .15s, background .15s;
+}
+.dropzone:hover, .dropzone.over { border-color: var(--accent); background: var(--accent-soft); }
+.dropzone p { margin: .3rem 0; }
+.previewpane { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; min-height: 60vh; background: var(--surface-2); }
+.previewpane iframe { width: 100%; height: 78vh; border: 0; display: block; }
+.previewpane img { width: 100%; height: auto; max-height: 78vh; object-fit: contain; display: block; }
 
 /* ---- tabs ---- */
 .pagehead { display: flex; align-items: center; gap: 1.25rem; margin: .75rem 0 1.25rem; }

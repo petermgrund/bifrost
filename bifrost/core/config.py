@@ -60,10 +60,17 @@ class SyncPaperlessConfig:
     gramps_url_field_id: int = 0
     date_qualifier_field_id: int | None = None
     date_meaning_field_id: int | None = None
+    # Custom field ids used by the upload wizard's metadata form.
+    family_group_field_id: int | None = None
+    source_url_field_id: int | None = None
+    source_url_access_field_id: int | None = None
     # Paperless tag id marking documents with a transcription to sync.
     transcription_tag_id: int | None = None
     # Paperless tag NAME marking documents to (re-)OCR with Gemini in place.
     ocr_tag: str = ""
+    # House-style master doc; the upload wizard feeds its Paperless section to
+    # the LLM for field autofill. Path as seen inside the container.
+    house_style_path: str = "/app/house_style_master.md"
 
 
 @dataclass(frozen=True)
@@ -151,8 +158,12 @@ def load_config(path: str | Path | None = None) -> Config:
         gramps_url_field_id=int(sp_raw.get("gramps_url_field_id") or 0),
         date_qualifier_field_id=sp_raw.get("date_qualifier_field_id"),
         date_meaning_field_id=sp_raw.get("date_meaning_field_id"),
+        family_group_field_id=sp_raw.get("family_group_field_id"),
+        source_url_field_id=sp_raw.get("source_url_field_id"),
+        source_url_access_field_id=sp_raw.get("source_url_access_field_id"),
         transcription_tag_id=sp_raw.get("transcription_tag_id"),
         ocr_tag=sp_raw.get("ocr_tag") or "",
+        house_style_path=sp_raw.get("house_style_path") or "/app/house_style_master.md",
     )
     gem_raw = raw.get("gemini") or {}
     return Config(

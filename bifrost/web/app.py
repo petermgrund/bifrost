@@ -51,6 +51,7 @@ from .routes.faces import router as faces_router  # noqa: E402
 from .routes.idgen import router as idgen_router  # noqa: E402
 from .routes.places import router as places_router  # noqa: E402
 from .routes.sync import router as sync_router  # noqa: E402
+from .routes.upload import router as upload_router  # noqa: E402
 
 app.include_router(activity_router)
 app.include_router(citations_router)
@@ -58,6 +59,7 @@ app.include_router(faces_router)
 app.include_router(idgen_router)
 app.include_router(places_router)
 app.include_router(sync_router)
+app.include_router(upload_router)
 
 
 @app.get("/healthz")

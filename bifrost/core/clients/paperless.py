@@ -123,3 +123,58 @@ class PaperlessClient:
         """Set the document's full tag list (pass existing + new to add one)."""
         await self._request(
             "PATCH", f"/api/documents/{doc_id}/", json={"tags": tag_ids})
+
+    async def patch_fields(self, doc_id: int, payload: dict) -> None:
+        """Generic document PATCH — title / created / correspondent /
+        document_type / tags / custom_fields in one call (upload wizard save)."""
+        await self._request("PATCH", f"/api/documents/{doc_id}/", json=payload)
+
+    # --- ingest (upload wizard) ---
+
+    async def upload(
+        self, filename: str, data: bytes, mime: str, tags: list[int],
+        title: str | None = None, created: str | None = None,
+    ) -> str:
+        """POST a file into the Paperless consume pipeline. Returns the consume
+        TASK uuid (a string) — the document id does not exist until consumption
+        finishes; poll get_task(uuid) for status + related_document."""
+        form: list[tuple[str, str]] = [("tags", str(t)) for t in tags]
+        if title:
+            form.append(("title", title))
+        if created:
+            form.append(("created", created))
+        resp = await self._request(
+            "POST", "/api/documents/post_document/",
+            files={"document": (filename, data, mime or "application/octet-stream")},
+            data=form,
+        )
+        # Body is the task uuid as a bare JSON string.
+        return str(resp.json()).strip()
+
+    async def get_task(self, task_uuid: str) -> dict:
+        """Status of a consume task: status (PENDING/STARTED/SUCCESS/FAILURE),
+        related_document (the new doc id on success)."""
+        resp = await self._request("GET", "/api/tasks/", params={"task_id": task_uuid})
+        data = resp.json()
+        items = data.get("results", []) if isinstance(data, dict) else data
+        return items[0] if items else {}
+
+    # --- option lists for the upload form (id + name) ---
+
+    async def list_correspondents(self) -> list[dict]:
+        return [{"id": c["id"], "name": c.get("name", "")}
+                for c in await self._paginated("/api/correspondents/")]
+
+    async def list_document_types(self) -> list[dict]:
+        return [{"id": d["id"], "name": d.get("name", "")}
+                for d in await self._paginated("/api/document_types/")]
+
+    async def list_tags(self) -> list[dict]:
+        return [{"id": t["id"], "name": t.get("name", "")}
+                for t in await self._paginated("/api/tags/")]
+
+    async def list_all_documents(self, fields: str | None = None) -> list[dict]:
+        """Every document (paginated). `fields` trims the payload via the
+        Paperless `fields=` selector when given."""
+        params = {"fields": fields} if fields else None
+        return await self._paginated("/api/documents/", params=params)

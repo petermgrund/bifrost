@@ -524,6 +524,26 @@ async def uncited_events(gramps: GrampsClient) -> list[dict]:
     return out
 
 
+async def all_events(gramps: GrampsClient) -> list[dict]:
+    """Every event (light) for the upload-wizard attach picker — like
+    uncited_events but unfiltered, flagging which already carry a citation."""
+    events = await gramps._paged(
+        "/events/", keys="handle,gramps_id,type,date,place,description,citation_list")
+    places = {
+        p["handle"]: ((p.get("name") or {}).get("value") or p.get("gramps_id", ""))
+        for p in await gramps._paged("/places/", keys="handle,gramps_id,name")}
+    out = [{
+        "handle": e["handle"], "gramps_id": e.get("gramps_id", ""),
+        "type": str(e.get("type") or "Event"),
+        "date": _event_date_text(e),
+        "place": places.get(e.get("place"), ""),
+        "description": e.get("description", ""),
+        "cited": bool(e.get("citation_list")),
+    } for e in events]
+    out.sort(key=lambda r: (r["cited"], r["type"], r["date"]))
+    return out
+
+
 async def event_detail(
     gramps: GrampsClient, handle: str, cited: set[str]
 ) -> dict:

@@ -1,4 +1,8 @@
 config.yaml
+# Personal house-style doc — worked examples contain real family data, and it's
+# bind-mounted from the host, so it never needs to be in the repo. Remove this
+# line if you decide to version it (scrub personal data first).
+house_style_master.md
 data/
 __pycache__/
 *.pyc

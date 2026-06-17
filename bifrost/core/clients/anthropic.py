@@ -60,7 +60,11 @@ class AnthropicClient:
         body = {
             "model": self._model,
             "max_tokens": max_tokens,
-            "system": system,
+            # Cache the system prefix: it carries the full house-style guide
+            # (~50k tokens, identical across calls), so this turns most of the
+            # input cost into cheap cache reads within the 5-min window.
+            "system": [{"type": "text", "text": system,
+                        "cache_control": {"type": "ephemeral"}}],
             "messages": [{"role": "user", "content": user}],
             "tools": [{
                 "name": "emit_result",

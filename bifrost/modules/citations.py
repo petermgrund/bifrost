@@ -158,9 +158,35 @@ and compose only the citation locator, confidence, notes and quality \
 consistent with that source's established style."""
 
 _STYLE_DIR = Path(__file__).parent / "data"
+# The single source of truth, edited live by Peter and bind-mounted into the
+# container at /app/house_style_master.md (same resolution as config.yaml).
+_MASTER = Path(__file__).resolve().parents[2] / "house_style_master.md"
+
+
+def _master_citation_style() -> str:
+    """The citation-relevant body of the master house-style doc: everything
+    BEFORE '# Part C' — i.e. Part 0 (incl. the Gramps field map), Part A (common
+    conventions) and Part B.1–B.4 (per-region/record-type guides). Part C is
+    Paperless scan metadata and the appendices are change logs, both irrelevant
+    (and Part C's Title rules conflict with citation subjects), so they're cut.
+    Read fresh each call so live edits to the master take effect immediately.
+    Returns '' if the master isn't reachable."""
+    try:
+        text = _MASTER.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    lines = text.splitlines()
+    cut = next((i for i, ln in enumerate(lines) if ln.startswith("# Part C")),
+               len(lines))
+    return "\n".join(lines[:cut]).strip()
 
 
 def _style_guides() -> str:
+    master = _master_citation_style()
+    if master:
+        return master
+    # Fallback only if the master is missing (e.g. bind mount absent): the older,
+    # incomplete per-region guides bundled in data/.
     return "\n\n---\n\n".join(
         p.read_text() for p in sorted(_STYLE_DIR.glob("style_*.md")))
 

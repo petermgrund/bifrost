@@ -67,11 +67,11 @@ class SyncPanel extends BifrostElement {
           @click=${() => this.run(false)}>Preview</button>
         <button class="${this.canApply ? 'primary' : ''}" ?disabled=${!this.canApply || this.running}
           @click=${() => this.run(true)}>Apply</button>
-        ${!this.maintenance && this.source !== 'ocr' ? html`<label class="hint manualtoggle">
-          <input type="checkbox" .checked=${this.manualMode}
-            @change=${(e) => (this.manualMode = e.target.checked)}>
-          Assign my own Gramps IDs</label>` : nothing}
         ${this.status ? html`<span class="hint">${this.status}</span>` : nothing}
+        <span class="spacer"></span>
+        ${!this.maintenance && this.source !== 'ocr' ? html`<button
+          class="chip ${this.manualMode ? 'active' : ''}" title="Pick the Gramps id for each new item"
+          @click=${() => (this.manualMode = !this.manualMode)}>Assign my own Gramps IDs</button>` : nothing}
       </div>
       ${this.manualMode && isPreview ? html`<p class="hint">Type a 6-char id (safe
         alphabet) for any new item; blanks get an auto id. A taken id is rejected on

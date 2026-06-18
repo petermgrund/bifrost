@@ -20,6 +20,31 @@ function runResult(r) {
   try { return summarize(JSON.parse(r.summary).data, true); } catch { return ''; }
 }
 
+/* Plain-English label for an internal job id (e.g. sync.paperless.versions). */
+const JOB_LABELS = {
+  'sync.paperless': 'Paperless → Gramps',
+  'sync.paperless.versions': 'Paperless version sync',
+  'sync.paperless.transcriptions': 'Rewrite transcriptions',
+  'sync.paperless.resync-media': 'Resync media version',
+  'sync.immich': 'Immich → Gramps',
+  'ocr.gemini': 'Gemini OCR',
+  'upload.ocr': 'Document OCR',
+  'upload.to-gramps': 'Create Gramps media',
+  'places.boundaries': 'Place boundaries',
+  'citations.save': 'Citation created',
+  'faces.apply': 'Faces applied',
+  'faces.link': 'Face linked',
+  'faces.repad': 'Face padding',
+};
+function jobLabel(job) {
+  if (!job) return '';
+  const preview = job.endsWith('.preview');
+  const base = preview ? job.slice(0, -8) : job;
+  const label = JOB_LABELS[base]
+    || base.replace(/[._-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  return preview ? `${label} (preview)` : label;
+}
+
 class InboxPage extends BifrostElement {
   static properties = {
     data: { state: true }, error: { state: true }, loading: { state: true },
@@ -70,11 +95,11 @@ class InboxPage extends BifrostElement {
       </div>` : html`<p class="hint">All caught up — nothing pending.</p>`}
 
       <h2>Recent runs</h2>
-      ${runs.length ? html`<table class="results">
-        <tr><th></th><th>job</th><th>result</th><th>when</th></tr>
+      ${runs.length ? html`<table class="results runs-table">
+        <tr><th></th><th>Task</th><th>Result</th><th>When</th></tr>
         ${runs.map((r) => html`<tr>
           <td>${statusIcon(r.status)}</td>
-          <td>${r.job}</td>
+          <td>${jobLabel(r.job)}</td>
           <td class="hint">${runResult(r)}</td>
           <td class="hint">${relTime(r.started_at)}</td>
         </tr>`)}

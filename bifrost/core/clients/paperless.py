@@ -138,11 +138,14 @@ class PaperlessClient:
         """POST a file into the Paperless consume pipeline. Returns the consume
         TASK uuid (a string) — the document id does not exist until consumption
         finishes; poll get_task(uuid) for status + related_document."""
-        form: list[tuple[str, str]] = [("tags", str(t)) for t in tags]
+        # httpx multipart requires data= to be a DICT — a list/tuples is read as
+        # raw (sync) content, which drops files= and fails on the async client.
+        # A list value is sent as repeated form fields (one `tags` per id).
+        form: dict = {"tags": [str(t) for t in tags]}
         if title:
-            form.append(("title", title))
+            form["title"] = title
         if created:
-            form.append(("created", created))
+            form["created"] = created
         resp = await self._request(
             "POST", "/api/documents/post_document/",
             files={"document": (filename, data, mime or "application/octet-stream")},

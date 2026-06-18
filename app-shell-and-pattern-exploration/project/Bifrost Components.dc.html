@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./bifrost.css">
+<link rel="stylesheet" href="./bifrost-kit.css">
+<style>
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+</style>
+</helmet>
+
+<div data-theme="{{theme}}" style="min-height:100vh;background:var(--bf-surface);color:var(--bf-on-surface);font:var(--bf-body-medium);padding:0 0 90px;">
+
+  <!-- header -->
+  <div style="position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:20px;padding:20px 48px;background:var(--bf-surface-container-low);border-bottom:1px solid var(--bf-outline-variant);">
+    <div style="display:flex;flex-direction:column;gap:3px;">
+      <div style="font:var(--bf-headline-small);color:var(--bf-on-surface);">Bifrost components</div>
+      <div style="font:var(--bf-body-small);color:var(--bf-on-surface-variant);">The class kit · <span style="font:var(--bf-label-medium);">bifrost-kit.css</span> on the token layer</div>
+    </div>
+    <div style="flex:1;"></div>
+    <div class="bf-seg">
+      <button onClick="{{setLight}}" class="{{lightSegClass}}">Light</button>
+      <button onClick="{{setDark}}" class="{{darkSegClass}}">Dark</button>
+    </div>
+  </div>
+
+  <div style="max-width:1080px;margin:0 auto;padding:40px 48px;display:flex;flex-direction:column;gap:48px;">
+
+    <!-- BUTTONS -->
+    <section style="display:flex;flex-direction:column;gap:16px;">
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <div style="font:var(--bf-title-large);color:var(--bf-on-surface);">Buttons</div>
+        <div style="font:var(--bf-body-medium);color:var(--bf-on-surface-variant);">One filled primary per action cluster. Tonal &amp; outlined for secondary, text for low-emphasis.</div>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;background:var(--bf-surface-container-low);border-radius:var(--bf-shape-lg);padding:24px;" data-comment-anchor="829f03e9c7-div">
+        <button class="bf-btn bf-btn--filled">Apply</button>
+        <button class="bf-btn bf-btn--tonal">Preview</button>
+        <button class="bf-btn bf-btn--outlined">Re-run</button>
+        <button class="bf-btn bf-btn--text">Cancel</button>
+        <button class="bf-btn bf-btn--danger">Release</button>
+        <button class="bf-btn bf-btn--filled" disabled="true">Disabled</button>
+      </div>
+    </section>
+
+    <!-- PILLS + DOTS -->
+    <section style="display:flex;flex-direction:column;gap:16px;">
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <div style="font:var(--bf-title-large);color:var(--bf-on-surface);">Status pills &amp; dots</div>
+        <div style="font:var(--bf-body-medium);color:var(--bf-on-surface-variant);">Action types in preview tables; lifecycle stages; pipeline status dots.</div>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;background:var(--bf-surface-container-low);border-radius:var(--bf-shape-lg);padding:24px;" data-comment-anchor="a521f9f8c0-div">
+        <span class="bf-pill bf-pill--create">create</span>
+        <span class="bf-pill bf-pill--update">update</span>
+        <span class="bf-pill bf-pill--skip">skip</span>
+        <span class="bf-pill bf-pill--reserved">reserved</span>
+        <span class="bf-pill bf-pill--assigned">assigned</span>
+        <span class="bf-pill bf-pill--minted">minted</span>
+        <span style="width:1px;height:22px;background:var(--bf-outline-variant);"></span>
+        <span style="display:inline-flex;align-items:center;gap:8px;font:var(--bf-body-medium);"><span class="bf-dot bf-dot--ok"></span>up to date</span>
+        <span style="display:inline-flex;align-items:center;gap:8px;font:var(--bf-body-medium);" data-comment-anchor="3d00ec0528-span"><span class="bf-dot bf-dot--warn"></span>ready to apply</span>
+        <span style="display:inline-flex;align-items:center;gap:8px;font:var(--bf-body-medium);"><span class="bf-dot bf-dot--error"></span>failed</span>
+      </div>
+    </section>
+
+    <!-- CHIPS + SEGMENTED + DECISION -->
+    <section style="display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start;">
+      <div style="display:flex;flex-direction:column;gap:16px;">
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          <div style="font:var(--bf-title-large);color:var(--bf-on-surface);">Chips &amp; segmented</div>
+          <div style="font:var(--bf-body-medium);color:var(--bf-on-surface-variant);">Chips = multi-select filter. Segmented = choose one of N.</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:16px;background:var(--bf-surface-container-low);border-radius:var(--bf-shape-lg);padding:24px;">
+          <div class="bf-chip-set">
+            <button class="bf-chip bf-chip--selected">All</button>
+            <button class="bf-chip">Reserved</button>
+            <button class="bf-chip">Assigned</button>
+            <button class="bf-chip">Minted</button>
+          </div>
+          <div class="bf-seg">
+            <button class="bf-seg__item bf-seg__item--selected">Auto-assign</button>
+            <button class="bf-seg__item">Assign my own</button>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:16px;">
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          <div style="font:var(--bf-title-large);color:var(--bf-on-surface);">Decision block</div>
+          <div style="font:var(--bf-body-medium);color:var(--bf-on-surface-variant);">A crucial choice — labelled, explained, grouped with what it affects.</div>
+        </div>
+        <div class="bf-decision">
+          <div style="display:flex;flex-direction:column;gap:2px;">
+            <div class="bf-decision__title">Attach this citation to</div>
+            <div class="bf-decision__desc">Where the saved citation lands in the tree.</div>
+          </div>
+          <div class="bf-seg" style="align-self:flex-start;">
+            <button class="bf-seg__item">Media only</button>
+            <button class="bf-seg__item bf-seg__item--selected">A specific event</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- FORM -->
+    <section style="display:flex;flex-direction:column;gap:16px;">
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <div style="font:var(--bf-title-large);color:var(--bf-on-surface);">Form fields</div>
+        <div style="font:var(--bf-body-medium);color:var(--bf-on-surface-variant);">Label above control; focus ring uses the primary role.</div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;background:var(--bf-surface-container-low);border-radius:var(--bf-shape-lg);padding:24px;">
+        <label class="bf-field"><span class="bf-label">Title</span><input class="bf-input" placeholder="1881 Census — Whitby" /></label>
+        <label class="bf-field"><span class="bf-label">Record type</span><select class="bf-select"><option>Census</option><option>Marriage</option><option>Baptism</option></select></label>
+        <label class="bf-field" style="grid-column:1 / -1;"><span class="bf-label">Research abstract</span><textarea class="bf-textarea" placeholder="Drafted by the LLM, editable…"></textarea></label>
+      </div>
+    </section>
+
+    <!-- CARD + TABLE -->
+    <section style="display:flex;flex-direction:column;gap:16px;">
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <div style="font:var(--bf-title-large);color:var(--bf-on-surface);">Card · action row · preview table</div>
+        <div style="font:var(--bf-body-medium);color:var(--bf-on-surface-variant);">Fixed anatomy: title → description → content → action row (cluster left, one primary).</div>
+      </div>
+      <div class="bf-card">
+        <div class="bf-card__head">
+          <div class="bf-card__title">Paperless → Gramps</div>
+          <div class="bf-card__desc">Documents that would become sources &amp; citations.</div>
+        </div>
+        <table class="bf-table">
+          <thead><tr><th style="width:110px;">Action</th><th>What</th><th>Detail</th></tr></thead>
+          <tbody>
+            <tr><td><span class="bf-pill bf-pill--create">create</span></td><td>1881 Census — Whitby</td><td class="bf-muted" data-comment-anchor="fcd6162180-td">new source S0042</td></tr>
+            <tr><td><span class="bf-pill bf-pill--update">update</span></td><td>Baptism record — 1854</td><td class="bf-muted">page no. changed</td></tr>
+            <tr><td><span class="bf-pill bf-pill--skip">skip</span></td><td>Probate index</td><td class="bf-muted">already linked</td></tr>
+          </tbody>
+        </table>
+        <div class="bf-summary">Would create 6 · update 2 · skip 3.</div>
+        <div class="bf-decision">
+          <div style="display:flex;flex-direction:column;gap:2px;">
+            <div class="bf-decision__title">Media IDs</div>
+            <div class="bf-decision__desc">How new media objects are identified when applied.</div>
+          </div>
+          <div class="bf-seg" style="align-self:flex-start;">
+            <button class="bf-seg__item bf-seg__item--selected">Auto-assign</button>
+            <button class="bf-seg__item">Assign my own</button>
+          </div>
+        </div>
+        <div class="bf-actions">
+          <button class="bf-btn bf-btn--filled">Apply 8 changes</button>
+          <button class="bf-btn bf-btn--outlined">Re-run preview</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- STEPPER -->
+    <section style="display:flex;flex-direction:column;gap:16px;">
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <div style="font:var(--bf-title-large);color:var(--bf-on-surface);">Wizard stepper</div>
+        <div style="font:var(--bf-body-medium);color:var(--bf-on-surface-variant);">Done = filled dot, active = filled + number, upcoming = outline. No checkmarks.</div>
+      </div>
+      <div style="background:var(--bf-surface-container-low);border-radius:var(--bf-shape-lg);padding:24px;">
+        <div class="bf-stepper" style="max-width:560px;">
+          <div class="bf-step bf-step--done"><span class="bf-step__dot"></span><span class="bf-step__label">Start</span></div>
+          <div class="bf-step__line bf-step__line--done"></div>
+          <div class="bf-step bf-step--active"><span class="bf-step__dot">2</span><span class="bf-step__label">Edit</span></div>
+          <div class="bf-step__line"></div>
+          <div class="bf-step"><span class="bf-step__dot">3</span><span class="bf-step__label">Citation</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TWO-PANE -->
+    <section style="display:flex;flex-direction:column;gap:16px;">
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <div style="font:var(--bf-title-large);color:var(--bf-on-surface);">Two-pane review</div>
+        <div style="font:var(--bf-body-medium);color:var(--bf-on-surface-variant);">Media / preview on one side, the thing you act on on the other.</div>
+      </div>
+      <div class="bf-twopane">
+        <div class="bf-preview" style="min-height:200px;">document / image preview</div>
+        <div class="bf-card bf-card--flat">
+          <div class="bf-card__head"><div class="bf-card__title">Metadata</div></div>
+          <div class="bf-card__body">
+            <label class="bf-field"><span class="bf-label">Title</span><input class="bf-input" placeholder="Record title" /></label>
+            <label class="bf-field"><span class="bf-label">Date</span><input class="bf-input" placeholder="1881" /></label>
+          </div>
+          <div class="bf-actions">
+            <button class="bf-btn bf-btn--filled">Save</button>
+            <button class="bf-btn bf-btn--text">Autofill from house style</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- STATES -->
+    <section style="display:flex;flex-direction:column;gap:16px;">
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <div style="font:var(--bf-title-large);color:var(--bf-on-surface);">Empty · loading · error · all caught up</div>
+        <div style="font:var(--bf-body-medium);color:var(--bf-on-surface-variant);">Every async surface ships all four.</div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:18px;">
+        <div class="bf-state bf-state--empty"><span class="bf-ico" style="width:28px;height:28px;"></span><span class="bf-state__title">Nothing yet</span><button class="bf-btn bf-btn--filled bf-btn--sm">Add one</button></div>
+        <div class="bf-state bf-state--loading"><span class="bf-spinner"></span><span class="bf-state__desc">Working…</span></div>
+        <div class="bf-state bf-state--error" data-comment-anchor="c3fec1845c-div"><span class="bf-state__title">Something failed</span><button class="bf-btn bf-btn--error bf-btn--sm">Retry</button></div>
+        <div class="bf-state bf-state--done"><span class="bf-state__title">All caught up</span></div>
+      </div>
+    </section>
+
+    <!-- NAV -->
+    <section style="display:flex;flex-direction:column;gap:16px;">
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <div style="font:var(--bf-title-large);color:var(--bf-on-surface);">Navigation drawer</div>
+        <div style="font:var(--bf-body-medium);color:var(--bf-on-surface-variant);">Grouped destinations; active item carries the secondary-container.</div>
+      </div>
+      <div class="bf-nav" style="width:240px;border-radius:var(--bf-shape-lg);">
+        <div class="bf-nav__group">
+          <div class="bf-nav__label">Add</div>
+          <button class="bf-nav__item"><span class="bf-ico"></span>Upload</button>
+          <button class="bf-nav__item"><span class="bf-ico"></span>Transcribe</button>
+          <button class="bf-nav__item bf-nav__item--active"><span class="bf-ico"></span>Paperless</button>
+          <button class="bf-nav__item"><span class="bf-ico"></span>Immich</button>
+        </div>
+        <div class="bf-nav__group">
+          <div class="bf-nav__label">Curate</div>
+          <button class="bf-nav__item"><span class="bf-ico"></span>Faces</button>
+          <button class="bf-nav__item"><span class="bf-ico"></span>Citations</button>
+        </div>
+      </div>
+    </section>
+
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{
+  &quot;$preview&quot;: { &quot;width&quot;: 1080, &quot;height&quot;: 900 },
+  &quot;theme&quot;: { &quot;editor&quot;: &quot;enum&quot;, &quot;options&quot;: [&quot;light&quot;, &quot;dark&quot;], &quot;default&quot;: &quot;light&quot;, &quot;tsType&quot;: &quot;'light'|'dark'&quot; }
+}">
+class Component extends DCLogic {
+  state = { theme: this.props.theme || 'light' };
+  renderVals(){
+    const isDark = this.state.theme === 'dark';
+    return {
+      theme: this.state.theme,
+      setLight: () => this.setState({ theme: 'light' }),
+      setDark: () => this.setState({ theme: 'dark' }),
+      lightSegClass: isDark ? 'bf-seg__item' : 'bf-seg__item bf-seg__item--selected',
+      darkSegClass: isDark ? 'bf-seg__item bf-seg__item--selected' : 'bf-seg__item',
+    };
+  }
+}
+</script>
+</body>
+</html>

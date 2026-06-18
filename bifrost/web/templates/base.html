@@ -5,59 +5,79 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Bifrost{% endblock %}</title>
   <script>
-    // theme: saved preference wins; otherwise follow the system (set before paint)
-    const t = localStorage.getItem('bifrost-theme');
-    if (t) document.documentElement.dataset.theme = t;
+    // theme: saved preference wins, else follow the system; always set explicitly
+    // so the M3 [data-theme] tokens resolve on first paint.
+    const t = localStorage.getItem('bifrost-theme')
+      || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    document.documentElement.dataset.theme = t;
   </script>
   <link rel="icon" type="image/svg+xml" href="/static/bifrost_logo.svg">
   <link rel="stylesheet" href="/static/bifrost.css">
+  <link rel="stylesheet" href="/static/bifrost-tokens.css">
+  <link rel="stylesheet" href="/static/bifrost-kit.css">
   <script type="importmap">
   { "imports": { "lit": "/static/vendor/lit-all.min.js" } }
   </script>
 </head>
 <body>
-  <header class="appbar">
-    <button class="navtoggle" aria-label="Toggle navigation"
-      onclick="document.querySelector('.drawer').classList.toggle('open')">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
-    </button>
-    <a class="brand" href="/"><img class="logo" src="/static/bifrost_logo.svg" alt="">Bifrost</a>
-    <span class="spacer"></span>
-    <button id="theme-toggle" title="Toggle dark mode" onclick="
-      const sys = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-      const cur = document.documentElement.dataset.theme || sys;
-      const next = cur === 'dark' ? 'light' : 'dark';
-      document.documentElement.dataset.theme = next;
-      localStorage.setItem('bifrost-theme', next);
-    ">◐</button>
-  </header>
-  <div class="shell">
-    {% set p = request.url.path %}
-    <nav class="drawer">
-      <div class="navgroup">
-        <span class="navlabel">Overview</span>
-        <a href="/" class="{{ 'active' if p == '/' else '' }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11l8-7 8 7"/><path d="M6 10v9h12v-9"/></svg>Home</a>
+  {% set p = request.url.path %}
+  <div class="bf-app">
+    <header class="bf-appbar">
+      <a class="bf-brand" href="/">
+        <svg width="30" height="22" viewBox="0 0 30 22" aria-hidden="true"><path d="M3 20 A12 12 0 0 1 27 20" fill="none" stroke="var(--bf-tertiary)" stroke-width="2.6" stroke-linecap="round"/><path d="M7 20 A8 8 0 0 1 23 20" fill="none" stroke="var(--bf-warning)" stroke-width="2.6" stroke-linecap="round"/><path d="M11 20 A4 4 0 0 1 19 20" fill="none" stroke="var(--bf-primary)" stroke-width="2.6" stroke-linecap="round"/></svg>
+        Bifrost
+      </a>
+      <div style="flex:1"></div>
+      <div class="bf-seg" id="theme-seg">
+        <button class="bf-seg__item" data-set-theme="light">Light</button>
+        <button class="bf-seg__item" data-set-theme="dark">Dark</button>
       </div>
-      <div class="navgroup">
-        <span class="navlabel">Add</span>
-        <a href="/upload" class="{{ 'active' if p.startswith('/upload') else '' }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V5"/><path d="M7 9l5-5 5 5"/><path d="M5 19h14"/></svg>Upload</a>
-        <a href="/transcribe" class="{{ 'active' if p.startswith('/transcribe') else '' }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4h9l3 3v13H6z"/><path d="M9 10h6M9 13h6M9 16h3"/></svg>Transcribe</a>
-        <a href="/sync" class="{{ 'active' if p.startswith('/sync') else '' }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 0 0-14-4L4 9"/><path d="M4 5v4h4"/><path d="M4 13a8 8 0 0 0 14 4l2-2"/><path d="M20 19v-4h-4"/></svg>Sync</a>
-      </div>
-      <div class="navgroup">
-        <span class="navlabel">Curate</span>
-        <a href="/faces" class="{{ 'active' if p.startswith('/faces') else '' }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/></svg>Faces</a>
-        <a href="/citations" class="{{ 'active' if p.startswith('/citations') else '' }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4h11a1 1 0 0 1 1 1v15H7a1 1 0 0 1-1-1V4z"/><path d="M9 8h6M9 12h5"/></svg>Citations</a>
-      </div>
-      <div class="navgroup">
-        <span class="navlabel">Tools</span>
-        <a href="/places" class="{{ 'active' if p.startswith('/places') else '' }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-6-5.2-6-10a6 6 0 0 1 12 0c0 4.8-6 10-6 10z"/><circle cx="12" cy="11" r="2"/></svg>Places</a>
-        <a href="/activity" class="{{ 'active' if p.startswith('/activity') else '' }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V5"/><path d="M4 19h16"/><path d="M8 15l3-4 3 2 4-6"/></svg>Activity</a>
-        <a href="/idgen" class="{{ 'active' if p.startswith('/idgen') else '' }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h16M4 15h16M10 4L8 20M16 4l-2 16"/></svg>IDs</a>
-      </div>
-    </nav>
-    <main>{% block content %}{% endblock %}</main>
+    </header>
+
+    <div class="bf-shell">
+      <nav class="bf-nav">
+        <div class="bf-nav__group">
+          <div class="bf-nav__label">Overview</div>
+          <a class="bf-nav__item {{ 'bf-nav__item--active' if p == '/' else '' }}" href="/"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.6 12 3l9 6.6V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Home</a>
+        </div>
+        <div class="bf-nav__group">
+          <div class="bf-nav__label">Add</div>
+          <a class="bf-nav__item {{ 'bf-nav__item--active' if p.startswith('/upload') else '' }}" href="/upload"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4m0 0 4 4m-4-4-4 4M5 20h14"/></svg>Upload</a>
+          <a class="bf-nav__item {{ 'bf-nav__item--active' if p.startswith('/transcribe') else '' }}" href="/transcribe"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Transcribe</a>
+          <a class="bf-nav__item {{ 'bf-nav__item--active' if p.startswith('/sync') else '' }}" href="/sync"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 0 0-14-4L4 9"/><path d="M4 5v4h4"/><path d="M4 13a8 8 0 0 0 14 4l2-2"/><path d="M20 19v-4h-4"/></svg>Sync</a>
+        </div>
+        <div class="bf-nav__group">
+          <div class="bf-nav__label">Curate</div>
+          <a class="bf-nav__item {{ 'bf-nav__item--active' if p.startswith('/faces') else '' }}" href="/faces"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 10h.01M15 10h.01"/><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0"/></svg>Faces</a>
+          <a class="bf-nav__item {{ 'bf-nav__item--active' if p.startswith('/citations') else '' }}" href="/citations"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 16V6a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H9l-4 4z"/><path d="M9 9h6M9 12h4"/></svg>Citations</a>
+        </div>
+        <div class="bf-nav__group">
+          <div class="bf-nav__label">Tools</div>
+          <a class="bf-nav__item {{ 'bf-nav__item--active' if p.startswith('/places') else '' }}" href="/places"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s7-6 7-11a7 7 0 1 0-14 0c0 5 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>Places</a>
+          <a class="bf-nav__item {{ 'bf-nav__item--active' if p.startswith('/activity') else '' }}" href="/activity"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V5M4 19h16M8 16v-4M12 16V8M16 16v-6"/></svg>Activity</a>
+          <a class="bf-nav__item {{ 'bf-nav__item--active' if p.startswith('/idgen') else '' }}" href="/idgen"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h6.6a2 2 0 0 1 1.4.6l8 8a2 2 0 0 1 0 2.8l-5.6 5.6a2 2 0 0 1-2.8 0l-8-8A2 2 0 0 1 4 11.6z"/><path d="M8 8h.01"/></svg>IDs</a>
+        </div>
+      </nav>
+
+      <div class="bf-content"><main>{% block content %}{% endblock %}</main></div>
+    </div>
   </div>
+
+  <script>
+    (function () {
+      const cur = document.documentElement.dataset.theme;
+      const items = document.querySelectorAll('#theme-seg [data-set-theme]');
+      items.forEach((b) => {
+        if (b.dataset.setTheme === cur) b.classList.add('bf-seg__item--selected');
+        b.addEventListener('click', () => {
+          const t = b.dataset.setTheme;
+          document.documentElement.dataset.theme = t;
+          localStorage.setItem('bifrost-theme', t);
+          items.forEach((x) => x.classList.toggle('bf-seg__item--selected', x === b));
+        });
+      });
+    })();
+  </script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

@@ -15,7 +15,6 @@ from ..core import db
 from ..core.clients import GeminiClient, GrampsClient, ImmichClient, PaperlessClient
 from ..core.clients.anthropic import AnthropicClient
 from ..core.config import load_config
-from ..modules import activity as activity_mod
 from ..modules import inbox as inbox_mod
 
 WEB_DIR = Path(__file__).parent
@@ -46,23 +45,19 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Bifrost", version=__version__, lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=WEB_DIR / "static"), name="static")
 
-from .routes.activity import router as activity_router  # noqa: E402
 from .routes.citations import router as citations_router  # noqa: E402
 from .routes.faces import router as faces_router  # noqa: E402
 from .routes.idgen import router as idgen_router  # noqa: E402
 from .routes.places import router as places_router  # noqa: E402
 from .routes.sync import router as sync_router  # noqa: E402
 from .routes.transcribe import router as transcribe_router  # noqa: E402
-from .routes.upload import router as upload_router  # noqa: E402
 
-app.include_router(activity_router)
 app.include_router(citations_router)
 app.include_router(faces_router)
 app.include_router(idgen_router)
 app.include_router(places_router)
 app.include_router(sync_router)
 app.include_router(transcribe_router)
-app.include_router(upload_router)
 
 
 @app.get("/healthz")
@@ -93,20 +88,6 @@ async def inbox(request: Request, refresh: bool = False):
     ).fetchall()
     data["runs"] = [dict(r) for r in rows]
     return data
-
-
-@app.get("/api/inbox/trends")
-async def inbox_trends(request: Request, refresh: bool = False):
-    """Per-class history for the home snapshot cards. Reuses (and warms) the same
-    'activity' cache the Activity page uses; tolerant — returns empties on error
-    so the snapshot still renders its live counts."""
-    st = request.app.state
-    try:
-        if st.caches.get("activity") is None or refresh:
-            st.caches["activity"] = await activity_mod.dashboard(st.gramps)
-        return inbox_mod.trends(st.caches["activity"])
-    except Exception:  # noqa: BLE001 — trends are a progressive enhancement
-        return {"weeks": [], "series": {}, "coverage_pct": None, "coverage_series": []}
 
 
 @app.get("/", response_class=HTMLResponse)

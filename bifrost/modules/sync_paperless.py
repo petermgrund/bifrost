@@ -322,7 +322,7 @@ async def sync(
             return
         documents = await paperless.list_documents_by_tags(list(tag_map.values()))
         # single_doc_id scopes phase 1 (media create) too, not just the
-        # transcription phase below — the upload wizard mints one doc at a time.
+        # transcription phase below — callers may sync one document at a time.
         if single_doc_id is not None:
             documents = [d for d in documents if d["id"] == single_doc_id]
         yield SyncEvent(kind="started",

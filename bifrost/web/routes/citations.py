@@ -135,7 +135,4 @@ async def save(request: Request, body: SaveBody):
     for key in list(st.caches):
         if key.startswith("citations_"):
             st.caches.pop(key, None)
-    # the upload wizard caches all events with a cited flag — a save that
-    # attaches a citation to an event makes that flag stale.
-    st.caches.pop("upload_events", None)
     return created

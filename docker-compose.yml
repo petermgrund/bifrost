@@ -10,8 +10,8 @@ services:
     volumes:
       - ./config.yaml:/app/config.yaml:ro
       - ./data:/app/data
-      # House-style master doc — read by the upload wizard for LLM field
-      # autofill. Bind-mounted so edits apply without an image rebuild.
+      # House-style master doc — read by the citation composer (resolves to
+      # /app/house_style_master.md). Bind-mounted so edits apply without a rebuild.
       - ./house_style_master.md:/app/house_style_master.md:ro
       # Phase 1 shim: write-through person_map.yaml export for the legacy
       # pipeline (file bind mount; the export truncates in place, preserving

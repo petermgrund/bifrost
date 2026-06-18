@@ -201,18 +201,6 @@ input:hover:not(:focus), select:hover { border-color: var(--text); }
 input:focus, select:focus { outline: none; border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 select { cursor: pointer; }
 
-/* Upload wizard: drop zone + preview pane */
-.dropzone {
-  border: 2px dashed var(--border-strong); border-radius: 12px;
-  padding: 2.5rem 1.5rem; text-align: center; cursor: pointer;
-  background: var(--surface); transition: border-color .15s, background .15s;
-}
-.dropzone:hover, .dropzone.over { border-color: var(--accent); background: var(--accent-soft); }
-.dropzone p { margin: .3rem 0; }
-.previewpane { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; min-height: 60vh; background: var(--surface-2); }
-.previewpane iframe { width: 100%; height: 78vh; border: 0; display: block; }
-.previewpane img { width: 100%; height: auto; max-height: 78vh; object-fit: contain; display: block; }
-
 /* ---- tabs ---- */
 .pagehead { display: flex; align-items: center; gap: 1.25rem; margin: .75rem 0 1.25rem; }
 .pagehead h1 { margin: 0; }

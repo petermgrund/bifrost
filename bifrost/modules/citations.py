@@ -202,7 +202,11 @@ Before emitting, re-read your draft against the mistakes that recur:
 - Jurisdiction: the place hierarchy must follow the record's OWN administrative \
 path, not a different system borrowed by analogy (an urban census uses amt → \
 kjøpstad → census district, never the ecclesiastical prestegjeld), with no \
-place name repeated across levels.
+place name repeated across levels. Use the guide's place-name forms (modern \
+unless it says otherwise) and NEVER invent a name pairing or parenthetical the \
+guide does not sanction; match the guide's worked-example depth (don't add \
+härad/län levels it omits). Order the source title largest-jurisdiction-first; \
+the reference note runs specific-to-general.
 - Locator: matches the guide's token format exactly (including forms like \
 "district [N] [name]") and omits anything the source title already implies.
 - First Reference Note: birth years, birthplaces, occupations and other facts \
@@ -298,7 +302,11 @@ Check, in order:
 record's country and exact type — not a neighbouring guide applied by analogy?
 - Jurisdiction: does the place hierarchy follow the record's OWN administrative \
 path (an urban census is amt → kjøpstad → census district, NEVER the \
-ecclesiastical prestegjeld), with no place name repeated across levels?
+ecclesiastical prestegjeld), with no place name repeated across levels? Are the \
+guide's place-name forms used (modern unless it says otherwise) with NO invented \
+name pairing or parenthetical (e.g. no "Värmlands (Carlstads) län"), and the \
+guide's worked-example depth matched (no extra härad/län levels it omits)? Is \
+the title largest-jurisdiction-first and the reference note specific-to-general?
 - Locator / title: the guide's exact token format (e.g. "district [N] [name]"), \
 nothing the source title already implies, native series names with the bracketed \
 English gloss in the First Reference Note only.

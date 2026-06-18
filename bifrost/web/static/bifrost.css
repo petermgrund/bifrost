@@ -173,8 +173,12 @@ button.chip {
 }
 button.chip:hover:not(:disabled) { background: var(--surface-2); border-color: var(--border-strong); color: var(--text); }
 button.chip.active { background: var(--accent-soft); border-color: transparent; color: var(--on-accent-soft); font-weight: 500; }
-button.chip.active::before { content: ""; display: inline-block; width: .42rem; height: .42rem;
-  border-radius: 50%; background: currentColor; margin-right: .45rem; vertical-align: middle; }
+
+/* option = a labelled on/off setting (NOT an action) — used wherever a toggle
+   modifies what an action will do (OCR-after-ingest, assign-my-own-ids). */
+.opt { display: inline-flex; align-items: center; gap: .5rem; font-size: .85rem;
+  color: var(--muted); cursor: pointer; user-select: none; }
+.opt input[type="checkbox"] { width: auto; margin: 0; accent-color: var(--accent); cursor: pointer; }
 
 input[type="search"], input[type="text"], input[type="date"], select {
   font: inherit; font-size: .9rem;

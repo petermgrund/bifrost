@@ -272,10 +272,10 @@ class UploadPage extends BifrostElement {
 
   // ---- start ----
   renderStart() {
-    const chip = (m, label) => html`<button class="chip ${this.startMode === m ? 'active' : ''}"
+    const tab = (m, label) => html`<button class="tab ${this.startMode === m ? 'active' : ''}"
       @click=${() => { this.startMode = m; if (m === 'existing' && !this.candidates) this.loadCandidates(); }}>${label}</button>`;
     return html`
-      <div class="toolbar">${chip('upload', 'Upload new file')}${chip('existing', 'Pick existing document')}</div>
+      <div class="tabs" style="margin-bottom:1.1rem">${tab('upload', 'Upload new file')}${tab('existing', 'Pick existing document')}</div>
       ${this.startMode === 'upload' ? this.renderDrop() : this.renderExisting()}`;
   }
 
@@ -290,11 +290,11 @@ class UploadPage extends BifrostElement {
         <p><b>Drop a file here</b> or click to choose</p>
         <p class="hint">PDF or image — goes straight into the Paperless ingest pipeline.</p>
       </div>
-      <div class="toolbar">
-        <button class="chip ${this.ocrOnUpload ? 'active' : ''}"
-          title="Transcribe with Gemini right after ingest (enables house-style autofill)"
-          @click=${() => (this.ocrOnUpload = !this.ocrOnUpload)}>Run Gemini OCR after ingest</button>
-      </div>`;
+      <label class="opt" style="margin-top:.7rem">
+        <input type="checkbox" .checked=${this.ocrOnUpload}
+          @change=${(e) => (this.ocrOnUpload = e.target.checked)}>
+        Run Gemini OCR right after ingesting <span class="hint">(enables house-style autofill)</span>
+      </label>`;
   }
 
   renderExisting() {

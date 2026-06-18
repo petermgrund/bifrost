@@ -1,4 +1,4 @@
-import { BifrostElement, html, nothing, api, post, summarize } from './core.js';
+import { BifrostElement, html, nothing, api, post, summarize, mdBtn, mdSpinner } from './core.js';
 
 class FacesPage extends BifrostElement {
   static properties = {
@@ -155,19 +155,18 @@ class FacesPage extends BifrostElement {
     return html`
       <div class="pagehead">
         <h1>Faces</h1>
-        <div class="tabs">
-          <button class="tab ${this.tab === 'photos' ? 'active' : ''}"
-            @click=${() => (this.tab = 'photos')}>Photos</button>
-          <button class="tab ${this.tab === 'people' ? 'active' : ''}"
-            @click=${() => (this.tab = 'people')}>People</button>
-        </div>
+        <md-tabs class="tabs" .activeTabIndex=${this.tab === 'people' ? 1 : 0}
+          @change=${(e) => (this.tab = e.target.activeTabIndex === 1 ? 'people' : 'photos')}>
+          <md-primary-tab>Photos</md-primary-tab>
+          <md-primary-tab>People</md-primary-tab>
+        </md-tabs>
         <span class="spacer"></span>
         ${this.listing.pending_total
-          ? html`<button class="primary" ?disabled=${this.busy} @click=${this.applyPending}>
-              ${this.busy ? 'Applying…' : `Apply pending (${this.listing.pending_total})`}</button>`
+          ? mdBtn('filled', this.busy ? 'Applying…' : `Apply pending (${this.listing.pending_total})`,
+              this.busy, this.applyPending)
           : nothing}
-        <button @click=${() => this.load(true)} ?disabled=${this.loading}>
-          ${this.loading ? 'Refreshing…' : 'Refresh'}</button>
+        ${mdBtn('outlined', this.loading ? 'Refreshing…' : 'Refresh', this.loading, () => this.load(true))}
+        ${this.busy || this.loading ? mdSpinner : nothing}
       </div>
       ${this.error ? html`<div class="alert">${this.error}</div>` : nothing}
       ${this.applyResultBanner()}
@@ -185,14 +184,16 @@ class FacesPage extends BifrostElement {
         (this.photoFilter === 'pending' && p.pending_count > 0) ||
         (this.photoFilter === 'manual' && p.is_manual) ||
         (this.photoFilter === 'unlinked' && p.faces.some((f) => f.status === 'unlinked')));
-    const chip = (f, label) => html`<button
-      class="chip ${this.photoFilter === f ? 'active' : ''}"
-      @click=${() => (this.photoFilter = f)}>${label}</button>`;
+    const chip = (f, label) => html`<md-filter-chip label=${label}
+      ?selected=${this.photoFilter === f}
+      @click=${() => (this.photoFilter = f)}></md-filter-chip>`;
     return html`
       <div class="toolbar">
-        <input type="search" placeholder="Search photos…"
-          .value=${this.photoQuery} @input=${(e) => (this.photoQuery = e.target.value)}>
-        ${chip('all', 'All')}${chip('pending', 'Needs attention')}${chip('unlinked', 'No person link')}${chip('manual', 'Manual')}
+        <md-outlined-text-field type="search" label="Search photos…"
+          .value=${this.photoQuery} @input=${(e) => (this.photoQuery = e.target.value)}></md-outlined-text-field>
+        <md-chip-set>
+          ${chip('all', 'All')}${chip('pending', 'Needs attention')}${chip('unlinked', 'No person link')}${chip('manual', 'Manual')}
+        </md-chip-set>
       </div>
       <div class="photo-grid">
         ${rows.length ? rows.map((p) => this.photoCard(p))
@@ -235,7 +236,7 @@ class FacesPage extends BifrostElement {
           <strong>${p.title}</strong>
           <span class="hint">${p.synced ? p.gramps_id : 'not in Gramps'}</span>
           <span class="spacer"></span>
-          <button @click=${() => (this.openAsset = null)}>✕</button>
+          <md-icon-button @click=${() => (this.openAsset = null)}>✕</md-icon-button>
         </div>
         ${p.is_manual ? html`<div class="alert">A face here was drawn manually in Immich; default pad is 0%.</div>` : nothing}
         <div class="detail-body">
@@ -255,9 +256,9 @@ class FacesPage extends BifrostElement {
       return html`<div class="facerow">
         <img src="/faces/api/thumb/person/${f.immich_person_id}" alt="">
         <div class="who"><div>${f.immich_name}</div><div class="hint">not linked</div></div>
-        <button class="linkjump" @click=${() => {
+        <md-text-button class="linkjump" @click=${() => {
           this.openAsset = null; this.tab = 'people'; this.selImmich = f.immich_person_id;
-        }}>Link…</button></div>`;
+        }}>Link…</md-text-button></div>`;
     }
     const padPct = Math.round(f.pad * 100);
     const statusTxt = {
@@ -268,12 +269,12 @@ class FacesPage extends BifrostElement {
       <img src="/faces/api/thumb/person/${f.immich_person_id}" alt="">
       <div class="who"><div>${f.label || f.immich_name}</div><div class="hint">${statusTxt}</div></div>
       <div class="padctl">
-        <input type="range" min="0" max="50" step="5" .value=${String(padPct)}
+        <md-slider min="0" max="50" step="5" labeled .value=${padPct}
           @input=${(e) => (e.target.nextElementSibling.textContent = `${e.target.value}%`)}
-          @change=${(e) => this.applyFace(f, Number(e.target.value) / 100)}>
+          @change=${(e) => this.applyFace(f, Number(e.target.value) / 100)}></md-slider>
         <span class="padval">${padPct}%</span>
         ${f.status === 'applied' ? nothing
-          : html`<button class="applyone" @click=${() => this.applyFace(f, f.pad)}>Apply</button>`}
+          : html`<md-text-button class="applyone" @click=${() => this.applyFace(f, f.pad)}>Apply</md-text-button>`}
       </div></div>`;
   }
 
@@ -304,9 +305,9 @@ class FacesPage extends BifrostElement {
           <td><img class="avatar" loading="lazy" src="/faces/api/thumb/person/${l.immich_person_id}" alt=""></td>
           <td>${l.g?.name || l.gramps_handle}</td>
           <td class="hint">${l.i?.name || '(unnamed)'}</td>
-          <td><input type="text" .value=${l.label || ''} placeholder="—"
-            @change=${(e) => this.saveLabel(l, e.target.value)}></td>
-          <td><button class="unlink" @click=${() => this.unlink(l.gramps_handle)}>unlink</button></td>
+          <td><md-outlined-text-field .value=${l.label || ''} placeholder="—"
+            @change=${(e) => this.saveLabel(l, e.target.value)}></md-outlined-text-field></td>
+          <td><md-text-button class="unlink" @click=${() => this.unlink(l.gramps_handle)}>unlink</md-text-button></td>
         </tr>`)}
       </table>
 
@@ -322,8 +323,8 @@ class FacesPage extends BifrostElement {
     return html`
       <div class="panes">
         <div class="pane">
-          <input type="search" placeholder="Search Gramps people…"
-            @input=${(e) => (this.grampsQuery = e.target.value)}>
+          <md-outlined-text-field type="search" label="Search Gramps people…"
+            @input=${(e) => (this.grampsQuery = e.target.value)}></md-outlined-text-field>
           <div class="cardlist">
             ${this.gramps
               .filter((p) => !lh[p.handle])
@@ -335,12 +336,12 @@ class FacesPage extends BifrostElement {
           </div>
         </div>
         <div class="pane-mid">
-          <input type="text" id="link-label" placeholder="Label (optional)">
-          <button class="primary" ?disabled=${!both} @click=${this.createLink}>Link pair</button>
+          <md-outlined-text-field id="link-label" label="Label (optional)"></md-outlined-text-field>
+          ${mdBtn('filled', 'Link pair', !both, this.createLink)}
         </div>
         <div class="pane">
-          <input type="search" placeholder="Search Immich people…"
-            @input=${(e) => (this.immichQuery = e.target.value)}>
+          <md-outlined-text-field type="search" label="Search Immich people…"
+            @input=${(e) => (this.immichQuery = e.target.value)}></md-outlined-text-field>
           <div class="cardlist">
             ${this.immich
               .filter((p) => !li[p.id])

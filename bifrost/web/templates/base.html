@@ -15,9 +15,12 @@
   <link rel="stylesheet" href="/static/bifrost.css">
   <link rel="stylesheet" href="/static/bifrost-tokens.css">
   <link rel="stylesheet" href="/static/bifrost-kit.css">
+  <link rel="stylesheet" href="/static/bifrost-md-theme.css">
   <script type="importmap">
   { "imports": { "lit": "/static/vendor/lit-all.min.js" } }
   </script>
+  <!-- Material 3 web components (vendored, offline). Registers the <md-*> elements. -->
+  <script type="module" src="/static/vendor/material-web.js"></script>
 </head>
 <body>
   {% set p = request.url.path %}

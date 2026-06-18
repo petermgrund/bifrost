@@ -1,4 +1,4 @@
-import { BifrostElement, html, nothing, api, post } from './core.js';
+import { BifrostElement, html, nothing, api, post, mdBtn, mdSpinner } from './core.js';
 
 const shuffle = (arr) => {
   const a = arr.slice();
@@ -241,19 +241,21 @@ class CitationsPage extends BifrostElement {
       <div class="pagehead">
         <h1>Citations</h1>
         <div class="tabs">
-          ${steps.map((s, i) => html`<button class="tab ${this.step === s ? 'active' : ''}"
+          ${steps.map((s, i) => html`<md-text-button class="tab ${this.step === s ? 'active' : ''}"
             ?disabled=${steps.indexOf(this.step) < i}
             @click=${() => { if (steps.indexOf(this.step) > i) this.step = s; }}>
-            ${i + 1}. ${s}</button>`)}
+            ${i + 1}. ${s}</md-text-button>`)}
         </div>
         <span class="spacer"></span>
-        ${!atStart ? html`<button @click=${this.reset}>Start over</button>` : nothing}
+        ${!atStart ? mdBtn('outlined', 'Start over', false, this.reset) : nothing}
       </div>
       <div class="toolbar">
-        <button class="chip ${this.mode === 'media' ? 'active' : ''}"
-          @click=${this.enterMediaMode}>Cite media</button>
-        <button class="chip ${this.mode === 'event' ? 'active' : ''}"
-          @click=${this.enterEventMode}>Cite uncited events</button>
+        <md-chip-set>
+          <md-filter-chip label="Cite media" ?selected=${this.mode === 'media'}
+            @click=${this.enterMediaMode}></md-filter-chip>
+          <md-filter-chip label="Cite uncited events" ?selected=${this.mode === 'event'}
+            @click=${this.enterEventMode}></md-filter-chip>
+        </md-chip-set>
       </div>
       ${this.error ? html`<div class="alert">${this.error}</div>` : nothing}
       ${{
@@ -279,7 +281,7 @@ class CitationsPage extends BifrostElement {
       <div class="toolbar">
         <span class="hint">${pos}</span>
         <span class="spacer"></span>
-        <button @click=${() => this.nextEvent()}>Skip — next random ↻</button>
+        ${mdBtn('outlined', 'Skip — next random ↻', false, () => this.nextEvent())}
       </div>
       ${!e ? html`<div class="hint">Loading event…</div>` : html`
         <div class="syncpanel">
@@ -291,8 +293,7 @@ class CitationsPage extends BifrostElement {
           ${e.participants.length ? html`<p class="hint">People:
             ${e.participants.map((p, i) => html`${i ? ', ' : ''}${p.name}${p.life}${p.role && p.role !== 'Primary' ? ` (${p.role.toLowerCase()})` : ''}`)}</p>` : nothing}
           <div class="toolbar">
-            <button class="primary" @click=${() => this.startCitingEvent(null)}>
-              Create citation for this event →</button>
+            ${mdBtn('filled', 'Create citation for this event →', false, () => this.startCitingEvent(null))}
           </div>
         </div>
         ${e.media.length ? html`
@@ -312,13 +313,14 @@ class CitationsPage extends BifrostElement {
       .filter((m) => m.origin === this.originFilter)
       .filter((m) => !q || m.title.toLowerCase().includes(q)
         || m.gramps_id.toLowerCase().includes(q)).slice(0, 80);
-    const chip = (f, label) => html`<button class="chip ${this.originFilter === f ? 'active' : ''}"
-      @click=${() => (this.originFilter = f)}>${label}</button>`;
+    const chip = (f, label) => html`<md-filter-chip label=${label}
+      ?selected=${this.originFilter === f}
+      @click=${() => (this.originFilter = f)}></md-filter-chip>`;
     return html`
       <div class="toolbar">
-        <input type="search" placeholder="Search media…" .value=${this.mediaQuery}
-          @input=${(e) => (this.mediaQuery = e.target.value)}>
-        ${chip('paperless', 'Paperless')}${chip('immich', 'Immich')}
+        <md-outlined-text-field label="Search media…" type="search" .value=${this.mediaQuery}
+          @input=${(e) => (this.mediaQuery = e.target.value)}></md-outlined-text-field>
+        <md-chip-set>${chip('paperless', 'Paperless')}${chip('immich', 'Immich')}</md-chip-set>
         <span class="hint">${rows.length} shown</span>
       </div>
       <div class="cardlist" style="max-height:60vh">
@@ -356,16 +358,16 @@ class CitationsPage extends BifrostElement {
       ${this.eventFacts()}
       <div class="syncpanel">
         <h2>Describe the ${ev ? 'source record' : 'record'}</h2>
-        <textarea rows="7" placeholder=${ev
+        <md-outlined-text-field type="textarea" rows="7" label=${ev
           ? 'Describe the record that evidences this event: what it is (census, parish register, certificate…), the archive or website, page/entry numbers, the URL you found it at. The event facts above are already included.'
           : "Dump everything you know: what the record is, who's in it, dates, page/entry numbers, archive references, the URL you found it at…"}
-          .value=${this.dump} @input=${(e) => (this.dump = e.target.value)}></textarea>
+          .value=${this.dump} @input=${(e) => (this.dump = e.target.value)}></md-outlined-text-field>
         <div class="toolbar">
-          ${this.ctx.llm ? html`<button class="primary"
-            ?disabled=${this.busy || (!this.dump.trim() && !ev)}
-            @click=${this.composeDump}>${this.busy ? 'Composing…' : 'Compose citation'}</button>` : nothing}
-          <button @click=${() => (this.wizard = !this.wizard)}>
-            ${this.wizard ? 'Hide' : 'Structured wizard'}</button>
+          ${this.ctx.llm ? mdBtn('filled', this.busy ? 'Composing…' : 'Compose citation',
+            this.busy || (!this.dump.trim() && !ev), this.composeDump) : nothing}
+          ${mdBtn('outlined', this.wizard ? 'Hide' : 'Structured wizard', false,
+            () => (this.wizard = !this.wizard))}
+          ${this.busy ? mdSpinner : nothing}
         </div>
         <p class="hint">Matches an existing source when one fits; drafts a new one when none does.</p>
       </div>
@@ -380,8 +382,8 @@ class CitationsPage extends BifrostElement {
       ${this.citingLine()}
       <h2>Existing source</h2>
       <div class="toolbar">
-        <input type="search" placeholder="Search sources…" .value=${this.sourceQuery}
-          @input=${(e) => (this.sourceQuery = e.target.value)}>
+        <md-outlined-text-field label="Search sources…" type="search" .value=${this.sourceQuery}
+          @input=${(e) => (this.sourceQuery = e.target.value)}></md-outlined-text-field>
       </div>
       <div class="cardlist" style="max-height:38vh">
         ${matches.map((s) => html`<div class="card"
@@ -395,10 +397,10 @@ class CitationsPage extends BifrostElement {
         ${Object.entries(this.ctx.groups).map(([gk, glabel]) => html`
           <div style="width:100%"><span class="hint">${glabel}</span></div>
           ${this.ctx.types.filter((t) => t.group === gk).map((t) => html`
-            <button class="chip" @click=${() => {
+            <md-text-button @click=${() => {
               this.pick = { ...this.pick, source: null, recordType: t };
               this.step = 'details';
-            }}>${t.label}</button>`)}`)}
+            }}>${t.label}</md-text-button>`)}`)}
       </div>`;
   }
 
@@ -410,16 +412,15 @@ class CitationsPage extends BifrostElement {
       return html`<p class="hint">Nothing to fill in here — this citation was
         composed from a description.</p>
         <div class="toolbar">
-          <button @click=${() => (this.step = 'describe')}>Back to describe</button>
-          ${this.draft ? html`<button class="primary"
-            @click=${() => (this.step = 'review')}>Back to review</button>` : nothing}
+          ${mdBtn('outlined', 'Back to describe', false, () => (this.step = 'describe'))}
+          ${this.draft ? mdBtn('filled', 'Back to review', false, () => (this.step = 'review')) : nothing}
         </div>`;
     }
     const fieldRow = (key, label, req, hint) => html`
       <label class="fieldrow">
         <span>${label}${req ? ' *' : ''}</span>
-        <input type="text" .value=${this.fields[key] || ''} placeholder=${hint || ''}
-          @input=${(e) => (this.fields = { ...this.fields, [key]: e.target.value })}>
+        <md-outlined-text-field .value=${this.fields[key] || ''} placeholder=${hint || ''}
+          @input=${(e) => (this.fields = { ...this.fields, [key]: e.target.value })}></md-outlined-text-field>
       </label>`;
     return html`
       ${this.citingLine()}
@@ -434,10 +435,10 @@ class CitationsPage extends BifrostElement {
       </div>
       <div class="toolbar">
         ${this.ctx.llm
-          ? html`<button class="primary" ?disabled=${this.busy} @click=${this.compose}>
-              ${this.busy ? 'Composing…' : 'Compose citation'}</button>`
+          ? mdBtn('filled', this.busy ? 'Composing…' : 'Compose citation', this.busy, this.compose)
           : nothing}
-        <button @click=${this.manualDraft}>Write manually</button>
+        ${mdBtn('outlined', 'Write manually', false, this.manualDraft)}
+        ${this.busy ? mdSpinner : nothing}
       </div>`;
   }
 
@@ -450,9 +451,8 @@ class CitationsPage extends BifrostElement {
         </table>
         <div class="toolbar">
           ${this.mode === 'event'
-            ? html`<button class="primary" @click=${() => { this.reset(); this.loadEvent(); }}>
-                Next event →</button>`
-            : html`<button class="primary" @click=${this.reset}>New citation</button>`}
+            ? mdBtn('filled', 'Next event →', false, () => { this.reset(); this.loadEvent(); })
+            : mdBtn('filled', 'New citation', false, this.reset)}
         </div>
       </div>`;
     }
@@ -464,10 +464,10 @@ class CitationsPage extends BifrostElement {
           : html`New source in existing repository <strong>${m.repository.gramps_id}</strong> — ${m.repository.name}`}</p>`
       : nothing;
     const bind = (obj, key, multiline = false) => multiline
-      ? html`<textarea rows="4" .value=${obj[key] || ''}
-          @input=${(e) => { obj[key] = e.target.value; }}></textarea>`
-      : html`<input type="text" .value=${String(obj[key] ?? '')}
-          @input=${(e) => { obj[key] = e.target.value; }}>`;
+      ? html`<md-outlined-text-field type="textarea" rows="4" .value=${obj[key] || ''}
+          @input=${(e) => { obj[key] = e.target.value; }}></md-outlined-text-field>`
+      : html`<md-outlined-text-field .value=${String(obj[key] ?? '')}
+          @input=${(e) => { obj[key] = e.target.value; }}></md-outlined-text-field>`;
     return html`
       ${matchedBanner}
       ${d.quality ? html`<p class="hint">${d.quality.source_type} source ·
@@ -497,9 +497,9 @@ class CitationsPage extends BifrostElement {
         </div>
       </div>
       <div class="toolbar">
-        <button class="primary" ?disabled=${this.busy} @click=${this.save}>
-          ${this.busy ? 'Saving…' : 'Save to Gramps'}</button>
-        <button @click=${() => (this.step = this.reviewFrom || 'details')}>Back</button>
+        ${mdBtn('filled', this.busy ? 'Saving…' : 'Save to Gramps', this.busy, this.save)}
+        ${mdBtn('outlined', 'Back', false, () => (this.step = this.reviewFrom || 'details'))}
+        ${this.busy ? mdSpinner : nothing}
       </div>`;
   }
 }

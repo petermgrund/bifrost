@@ -1,7 +1,10 @@
 /* Shared sync/transcribe panel components: <sync-panel> (preview→apply for a
    source) and <resync-panel> (one-object transcription resync). Imported by both
-   the Sync and Transcribe pages — importing this module registers the elements. */
-import { BifrostElement, html, nothing, post, summarize, hasWork, iconYes, iconNo } from './core.js';
+   the Sync and Transcribe pages — importing this module registers the elements.
+
+   Controls use Material 3 web components (<md-*>), registered globally by the
+   vendored bundle loaded in base.html. */
+import { BifrostElement, html, nothing, post, summarize, hasWork, iconYes, iconNo, mdBtn, mdSpinner } from './core.js';
 
 const GROUPS = [
   ['doc', 'Documents'], ['media', 'Media'], ['note', 'Transcriptions'],
@@ -66,15 +69,14 @@ class SyncPanel extends BifrostElement {
       <h2>${this.label}</h2>
       ${this.blurb ? html`<p class="hint">${this.blurb}</p>` : nothing}
       <div class="toolbar">
-        <button class="${this.canApply ? '' : 'primary'}" ?disabled=${this.running}
-          @click=${() => this.run(false)}>Preview</button>
-        <button class="${this.canApply ? 'primary' : ''}" ?disabled=${!this.canApply || this.running}
-          @click=${() => this.run(true)}>Apply</button>
+        ${mdBtn(this.canApply ? 'outlined' : 'filled', 'Preview', this.running, () => this.run(false))}
+        ${mdBtn(this.canApply ? 'filled' : 'outlined', 'Apply', !this.canApply || this.running, () => this.run(true))}
+        ${this.running ? mdSpinner : nothing}
         ${this.status ? html`<span class="hint">${this.status}</span>` : nothing}
-        ${!this.maintenance && this.source !== 'ocr' ? html`<label class="opt" style="margin-left:1rem"
+        ${!this.maintenance && this.source !== 'ocr' ? html`<label class="opt" style="margin-left:1rem;display:inline-flex;align-items:center;gap:.4rem"
           title="Pick the Gramps id for each new item instead of auto-assigning">
-          <input type="checkbox" .checked=${this.manualMode}
-            @change=${(e) => (this.manualMode = e.target.checked)}>
+          <md-checkbox touch-target="wrapper" ?checked=${this.manualMode}
+            @change=${(e) => (this.manualMode = e.target.checked)}></md-checkbox>
           Assign my own Gramps IDs</label>` : nothing}
       </div>
       ${this.manualMode && isPreview ? html`<p class="hint">Type a 6-char id (safe
@@ -119,13 +121,12 @@ class ResyncPanel extends BifrostElement {
     return html`<section class="syncpanel maintenance">
       <h2>Resync one object's transcription</h2>
       <div class="toolbar">
-        <input type="text" id="resync-id" placeholder="Media ID" style="max-width:11rem"
+        <md-outlined-text-field id="resync-id" label="Media ID" style="max-width:11rem"
           @input=${() => { this.canApply = false; }}
-          @keydown=${(e) => { if (e.key === 'Enter') this.run(false); }}>
-        <button class="${this.canApply ? '' : 'primary'}" ?disabled=${this.running}
-          @click=${() => this.run(false)}>Preview</button>
-        <button class="${this.canApply ? 'primary' : ''}" ?disabled=${!this.canApply || this.running}
-          @click=${() => this.run(true)}>Apply</button>
+          @keydown=${(e) => { if (e.key === 'Enter') this.run(false); }}></md-outlined-text-field>
+        ${mdBtn(this.canApply ? 'outlined' : 'filled', 'Preview', this.running, () => this.run(false))}
+        ${mdBtn(this.canApply ? 'filled' : 'outlined', 'Apply', !this.canApply || this.running, () => this.run(true))}
+        ${this.running ? mdSpinner : nothing}
         ${this.mapping ? html`<span class="hint">${this.mapping}</span>` : nothing}
       </div>
       ${this.result ? renderResult(this.result) : nothing}

@@ -1,4 +1,4 @@
-import { BifrostElement, html, nothing, api, post, iconYes, iconNo, iconNa } from './core.js';
+import { BifrostElement, html, nothing, api, post, iconYes, iconNo, iconNa, mdBtn, mdSpinner } from './core.js';
 
 class PlacesPage extends BifrostElement {
   static properties = {
@@ -87,24 +87,27 @@ class PlacesPage extends BifrostElement {
         (this.filter === 'relation' && r.osm_id) ||
         (this.filter === 'missing' && r.osm_id && !r.has_boundary));
     const missing = this.rows.filter((r) => r.osm_id && !r.has_boundary).length;
-    const chip = (f, label) => html`<button class="chip ${this.filter === f ? 'active' : ''}"
-      @click=${() => (this.filter = f)}>${label}</button>`;
+    const chip = (f, label) => html`<md-filter-chip label=${label}
+      ?selected=${this.filter === f} @click=${() => (this.filter = f)}></md-filter-chip>`;
     return html`
       <div class="pagehead">
         <h1>Places</h1>
         <span class="spacer"></span>
-        ${missing ? html`<button class="primary" ?disabled=${this.busy}
-          @click=${this.generateMissing}>
-          ${this.busy === 'all' ? 'Generating…' : `Generate missing (${missing})`}</button>` : nothing}
-        <button @click=${() => this.load(true)}>Refresh</button>
+        ${missing ? mdBtn('filled',
+          this.busy === 'all' ? 'Generating…' : `Generate missing (${missing})`,
+          !!this.busy, this.generateMissing) : nothing}
+        ${this.busy === 'all' ? mdSpinner : nothing}
+        ${mdBtn('outlined', 'Refresh', false, () => this.load(true))}
       </div>
       <p class="hint">Boundary polygons from OpenStreetMap — the outlines on the
       Gramps place minimaps. Relations cover admin areas (cities, counties);
       ways cover building footprints (a house, a farm).</p>
       <div class="toolbar">
-        <input type="search" placeholder="Search places…" .value=${this.query}
-          @input=${(e) => (this.query = e.target.value)}>
-        ${chip('relation', 'With OSM link')}${chip('missing', 'Missing boundary')}${chip('all', 'All places')}
+        <md-outlined-text-field type="search" label="Search places…" .value=${this.query}
+          @input=${(e) => (this.query = e.target.value)}></md-outlined-text-field>
+        <md-chip-set>
+          ${chip('relation', 'With OSM link')}${chip('missing', 'Missing boundary')}${chip('all', 'All places')}
+        </md-chip-set>
         <span class="hint">${filtered.length} shown</span>
         ${this.status ? html`<span class="hint action-failed">${this.status}</span>` : nothing}
       </div>
@@ -117,14 +120,14 @@ class PlacesPage extends BifrostElement {
             : r.name}</td>
           <td class="hint">${r.osm_id
             ? html`<a href="https://www.openstreetmap.org/${r.osm_type}/${r.osm_id}" target="_blank">${r.osm_type} ${r.osm_id}</a>`
-            : html`<input class="relinput" type="text" placeholder="relation/way id or URL"
+            : html`<md-outlined-text-field class="relinput" label="relation/way id or URL"
                 @keydown=${(e) => { if (e.key === 'Enter') this.addRelation(r, e.target.value); }}
-                @change=${(e) => this.addRelation(r, e.target.value)}>`}</td>
+                @change=${(e) => this.addRelation(r, e.target.value)}></md-outlined-text-field>`}</td>
           <td title=${!r.osm_id ? 'no OSM link yet' : r.has_boundary ? 'boundary present' : 'no boundary — generate'}>
             ${!r.osm_id ? iconNa : r.has_boundary ? iconYes : iconNo}</td>
-          <td>${r.osm_id ? html`<button class="applyone" ?disabled=${this.busy}
+          <td>${r.osm_id ? html`<md-text-button class="applyone" ?disabled=${!!this.busy}
             @click=${() => this.generate(r, r.has_boundary)}>
-            ${this.busy === r.handle ? '…' : r.has_boundary ? 'Regenerate' : 'Generate'}</button>` : nothing}</td>
+            ${this.busy === r.handle ? '…' : r.has_boundary ? 'Regenerate' : 'Generate'}</md-text-button>` : nothing}</td>
         </tr>`)}
       </table>
       ${this.failures.length ? html`<h3 class="action-failed">Failed (${this.failures.length})</h3>

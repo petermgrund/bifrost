@@ -1,4 +1,4 @@
-import { BifrostElement, html, api, summarize } from './core.js';
+import { BifrostElement, html, api, summarize, mdBtn } from './core.js';
 
 /* Relative, human time from an ISO/space timestamp. */
 function relTime(iso) {
@@ -84,7 +84,7 @@ class InboxPage extends BifrostElement {
       return html`<div class="bf-state bf-state--error">
         <div class="bf-state__title">Couldn't load the home page</div>
         <div class="bf-state__desc">${this.error}</div>
-        <button class="bf-btn bf-btn--filled bf-btn--sm" @click=${() => this.load(true)}>Retry</button></div>`;
+        ${mdBtn('filled', 'Retry', false, () => this.load(true))}</div>`;
     }
     const errs = this.data.errors || [];
     const runs = this.data.runs || [];
@@ -97,8 +97,8 @@ class InboxPage extends BifrostElement {
         <span style="display:inline-flex;align-items:center;gap:8px;font:var(--bf-body-small);color:var(--bf-on-surface-variant)">
           <span class="bf-dot bf-dot--${errs.length ? 'warn' : 'ok'}"></span>${errs.length
             ? `${errs.length} service${errs.length === 1 ? '' : 's'} unavailable` : 'All services reachable'}</span>
-        <button class="bf-btn bf-btn--text bf-btn--sm" ?disabled=${this.loading}
-          @click=${() => this.load(true)}>${this.loading ? 'Refreshing…' : 'Refresh'}</button>
+        <md-text-button ?disabled=${this.loading}
+          @click=${() => this.load(true)}>${this.loading ? 'Refreshing…' : 'Refresh'}</md-text-button>
       </div>
 
       <div class="bf-card">

@@ -1,4 +1,4 @@
-import { BifrostElement, html, nothing, api, post, iconYes, iconPending, iconHalf } from './core.js';
+import { BifrostElement, html, nothing, api, post, iconYes, iconPending, iconHalf, mdBtn, mdSpinner } from './core.js';
 
 /* Mint random-6 media ids ahead of time, reserve them, and track which were
    actually minted. Reserved ids are excluded from the sync auto-generator but
@@ -86,8 +86,8 @@ class IdgenPage extends BifrostElement {
     const reserved = this.rows.length - minted - assigned;
     const shown = this.rows.filter((r) =>
       this.filter === 'all' || this.filter === this.state(r));
-    const chip = (f, label) => html`<button class="chip ${this.filter === f ? 'active' : ''}"
-      @click=${() => (this.filter = f)}>${label}</button>`;
+    const chip = (f, label) => html`<md-filter-chip label=${label} ?selected=${this.filter === f}
+      @click=${() => (this.filter = f)}></md-filter-chip>`;
     return html`
       <div class="pagehead">
         <h1>IDs</h1>
@@ -114,22 +114,23 @@ class IdgenPage extends BifrostElement {
           extra physical copies. <code>##</code> = 2 chars from the same safe alphabet.</p>
       </details>
       <div class="toolbar">
-        <label class="hint">Generate
-          <input type="number" min="1" max="50" .value=${String(this.count)}
-            style="width:4rem"
-            @input=${(e) => (this.count = parseInt(e.target.value, 10) || 1)}></label>
-        <button class="primary" ?disabled=${this.busy} @click=${this.generate}>
-          ${this.busy ? 'Generating…' : 'Generate'}</button>
+        <md-outlined-text-field type="number" label="Generate" min="1" max="50"
+          .value=${String(this.count)} style="width:7rem"
+          @input=${(e) => (this.count = parseInt(e.target.value, 10) || 1)}></md-outlined-text-field>
+        ${mdBtn('filled', this.busy ? 'Generating…' : 'Generate', this.busy, this.generate)}
+        ${this.busy ? mdSpinner : nothing}
         ${this.status ? html`<span class="hint">${this.status}</span>` : nothing}
       </div>
 
       ${this.generated.length ? html`<div class="idgrid">
-        ${this.generated.map((id) => html`<button class="idchip" title="copy"
-          @click=${() => this.copy(id)}>${id}</button>`)}
+        ${this.generated.map((id) => html`<md-text-button class="idchip" title="copy"
+          @click=${() => this.copy(id)}>${id}</md-text-button>`)}
       </div>` : nothing}
 
       <div class="toolbar">
-        ${chip('all', 'All')}${chip('reserved', 'Reserved')}${chip('assigned', 'Assigned')}${chip('minted', 'Minted')}
+        <md-chip-set>
+          ${chip('all', 'All')}${chip('reserved', 'Reserved')}${chip('assigned', 'Assigned')}${chip('minted', 'Minted')}
+        </md-chip-set>
         <span class="hint">${shown.length} shown</span>
       </div>
       <table class="results">
@@ -146,19 +147,19 @@ class IdgenPage extends BifrostElement {
       minted: [iconYes, 'minted', 'action-created'],
     }[s];
     return html`<tr>
-      <td><button class="idlink" @click=${() => this.copy(r.gramps_id)}
-        title="copy">${r.gramps_id}</button></td>
+      <td><md-text-button class="idlink" @click=${() => this.copy(r.gramps_id)}
+        title="copy">${r.gramps_id}</md-text-button></td>
       <td class="${STATUS[2]}">${STATUS[0]} ${STATUS[1]}</td>
       <td class="hint">${r.minted && r.source_system
         ? `${r.source_system}${r.source_title ? ` · ${r.source_title}` : ''}` : ''}</td>
       <td class="hint">${(r.created_at || '').slice(0, 10)}</td>
       <td>${s === 'minted' ? nothing : html`
         ${s === 'reserved'
-          ? html`<button class="applyone" title="Mark as written on a photo"
-              @click=${() => this.setAssigned(r.gramps_id, true)}>Assign</button>`
-          : html`<button class="applyone" title="Back to reserved"
-              @click=${() => this.setAssigned(r.gramps_id, false)}>Unassign</button>`}
-        <button class="applyone" @click=${() => this.release(r.gramps_id)}>Release</button>`}</td>
+          ? html`<md-text-button title="Mark as written on a photo"
+              @click=${() => this.setAssigned(r.gramps_id, true)}>Assign</md-text-button>`
+          : html`<md-text-button title="Back to reserved"
+              @click=${() => this.setAssigned(r.gramps_id, false)}>Unassign</md-text-button>`}
+        <md-text-button @click=${() => this.release(r.gramps_id)}>Release</md-text-button>`}</td>
     </tr>`;
   }
 }

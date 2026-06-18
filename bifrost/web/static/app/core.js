@@ -15,6 +15,17 @@ export async function api(path, opts = {}) {
 export const post = (path, body) =>
   api(path, { method: 'POST', body: JSON.stringify(body || {}) });
 
+/* ---- Material 3 control helpers ----
+   The <md-*> custom elements are registered globally by the vendored
+   @material/web bundle (loaded in base.html); pages just use the tags.
+   mdBtn picks the element because Lit can't interpolate tag names. */
+export function mdBtn(variant, label, disabled, onClick) {
+  return variant === 'filled'
+    ? html`<md-filled-button ?disabled=${disabled} @click=${onClick}>${label}</md-filled-button>`
+    : html`<md-outlined-button ?disabled=${disabled} @click=${onClick}>${label}</md-outlined-button>`;
+}
+export const mdSpinner = html`<md-circular-progress indeterminate style="width:24px;height:24px"></md-circular-progress>`;
+
 /* Components render into light DOM so the global stylesheet themes them and
    existing class names keep working — no per-component style porting. */
 export class BifrostElement extends LitElement {

@@ -1,0 +1,17 @@
+{
+  "name": "bifrost-frontend-vendor",
+  "private": true,
+  "type": "module",
+  "description": "One-time bundler that produces the self-contained, offline @material/web ES module Bifrost serves from static/vendor/. Re-run only when bumping the @material/web version.",
+  "scripts": {
+    "build": "rollup -c"
+  },
+  "dependencies": {
+    "@material/web": "^2.0.0"
+  },
+  "devDependencies": {
+    "rollup": "^4.0.0",
+    "@rollup/plugin-node-resolve": "^15.0.0",
+    "@rollup/plugin-terser": "^0.4.0"
+  }
+}

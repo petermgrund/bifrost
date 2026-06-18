@@ -86,13 +86,22 @@ class UploadPage extends BifrostElement {
   }
 
   async pollConsume(task) {
-    for (let i = 0; i < 80; i++) {
+    // Paperless consume runs its own OCR (ocrmypdf); a multi-page scan on the
+    // Pi's ARM CPU can take several minutes. Poll generously, show elapsed time,
+    // and on timeout point at the recoverable path rather than failing hard.
+    const deadline = Date.now() + 12 * 60 * 1000;
+    let waited = 0;
+    while (Date.now() < deadline) {
       const s = await api(`/upload/api/ingest-status?task=${encodeURIComponent(task)}`);
       if (s.status === 'SUCCESS' && s.doc_id) return s.doc_id;
       if (s.status === 'FAILURE') throw new Error(s.error || 'Paperless rejected the file');
-      await sleep(1500);
+      await sleep(2500);
+      waited += 2500;
+      this.progress = `Paperless is processing the document — OCR can take a few minutes on the Pi… (${Math.round(waited / 1000)}s)`;
     }
-    throw new Error('timed out waiting for Paperless to consume the file');
+    throw new Error('Paperless is still processing this document. It will finish in '
+      + 'the background — once it does, reopen Upload, choose "Pick existing '
+      + 'document", and select it. Don’t re-upload the same file (Paperless flags duplicates).');
   }
 
   // ================= start: existing =================

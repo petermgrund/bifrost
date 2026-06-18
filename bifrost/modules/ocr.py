@@ -13,9 +13,12 @@ re-transcribing (and re-paying) docs already done, unless force.
 
 from __future__ import annotations
 
+import io
 import sqlite3
 from datetime import datetime
 from typing import AsyncIterator
+
+from pypdf import PdfReader, PdfWriter
 
 from ..core.clients import GeminiClient, GeminiError, PaperlessClient
 from ..core.config import GeminiConfig, SyncPaperlessConfig
@@ -35,6 +38,66 @@ Output ONLY the transcription — no preamble, no commentary, no markdown."""
 # Gemini accepts these inline; anything else we send as-is and let it try.
 _OK_MIME = {"image/jpeg", "image/png", "image/webp", "image/heic", "image/heif",
             "application/pdf"}
+
+# Every Gemini model caps a single response at 65,536 output tokens, so a long
+# document's transcription can't fit in one call. Transcribe a multi-page PDF in
+# page ranges and stitch the results. CHUNK_PAGES is the starting range; a range
+# that still overflows (dense pages) is halved adaptively, down to one page.
+CHUNK_PAGES = 30
+
+
+def _pdf_pages(data: bytes) -> int | None:
+    """Page count, or None if the bytes aren't a parseable PDF."""
+    try:
+        return len(PdfReader(io.BytesIO(data)).pages)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _pdf_subset(reader: PdfReader, lo: int, hi: int) -> bytes:
+    writer = PdfWriter()
+    for i in range(lo, hi):
+        writer.add_page(reader.pages[i])
+    buf = io.BytesIO()
+    writer.write(buf)
+    return buf.getvalue()
+
+
+async def _transcribe_range(
+    gemini: GeminiClient, reader: PdfReader, lo: int, hi: int,
+    prompt: str, thinking_budget: int | None,
+) -> str:
+    """Transcribe pages [lo, hi); on a MAX_TOKENS overflow, halve and recurse."""
+    chunk = _pdf_subset(reader, lo, hi)
+    try:
+        return await gemini.transcribe(chunk, "application/pdf", prompt, thinking_budget)
+    except GeminiError as exc:
+        if "MAX_TOKENS" in str(exc) and hi - lo > 1:
+            mid = (lo + hi) // 2
+            first = await _transcribe_range(gemini, reader, lo, mid, prompt, thinking_budget)
+            second = await _transcribe_range(gemini, reader, mid, hi, prompt, thinking_budget)
+            return f"{first}\n\n{second}"
+        raise
+
+
+async def transcribe_document(
+    gemini: GeminiClient, data: bytes, mime: str, prompt: str,
+    thinking_budget: int | None,
+) -> str:
+    """Transcribe a document, chunking a multi-page PDF so no single response
+    exceeds the model's output-token ceiling. Images and single-page/unparseable
+    PDFs go through in one call."""
+    if mime != "application/pdf":
+        return await gemini.transcribe(data, mime, prompt, thinking_budget)
+    pages = _pdf_pages(data)
+    if not pages or pages <= 1:
+        return await gemini.transcribe(data, mime, prompt, thinking_budget)
+    reader = PdfReader(io.BytesIO(data))
+    parts: list[str] = []
+    for lo in range(0, pages, CHUNK_PAGES):
+        parts.append(await _transcribe_range(
+            gemini, reader, lo, min(lo + CHUNK_PAGES, pages), prompt, thinking_budget))
+    return "\n\n".join(p for p in parts if p)
 
 
 def _ocr_done(conn: sqlite3.Connection, doc_id: int) -> bool:
@@ -125,7 +188,7 @@ async def run(
             continue
 
         try:
-            text = await gemini.transcribe(data, mime, OCR_PROMPT, gem_cfg.thinking_budget)
+            text = await transcribe_document(gemini, data, mime, OCR_PROMPT, gem_cfg.thinking_budget)
         except GeminiError as exc:
             counts["errors"] += 1
             yield SyncEvent(kind="item", entity="doc", action="failed",

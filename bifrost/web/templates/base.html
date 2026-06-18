@@ -16,18 +16,12 @@
   </script>
 </head>
 <body>
-  <header class="topbar">
+  <header class="appbar">
+    <button class="navtoggle" aria-label="Toggle navigation"
+      onclick="document.querySelector('.drawer').classList.toggle('open')">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+    </button>
     <a class="brand" href="/"><img class="logo" src="/static/bifrost_logo.svg" alt="">Bifrost</a>
-    <nav>
-      <a href="/">Home</a>
-      <a href="/upload">Upload</a>
-      <a href="/faces">Faces</a>
-      <a href="/sync">Sync</a>
-      <a href="/places">Places</a>
-      <a href="/citations">Citations</a>
-      <a href="/activity">Activity</a>
-      <a href="/idgen">IDs</a>
-    </nav>
     <span class="spacer"></span>
     <button id="theme-toggle" title="Toggle dark mode" onclick="
       const sys = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
@@ -37,7 +31,32 @@
       localStorage.setItem('bifrost-theme', next);
     ">◐</button>
   </header>
-  <main>{% block content %}{% endblock %}</main>
+  <div class="shell">
+    {% set p = request.url.path %}
+    <nav class="drawer">
+      <div class="navgroup">
+        <span class="navlabel">Overview</span>
+        <a href="/" class="{{ 'active' if p == '/' else '' }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11l8-7 8 7"/><path d="M6 10v9h12v-9"/></svg>Home</a>
+      </div>
+      <div class="navgroup">
+        <span class="navlabel">Add</span>
+        <a href="/upload" class="{{ 'active' if p.startswith('/upload') else '' }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V5"/><path d="M7 9l5-5 5 5"/><path d="M5 19h14"/></svg>Upload</a>
+        <a href="/sync" class="{{ 'active' if p.startswith('/sync') else '' }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 0 0-14-4L4 9"/><path d="M4 5v4h4"/><path d="M4 13a8 8 0 0 0 14 4l2-2"/><path d="M20 19v-4h-4"/></svg>Sync</a>
+      </div>
+      <div class="navgroup">
+        <span class="navlabel">Curate</span>
+        <a href="/faces" class="{{ 'active' if p.startswith('/faces') else '' }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/></svg>Faces</a>
+        <a href="/citations" class="{{ 'active' if p.startswith('/citations') else '' }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4h11a1 1 0 0 1 1 1v15H7a1 1 0 0 1-1-1V4z"/><path d="M9 8h6M9 12h5"/></svg>Citations</a>
+      </div>
+      <div class="navgroup">
+        <span class="navlabel">Tools</span>
+        <a href="/places" class="{{ 'active' if p.startswith('/places') else '' }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-6-5.2-6-10a6 6 0 0 1 12 0c0 4.8-6 10-6 10z"/><circle cx="12" cy="11" r="2"/></svg>Places</a>
+        <a href="/activity" class="{{ 'active' if p.startswith('/activity') else '' }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V5"/><path d="M4 19h16"/><path d="M8 15l3-4 3 2 4-6"/></svg>Activity</a>
+        <a href="/idgen" class="{{ 'active' if p.startswith('/idgen') else '' }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h16M4 15h16M10 4L8 20M16 4l-2 16"/></svg>IDs</a>
+      </div>
+    </nav>
+    <main>{% block content %}{% endblock %}</main>
+  </div>
   {% block scripts %}{% endblock %}
 </body>
 </html>

@@ -20,47 +20,13 @@ function runResult(r) {
   try { return summarize(JSON.parse(r.summary).data, true); } catch { return ''; }
 }
 
-// key, label, sparkline colour class (matches bifrost.css .c-*)
-const SNAP = [
-  ['people', 'People', 'person'], ['events', 'Events', 'event'],
-  ['places', 'Places', 'place'], ['citations', 'Citations', 'citation'],
-  ['media', 'Media', 'media'], ['sources', 'Sources', 'source'],
-];
-
-/* Min/max-scaled mini sparkline (growth shows even when counts barely move). */
-function sparkline(vals, cls) {
-  if (!vals || vals.length < 2) return nothing;
-  const w = 6, padY = 4, H = 34;
-  const width = (vals.length - 1) * w + 6;
-  const max = Math.max(...vals), min = Math.min(...vals);
-  const span = Math.max(1, max - min);
-  const y = (v) => padY + (H - 2 * padY) * (1 - (v - min) / span);
-  const pts = vals.map((v, i) => `${3 + i * w},${y(v).toFixed(1)}`).join(' ');
-  const lastX = 3 + (vals.length - 1) * w;
-  return html`<svg class="snapspark" viewBox="0 0 ${width} ${H}" height=${H}
-    preserveAspectRatio="none">
-    <polyline points=${pts} class="c-${cls}"/>
-    <path d="M ${lastX} ${y(vals[vals.length - 1]).toFixed(1)} l .01 0" class="endcap c-${cls}"/>
-  </svg>`;
-}
-
-/* "▲ +N this week" / "▼ −N" / "steady" from the last two weekly points. */
-function deltaBadge(vals) {
-  if (!vals || vals.length < 2) return nothing;
-  const d = vals[vals.length - 1] - vals[vals.length - 2];
-  if (d > 0) return html`<span class="snapdelta up">▲ +${d} this wk</span>`;
-  if (d < 0) return html`<span class="snapdelta down">▼ ${d} this wk</span>`;
-  return html`<span class="snapdelta">steady</span>`;
-}
-
 class InboxPage extends BifrostElement {
   static properties = {
     data: { state: true }, error: { state: true }, loading: { state: true },
-    trends: { state: true },
   };
   constructor() {
     super();
-    this.data = null; this.error = ''; this.loading = false; this.trends = null;
+    this.data = null; this.error = ''; this.loading = false;
   }
   connectedCallback() {
     super.connectedCallback();
@@ -75,39 +41,6 @@ class InboxPage extends BifrostElement {
     } finally {
       this.loading = false;
     }
-    // Trends are a progressive enhancement: cards render instantly with live
-    // counts; sparklines/deltas fill in when the (cached) history returns.
-    this.loadTrends(refresh);
-  }
-  async loadTrends(refresh = false) {
-    try {
-      this.trends = await api(`/api/inbox/trends${refresh ? '?refresh=true' : ''}`);
-    } catch { /* leave counts-only */ }
-  }
-  renderSnapshot() {
-    const snap = (this.data && this.data.snapshot) || {};
-    const cards = SNAP.filter(([k]) => snap[k] != null);
-    if (!cards.length) return nothing;
-    const tr = this.trends;
-    return html`<h2>Snapshot</h2>
-      <div class="snapgrid">
-        ${cards.map(([key, label, cls]) => {
-          const series = tr && tr.series ? tr.series[key] : null;
-          return html`<a class="snapcard" href="/activity"
-            title="${label} over time — open Activity">
-            <div class="snaptop">
-              <span class="snaplabel">${label}</span>
-              <span class="snapval">${snap[key]}</span>
-            </div>
-            ${sparkline(series, cls)}
-            <div class="snapfoot">
-              ${deltaBadge(series)}
-              ${key === 'events' && tr && tr.coverage_pct != null
-                ? html`<span class="snapcov">${tr.coverage_pct}% cited</span>` : nothing}
-            </div>
-          </a>`;
-        })}
-      </div>`;
   }
 
   render() {
@@ -135,8 +68,6 @@ class InboxPage extends BifrostElement {
           <span class="attn-go">→</span>
         </a>`)}
       </div>` : html`<p class="hint">All caught up — nothing pending.</p>`}
-
-      ${this.renderSnapshot()}
 
       <h2>Recent runs</h2>
       ${runs.length ? html`<table class="results">

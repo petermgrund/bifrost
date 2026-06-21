@@ -126,3 +126,34 @@ class ImmichClient:
             "DELETE", f"/api/tags/{tag_id}/assets", json={"ids": asset_ids}
         )
         return resp.json() if resp.content else []
+
+    async def upsert_tags(self, values: list[str]) -> list[dict]:
+        """Create tags by full path (creates the hierarchy, e.g. 'Gramps/Role/Original').
+
+        Idempotent — returns the existing tag if it already exists.
+        """
+        resp = await self._request("PUT", "/api/tags", json={"tags": values})
+        return resp.json() if resp.content else []
+
+    # --- stacks (version groups; see docs/IMMICH_VERSIONING.md) ---
+
+    async def list_stacks(self) -> list[dict]:
+        """All stacks. Each stack has an id, primaryAssetId, and an assets list."""
+        resp = await self._request("GET", "/api/stacks")
+        return resp.json()
+
+    async def get_stack(self, stack_id: str) -> dict:
+        resp = await self._request("GET", f"/api/stacks/{stack_id}")
+        return resp.json()
+
+    async def create_stack(self, asset_ids: list[str]) -> dict:
+        """Group assets into a new stack. The first id becomes the primary."""
+        resp = await self._request("POST", "/api/stacks", json={"assetIds": asset_ids})
+        return resp.json()
+
+    async def set_stack_primary(self, stack_id: str, primary_asset_id: str) -> dict:
+        """Re-point which member of a stack is the primary/cover (the displayed version)."""
+        resp = await self._request(
+            "PUT", f"/api/stacks/{stack_id}", json={"primaryAssetId": primary_asset_id}
+        )
+        return resp.json()

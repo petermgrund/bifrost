@@ -34,6 +34,11 @@ TAG_SYNC_LOCATION = "sync/location"
 TAG_SYNC_DESCRIPTION = "sync/description"
 TAG_SYNC_MANUAL_FACES = "sync/manualfaces"
 
+# A stack counts as a version set only if a member carries a tag with this path
+# prefix (written when a photo is opted into versioning). Keeps the pre-existing
+# burst/RAW/sequential stacks out of scope. See docs/IMMICH_VERSIONING.md §11.
+TAG_GRAMPS_BASE_PREFIX = "gramps/base/"
+
 TAG_DATE_APPROXIMATE = "date/approximate"
 TAG_DATE_BEFORE = "date/before"
 TAG_DATE_AFTER = "date/after"
@@ -47,6 +52,13 @@ MOD_REGULAR, MOD_BEFORE, MOD_AFTER, MOD_ABOUT = 0, 1, 2, 3
 QUAL_REGULAR, QUAL_ESTIMATED, QUAL_CALCULATED = 0, 1, 2
 
 MIME_FALLBACKS = {"IMAGE": "image/jpeg", "VIDEO": "video/mp4"}
+
+# Object types that can carry a face MediaRef (rect) back to a media object —
+# cleared when a version change replaces the image. Mirrors sync_paperless.
+BACKLINK_OBJ_TYPES = {
+    "person": "people", "family": "families", "event": "events",
+    "citation": "citations", "source": "sources", "place": "places",
+}
 
 CHARSET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 EARTH_RADIUS_KM = 6371.0
@@ -246,6 +258,104 @@ def validate_manual_ids(
 
 
 # ---------------------------------------------------------------------------
+# Version state (docs/IMMICH_VERSIONING.md). An Immich stack is one logical
+# photo's version set; its primaryAssetId is the version displayed in Gramps.
+# ---------------------------------------------------------------------------
+
+def _get_iversion(conn: sqlite3.Connection, gramps_id: str) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT * FROM immich_versions WHERE gramps_id=?", (gramps_id,)
+    ).fetchone()
+
+
+async def _stack_is_managed(immich: ImmichClient, conn: sqlite3.Connection,
+                            asset: dict, gramps_id: str) -> bool:
+    """Whether Bifrost manages this stack as a version set. True if: an existing
+    immich_versions row; the iterated (displayed) asset carries a Gramps/Base/*
+    tag (the fast path once propagated); or — the opt-in case — a
+    `Gramps/Base/<gramps_id>` tag exists at all, since Peter may tag ANY member
+    (often a non-displayed version), not necessarily the synced one. Pre-existing
+    burst/RAW/sequential stacks have none and are ignored until opted in."""
+    if _get_iversion(conn, gramps_id) is not None:
+        return True
+    if any(v.startswith(TAG_GRAMPS_BASE_PREFIX) for v in get_asset_tag_values(asset)):
+        return True
+    return await immich.resolve_tag_id(f"Gramps/Base/{gramps_id}") is not None
+
+
+def _set_iversion(conn: sqlite3.Connection, gramps_id: str, stack_id: str,
+                  current_asset_id: str, current_checksum: str, member_count: int) -> None:
+    with conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO immich_versions"
+            " (gramps_id, stack_id, current_asset_id, current_checksum, member_count, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (gramps_id, stack_id, current_asset_id, current_checksum, member_count,
+             datetime.now().isoformat(timespec="seconds")),
+        )
+
+
+def _set_media_attr(media: dict, attr_type: str, value: str) -> None:
+    """Overwrite an existing attribute's value in place, or append it."""
+    for a in media.get("attribute_list", []):
+        if a.get("type") == attr_type:
+            a["value"] = value
+            return
+    media.setdefault("attribute_list", []).append(
+        {"_class": "Attribute", "type": attr_type, "value": value,
+         "private": False, "citation_list": [], "note_list": []})
+
+
+def _path_mapping_matches(original_path: str, path_mappings: tuple[dict, ...]) -> bool:
+    """True if some mapping prefix matches — i.e. translate_path won't fall back
+    to the bare 'immich/<filename>' that 404s on the read-only Gramps mount."""
+    return any(original_path.startswith(m.get("immich_prefix", ""))
+               for m in path_mappings if m.get("immich_prefix"))
+
+
+async def _persist_stack(
+    immich: ImmichClient, conn: sqlite3.Connection, cfg: SyncImmichConfig,
+    gramps_id: str, stack_id: str, current_asset_id: str, current_checksum: str,
+) -> None:
+    """Apply-only: record a managed stack's state and keep it in the sync universe.
+
+    Propagates the configured sync tags + a `Gramps/Base/<id>` tag onto EVERY
+    stack member, so (a) the displayed version is always tagged and a full sync
+    keeps refreshing it (no date/place regression after a promotion), (b) any
+    member promoted later is already in scope, and (c) the version set is
+    self-describing in Immich and rebuildable if Bifrost's DB is lost. Then it
+    refreshes immich_version_members and upserts the immich_versions row.
+    """
+    stack = await immich.get_stack(stack_id)
+    members = stack.get("assets", [])
+    member_ids = [m["id"] for m in members]
+
+    base_value = f"Gramps/Base/{gramps_id}"
+    await immich.upsert_tags([base_value])  # idempotent; sync tags already exist
+    if member_ids:
+        for value in (*cfg.sync_tags, base_value):
+            tid = await immich.resolve_tag_id(value)
+            if tid:
+                await immich.tag_assets(tid, member_ids)
+
+    # Preserve any role/label the UI already set on a member across this refresh.
+    prev = {r["asset_id"]: r for r in conn.execute(
+        "SELECT asset_id, role, label FROM immich_version_members WHERE gramps_id=?",
+        (gramps_id,)).fetchall()}
+    with conn:
+        conn.execute("DELETE FROM immich_version_members WHERE gramps_id=?", (gramps_id,))
+        conn.executemany(
+            "INSERT INTO immich_version_members"
+            " (gramps_id, asset_id, checksum, role, label, seq) VALUES (?, ?, ?, ?, ?, ?)",
+            [(gramps_id, m["id"], m.get("checksum", ""),
+              prev[m["id"]]["role"] if m["id"] in prev else None,
+              prev[m["id"]]["label"] if m["id"] in prev else None, seq)
+             for seq, m in enumerate(members, start=1)],
+        )
+    _set_iversion(conn, gramps_id, stack_id, current_asset_id, current_checksum, len(members))
+
+
+# ---------------------------------------------------------------------------
 # The sync generator
 # ---------------------------------------------------------------------------
 
@@ -256,10 +366,16 @@ async def sync(
     cfg: SyncImmichConfig,
     apply: bool,
     manual_ids: dict[str, str] | None = None,
+    versions_only: bool = False,
 ) -> AsyncIterator[SyncEvent]:
+    # versions_only: run ONLY the version phase (repoint Gramps to the stack's
+    # displayed/primary asset). No create / date / place / description work —
+    # the lean path for the unattended scheduled run, mirroring sync_paperless.
     counts = {"created": 0, "skipped": 0, "faces_linked": 0,
               "dates_updated": 0, "places_linked": 0, "descs_updated": 0,
-              "errors": 0}
+              "baselined": 0, "versions_updated": 0,
+              "faces_cleared": 0, "faces_rederived": 0,
+              "stacks_seen": 0, "stacks_managed": 0, "errors": 0}
 
     # --- Gather inputs ---
     tag_ids = []
@@ -286,6 +402,12 @@ async def sync(
     yield SyncEvent(kind="started", detail=f"{len(assets)} tagged asset(s) in Immich")
 
     synced = await faces_mod.synced_immich_media(gramps)
+    # Non-displayed members of a managed version set carry the sync tag (so they
+    # stay discoverable for the version phase), but they are VERSIONS of an
+    # existing photo — never create them as their own Gramps media. The displayed
+    # member is in `synced` already; the others are skipped below.
+    version_member_ids = {r["asset_id"] for r in
+        conn.execute("SELECT asset_id FROM immich_version_members").fetchall()}
     existing_ids = await gramps.list_media_gramps_ids()
     # Manual ids: validate against what's really in Gramps, then keep the auto
     # generator away from both reserved ids and the chosen manual ids.
@@ -298,7 +420,7 @@ async def sync(
     by_immich = {e["immich_person_id"]: e for e in links}
 
     places_with_coords: list[dict] = []
-    if cfg.place_tag_handle:
+    if cfg.place_tag_handle and not versions_only:
         places_with_coords = [
             p for p in await gramps.list_places_full()
             if cfg.place_tag_handle in p.get("tag_list", [])
@@ -311,12 +433,14 @@ async def sync(
 
     # --- New assets → Media (manual-id assets first, so auto ids never race them) ---
     assets.sort(key=lambda a: 0 if a["id"] in valid_manual else 1)
-    for asset in assets:
+    for asset in (assets if not versions_only else []):
         asset_id = asset["id"]
         filename = asset.get("originalFileName") or f"Immich {asset_id[:8]}"
         if asset_id in synced:
             counts["skipped"] += 1
             continue
+        if asset_id in version_member_ids:
+            continue  # a non-displayed version of a managed photo, not a new item
         if asset_id in rejected_manual:
             counts["errors"] += 1
             yield SyncEvent(kind="item", entity="media", action="failed",
@@ -455,7 +579,7 @@ async def sync(
             )
 
     # --- Refresh passes for already-synced assets ---
-    for asset in assets:
+    for asset in (assets if not versions_only else []):
         asset_id = asset["id"]
         media = synced.get(asset_id)
         if media is None:
@@ -548,4 +672,256 @@ async def sync(
                                 title=ellipsize(title),
                                 data={"cols": {"description": snippet}})
 
+    # ============ Version phase: stack primary → displayed version ============
+    # An Immich stack groups one logical photo's versions; its primaryAssetId is
+    # the version shown in Gramps. `synced` is keyed on the Immich ID attribute,
+    # so the asset_id we point at IS what Gramps currently shows; the stack is in
+    # sync when that asset is the stack primary. A different primary = a deliberate
+    # promotion → repoint the SAME Gramps media: the base id and handle stay
+    # FROZEN; only path/mime + the Immich ID/URL attributes change. Now-invalid
+    # face rects are cleared and left PENDING (re-derivation is phase 5). The
+    # opt-in guard keeps the pre-existing burst/RAW stacks out of scope.
+    for asset in assets:
+        asset_id = asset["id"]
+        media = synced.get(asset_id)
+        if media is None:
+            continue
+        stack = asset.get("stack")
+        if not stack:
+            continue
+        counts["stacks_seen"] += 1
+        gramps_id = media.get("gramps_id", "?")
+        if not await _stack_is_managed(immich, conn, asset, gramps_id):
+            continue  # pre-existing burst/RAW stack, not opted into versioning
+        counts["stacks_managed"] += 1
+        stack_id = stack.get("id")
+        member_count = stack.get("assetCount", 0)
+        primary = stack.get("primaryAssetId")
+        title = ((media.get("desc") or "").strip()
+                 or asset.get("originalFileName") or asset_id[:8])
+        tracked = _get_iversion(conn, gramps_id)
+
+        # In sync: Gramps already shows the stack primary. First sight = baseline;
+        # a later membership change re-propagates tags and refreshes the row.
+        if primary == asset_id:
+            if tracked is None:
+                if apply:
+                    await _persist_stack(immich, conn, cfg, gramps_id, stack_id,
+                                         asset_id, asset.get("checksum", ""))
+                counts["baselined"] += 1
+            elif apply and tracked["member_count"] != member_count:
+                await _persist_stack(immich, conn, cfg, gramps_id, stack_id,
+                                     asset_id, asset.get("checksum", ""))
+            continue
+
+        # Divergence: a different member is the displayed/primary version.
+        try:
+            new = await immich.get_asset(primary)
+        except Exception as exc:  # noqa: BLE001 — e.g. the primary was deleted
+            counts["errors"] += 1
+            yield SyncEvent(kind="item", entity="media", action="failed",
+                            source_id=primary, gramps_id=gramps_id, title=ellipsize(title),
+                            detail=f"displayed version {primary[:8]} unavailable: {exc}")
+            continue
+
+        original_path = new.get("originalPath", "")
+        if not _path_mapping_matches(original_path, cfg.path_mappings):
+            counts["errors"] += 1
+            yield SyncEvent(kind="item", entity="media", action="failed",
+                            source_id=primary, gramps_id=gramps_id, title=ellipsize(title),
+                            detail=f"path {original_path!r} is under no configured mount")
+            continue
+        new_path = translate_path(original_path, cfg.path_mappings)
+        new_mime = new.get("originalMimeType") or MIME_FALLBACKS.get(
+            new.get("type", "IMAGE"), "application/octet-stream")
+
+        fresh = await gramps.get_media_by_gramps_id(gramps_id)
+        if not fresh:
+            counts["errors"] += 1
+            yield SyncEvent(kind="item", entity="media", action="failed",
+                            source_id=primary, gramps_id=gramps_id, title=ellipsize(title),
+                            detail=f"no Gramps media {gramps_id}")
+            continue
+
+        vcols: dict = {"version": "repointed" if apply else "would repoint",
+                       "from": asset_id[:8], "to": primary[:8]}
+        if fresh.get("path") != new_path or fresh.get("mime") != new_mime:
+            vcols["path/mime"] = "updated"
+
+        # Clear now-invalid face rects on every backlinked object (the pixels
+        # changed). Counted in preview too; only nulled+saved under apply.
+        cleared = 0
+        backlinks = await gramps.get_media_backlinks(fresh["handle"])
+        for bl_type, api_path in BACKLINK_OBJ_TYPES.items():
+            for obj_handle in backlinks.get(bl_type, []):
+                obj = await gramps.get_object(api_path, obj_handle)
+                modified = False
+                for mref in obj.get("media_list", []):
+                    if mref.get("ref") == fresh["handle"] and mref.get("rect"):
+                        cleared += 1
+                        if apply:
+                            mref["rect"] = None
+                            modified = True
+                if modified and apply:
+                    await gramps.update_object(api_path, obj_handle, obj)
+        if cleared:
+            counts["faces_cleared"] += cleared
+
+        re_derived = 0
+        if apply:
+            _set_media_attr(fresh, "Immich ID", primary)
+            _set_media_attr(fresh, "Immich URL", f"{cfg.public_url}/photos/{primary}")
+            fresh["path"] = new_path
+            fresh["mime"] = new_mime
+            fresh["change"] = int(datetime.utcnow().timestamp())
+            await gramps.update_media(fresh["handle"], fresh)
+            # Tag the new primary into the sync universe + refresh row/members.
+            await _persist_stack(immich, conn, cfg, gramps_id, stack_id, primary,
+                                 new.get("checksum", ""))
+            # Best-effort re-derivation: re-draw the faces of LINKED people that
+            # Immich still detects on the new primary (person ids usually carry
+            # across a rescan via Immich recognition). Unmatched faces and any
+            # non-person rects stay PENDING — cleared, never silently mis-placed.
+            new_is_manual = TAG_SYNC_MANUAL_FACES in get_asset_tag_values(new)
+            for face in await immich.get_faces(primary):
+                ipid = (face.get("person") or {}).get("id")
+                link = by_immich.get(ipid) if ipid else None
+                if not link:
+                    continue
+                pad = faces_mod.effective_pad(conn, link["gramps_handle"], primary, new_is_manual)
+                try:
+                    await faces_mod.apply_face(gramps, immich, conn, link["gramps_handle"],
+                                               primary, pad, media_handle=fresh["handle"])
+                except Exception:  # noqa: BLE001 — best effort; leave pending
+                    continue
+                re_derived += 1
+            counts["faces_rederived"] += re_derived
+
+        if cleared or re_derived:
+            pending = max(0, cleared - re_derived)
+            vcols["faces"] = f"{cleared} cleared / {re_derived} re-derived / {pending} pending"
+
+        counts["versions_updated"] += 1
+        yield SyncEvent(
+            kind="item", entity="media",
+            action="updated" if apply else "would_update",
+            source_id=primary, gramps_id=gramps_id, title=ellipsize(title),
+            data={"cols": vcols},
+        )
+
     yield SyncEvent(kind="summary", data=counts)
+
+
+# ---------------------------------------------------------------------------
+# Interactive version management (the VERSIONS strip — docs/IMMICH_VERSIONING.md
+# §8). Bifrost is the cockpit; the durable state (stack, primaryAssetId, role
+# tags) lives in Immich. These single-photo ops back the UI; promotion itself
+# reuses set_stack_primary + the versions_only sync.
+# ---------------------------------------------------------------------------
+
+# Role → the Immich tag that carries it (kind is provenance, set explicitly).
+VERSION_ROLES = {
+    "original": "Gramps/Role/Original",
+    "ai": "Gramps/Role/AI",
+    "crop": "Gramps/Role/Crop",
+    "duplicate": "Gramps/Role/Duplicate",
+    "verso": "Gramps/Role/Verso",
+}
+TAG_GRAMPS_ROLE_PREFIX = "gramps/role/"
+
+
+async def version_set(
+    immich: ImmichClient, gramps: GrampsClient, conn: sqlite3.Connection,
+    cfg: SyncImmichConfig, asset_id: str,
+) -> dict:
+    """The version set for the photo currently displayed as `asset_id` — the
+    live stack merged with Bifrost's role/label/seq cache. `versioned=False`
+    when the asset is not in a stack."""
+    asset = await immich.get_asset(asset_id)
+    stack = asset.get("stack")
+    if not stack:
+        return {"versioned": False}
+    full = await immich.get_stack(stack["id"])
+    members = full.get("assets", [])
+    primary = full.get("primaryAssetId")
+
+    synced = await faces_mod.synced_immich_media(gramps)
+    gramps_id = next((synced[m["id"]].get("gramps_id")
+                      for m in members if m["id"] in synced), None)
+    managed = bool(gramps_id) and await _stack_is_managed(immich, conn, asset, gramps_id)
+    cache = {r["asset_id"]: r for r in conn.execute(
+        "SELECT asset_id, role, label, seq FROM immich_version_members WHERE gramps_id=?",
+        (gramps_id,)).fetchall()} if gramps_id else {}
+
+    out = []
+    for i, m in enumerate(members):
+        row = cache.get(m["id"])
+        out.append({
+            "asset_id": m["id"],
+            "filename": m.get("originalFileName"),
+            "is_displayed": m["id"] == primary,
+            "role": row["role"] if row else None,
+            "label": row["label"] if row else None,
+            "seq": row["seq"] if row else i + 1,
+            "thumb_url": f"/faces/api/thumb/asset/{m['id']}",
+        })
+    out.sort(key=lambda x: x["seq"])
+    return {"versioned": True, "managed": managed, "gramps_id": gramps_id,
+            "stack_id": stack["id"], "primary_asset_id": primary, "members": out}
+
+
+async def set_role(
+    immich: ImmichClient, conn: sqlite3.Connection,
+    gramps_id: str, asset_id: str, role: str | None,
+) -> dict:
+    """Mark a member's kind. Writes the durable `Gramps/Role/*` Immich tag
+    (removing any prior role tag) and mirrors it into the members cache.
+    role=None clears the kind."""
+    if role is not None and role not in VERSION_ROLES:
+        raise ValueError(f"unknown role {role!r}")
+
+    asset = await immich.get_asset(asset_id)
+    for t in asset.get("tags", []):
+        val = (t.get("value") or t.get("name") or "").lower()
+        if val.startswith(TAG_GRAMPS_ROLE_PREFIX) and t.get("id"):
+            await immich.untag_assets(t["id"], [asset_id])
+    if role is not None:
+        value = VERSION_ROLES[role]
+        await immich.upsert_tags([value])
+        tid = await immich.resolve_tag_id(value)
+        if tid:
+            await immich.tag_assets(tid, [asset_id])
+    with conn:
+        conn.execute(
+            "UPDATE immich_version_members SET role=? WHERE gramps_id=? AND asset_id=?",
+            (role, gramps_id, asset_id))
+    return {"asset_id": asset_id, "role": role}
+
+
+def set_label(conn: sqlite3.Connection, gramps_id: str, asset_id: str,
+              label: str | None) -> dict:
+    """Set a member's free-text note (Bifrost-owned)."""
+    label = (label or "").strip() or None
+    with conn:
+        conn.execute(
+            "UPDATE immich_version_members SET label=? WHERE gramps_id=? AND asset_id=?",
+            (label, gramps_id, asset_id))
+    return {"asset_id": asset_id, "label": label}
+
+
+async def adopt(
+    immich: ImmichClient, conn: sqlite3.Connection, cfg: SyncImmichConfig,
+    gramps_id: str, displayed_asset_id: str, add_asset_ids: list[str],
+) -> dict:
+    """Fold already-uploaded asset(s) into a NEW stack with the synced photo,
+    opting it into versioning. The synced (displayed) asset is listed first so
+    it stays the primary; then propagate tags + baseline via _persist_stack.
+    Assumes the displayed asset is not already stacked (UI guards that)."""
+    ids = [displayed_asset_id, *[a for a in add_asset_ids if a != displayed_asset_id]]
+    if len(ids) < 2:
+        raise ValueError("need at least one other asset to form a version set")
+    stack = await immich.create_stack(ids)
+    displayed = await immich.get_asset(displayed_asset_id)
+    await _persist_stack(immich, conn, cfg, gramps_id, stack["id"],
+                         displayed_asset_id, displayed.get("checksum", ""))
+    return {"stack_id": stack["id"], "members": ids, "primary_asset_id": displayed_asset_id}

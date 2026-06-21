@@ -36,7 +36,7 @@
   --surface: #ffffff;       /* surface container lowest (cards) */
   --surface-2: #eceef4;     /* surface container / surface-variant */
   --text: #1a1c20;          /* on-surface */
-  --muted: #44474e;         /* on-surface-variant */
+  --muted: #1a1c20;         /* secondary text = the near-black text colour, never grey (Peter's rule) */
   --border: #c4c6d0;        /* outline-variant */
   --border-strong: #74777f; /* outline */
   --accent: #415f91;        /* primary */
@@ -60,26 +60,23 @@
   --elev-2: 0 1px 2px #1a1c2026, 0 2px 6px 2px #1a1c2014;
 }
 
-/* Dark theme: explicit toggle or system preference */
+/* Dark theme — driven SOLELY by the explicit [data-theme] toggle, exactly like
+   the --bf-* tokens in bifrost-tokens.css (which has no prefers-color-scheme
+   block). base.html always sets <html data-theme="light|dark"> before first
+   paint — defaulting to the system preference only when no choice is saved — so
+   the legacy tokens below and the --bf-*/Material tokens now switch together off
+   the same single signal. A `@media (prefers-color-scheme: dark)` fallback is
+   intentionally NOT used here: it would make these legacy colors track the OS
+   theme independently of the toggle, leaving the UI half-switched whenever the
+   chosen theme and the OS preference disagree. */
 :root[data-theme="dark"] {
   --bg: #111318; --surface: #1b1f24; --surface-2: #2a2e35;
-  --text: #e2e2e9; --muted: #c4c6d0; --border: #44474e; --border-strong: #8e9099;
+  --text: #e9eaf1; --muted: #e9eaf1; --border: #3a3f47; --border-strong: #8e9099;
   --accent: #aac7ff; --accent-dark: #c6dbff; --accent-soft: #284777;
   --on-accent: #0a305f; --on-accent-soft: #d8e2ff;
   --ok: #7cdba0; --warn: #f1c15b; --err: #ffb4ab;
   --warn-soft: #5a3d00; --ok-soft: #20402d; --err-soft: #5c1414;
   --label-bg: #111318d9; --shadow: #00000066;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #111318; --surface: #1b1f24; --surface-2: #2a2e35;
-    --text: #e2e2e9; --muted: #c4c6d0; --border: #44474e; --border-strong: #8e9099;
-    --accent: #aac7ff; --accent-dark: #c6dbff; --accent-soft: #284777;
-    --on-accent: #0a305f; --on-accent-soft: #d8e2ff;
-    --ok: #7cdba0; --warn: #f1c15b; --err: #ffb4ab;
-    --warn-soft: #5a3d00; --ok-soft: #20402d; --err-soft: #5c1414;
-    --label-bg: #111318d9; --shadow: #00000066;
-  }
 }
 
 * { box-sizing: border-box; }
@@ -251,10 +248,10 @@ select { cursor: pointer; }
 .photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: .75rem; }
 .photo-card {
   display: flex; gap: .7rem;
-  background: var(--surface); border: 1px solid var(--border);
+  background: transparent; border: 1px solid var(--border);
   border-radius: 12px; padding: .6rem; cursor: pointer;
 }
-.photo-card:hover { border-color: var(--accent); }
+.photo-card:hover { border-color: var(--accent); background: var(--surface-2); }
 .photo-card.unsynced { opacity: .55; }
 .photo-card img { width: 68px; height: 68px; border-radius: var(--radius); object-fit: cover; background: var(--surface-2); }
 .photo-card .body { flex: 1; min-width: 0; }
@@ -281,7 +278,7 @@ select { cursor: pointer; }
   padding: .8rem 1.1rem; border-bottom: 1px solid var(--border);
 }
 .alert { background: var(--warn-soft); color: var(--warn); padding: .55rem 1.1rem; font-size: .85rem; }
-.detail-body { display: grid; grid-template-columns: 1.4fr 1fr; gap: 1.1rem; padding: 1.1rem; overflow-y: auto; }
+.detail-body { display: grid; grid-template-columns: 1.4fr 1fr; gap: 1.1rem; }
 .imgwrap { position: relative; align-self: start; }
 .imgwrap img { width: 100%; border-radius: var(--radius); display: block; }
 .facebox { position: absolute; border: 2px solid var(--accent); border-radius: 3px; pointer-events: none; }
@@ -301,6 +298,29 @@ select { cursor: pointer; }
 .facerow.s-pending, .facerow.s-outdated { border-color: var(--accent); border-style: dashed; }
 .facerow.s-differs { border-color: var(--warn); border-style: dashed; }
 .padctl { display: flex; align-items: center; gap: .4rem; }
+
+/* Image versions strip (Photos detail — docs/IMMICH_VERSIONING.md) */
+/* Versions strip — at the TOP of the photo dialog; one flat row per version
+   (no boxed cards). The displayed version gets a left accent bar, not a fill. */
+.version-strip { border-bottom: 1px solid var(--border); padding-bottom: .7rem; margin-bottom: .8rem; }
+.version-strip .vhead { font-weight: 600; font-size: .95rem; margin-bottom: .1rem; }
+.version-strip .vintro { font-size: .8rem; color: var(--muted); margin-bottom: .5rem; }
+.version-strip code { background: var(--surface-2); padding: 0 .25rem; border-radius: 3px; }
+.vrow {
+  display: flex; align-items: center; gap: .75rem;
+  padding: .5rem 0; border-bottom: 1px solid var(--border);
+}
+.vrow:last-child { border-bottom: none; }
+.vrow.displayed { box-shadow: inset 3px 0 0 var(--accent); padding-left: .6rem; }
+.vthumb { width: 56px; height: 56px; object-fit: cover; border-radius: var(--radius-sm); flex: 0 0 auto; }
+.vinfo { width: 170px; flex: 0 0 auto; font-size: .8rem; display: flex; flex-direction: column; gap: .35rem; align-items: flex-start; }
+.vinfo .vfile { word-break: break-all; }
+.vinfo .vtag { color: var(--accent); font-weight: 600; font-size: .75rem; }
+.vroles { flex: 1 1 auto; }
+.vnote { width: 150px; flex: 0 0 auto; }
+
+/* Photo detail is an md-dialog; widen it for the two-pane body. */
+md-dialog.photo-dialog { max-width: 980px; min-width: min(700px, 92vw); }
 .padctl input[type="range"] { width: 90px; accent-color: var(--accent); }
 .padval { font-size: .75rem; color: var(--muted); width: 2.4rem; text-align: right; }
 .applyone, .linkjump { font-size: .72rem; padding: .18rem .55rem; }
@@ -318,12 +338,10 @@ table.results th { color: var(--muted); font-weight: 700; }
 .summary-line { margin-top: .6rem; font-size: .88rem; }
 
 /* ---- sync panels ---- */
-.syncpanel {
-  background: var(--surface); border: 1px solid var(--border);
-  border-radius: 12px; padding: 1rem 1.25rem; margin: 1rem 0;
-}
+/* Flat panels — no background cards; consistent with every other page
+   (heading, then content). */
+.syncpanel { margin: 1.75rem 0; }
 .syncpanel h2 { margin-top: 0; }
-.syncpanel.maintenance { background: var(--surface-2); border-color: transparent; }
 .syncpanel.maintenance h2 { color: var(--muted); font-size: .95rem; }
 
 /* ---- inbox ---- */

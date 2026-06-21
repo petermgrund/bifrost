@@ -32,7 +32,9 @@
   /* ---- surfaces ---- */
   --md-sys-color-surface:                   var(--bf-surface);
   --md-sys-color-on-surface:                var(--bf-on-surface);
-  --md-sys-color-on-surface-variant:        var(--bf-on-surface-variant);
+  /* Secondary text in MD components (field labels, supporting text, chip text)
+     uses the FULL on-surface colour — no grey, per Peter's rule. */
+  --md-sys-color-on-surface-variant:        var(--bf-on-surface);
   --md-sys-color-surface-variant:           var(--bf-surface-container-highest);
   --md-sys-color-surface-dim:               var(--bf-surface-dim);
   --md-sys-color-surface-bright:            var(--bf-surface-bright);

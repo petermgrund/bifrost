@@ -19,6 +19,8 @@ class FacesPage extends BifrostElement {
     loaded: { state: true },
     error: { state: true },
     applyResult: { state: true },
+    versionSet: { state: true },
+    versionsBusy: { state: true },
   };
 
   constructor() {
@@ -40,6 +42,8 @@ class FacesPage extends BifrostElement {
     this.loaded = false;
     this.error = '';
     this.applyResult = null;
+    this.versionSet = null;
+    this.versionsBusy = false;
   }
 
   connectedCallback() {
@@ -155,11 +159,6 @@ class FacesPage extends BifrostElement {
     return html`
       <div class="pagehead">
         <h1>Faces</h1>
-        <md-tabs class="tabs" .activeTabIndex=${this.tab === 'people' ? 1 : 0}
-          @change=${(e) => (this.tab = e.target.activeTabIndex === 1 ? 'people' : 'photos')}>
-          <md-primary-tab>Photos</md-primary-tab>
-          <md-primary-tab>People</md-primary-tab>
-        </md-tabs>
         <span class="spacer"></span>
         ${this.listing.pending_total
           ? mdBtn('filled', this.busy ? 'Applying…' : `Apply pending (${this.listing.pending_total})`,
@@ -168,6 +167,11 @@ class FacesPage extends BifrostElement {
         ${mdBtn('outlined', this.loading ? 'Refreshing…' : 'Refresh', this.loading, () => this.load(true))}
         ${this.busy || this.loading ? mdSpinner : nothing}
       </div>
+      <md-tabs .activeTabIndex=${this.tab === 'people' ? 1 : 0}
+        @change=${(e) => (this.tab = e.target.activeTabIndex === 1 ? 'people' : 'photos')}>
+        <md-primary-tab>Photos</md-primary-tab>
+        <md-primary-tab>People</md-primary-tab>
+      </md-tabs>
       ${this.error ? html`<div class="alert">${this.error}</div>` : nothing}
       ${this.applyResultBanner()}
       ${this.tab === 'photos' ? this.renderPhotos() : this.renderPeople()}
@@ -209,6 +213,7 @@ class FacesPage extends BifrostElement {
         <div class="title" title=${p.title}>${p.title}</div>
         <div class="meta">
           ${p.gramps_id || ''}
+          ${p.version_count > 1 ? html`<span class="badge">v${p.version_count}</span>` : nothing}
           ${p.pending_count ? html`<span class="badge">${p.pending_count} pending</span>` : nothing}
           ${p.synced ? nothing : html`<span class="badge unlinked">not in Gramps</span>`}
         </div>
@@ -218,6 +223,99 @@ class FacesPage extends BifrostElement {
 
   openDetail(assetId) {
     this.openAsset = assetId;
+    this.versionSet = null;
+    this.loadVersions(assetId);
+  }
+
+  closeDetail() {
+    this.openAsset = null;
+    this.versionSet = null;
+  }
+
+  /* ---- versions (the VERSIONS strip — docs/IMMICH_VERSIONING.md) ---- */
+  async loadVersions(assetId) {
+    this.versionsBusy = true;
+    try {
+      const vs = await api(`/versions/api/by-asset/${assetId}`);
+      if (this.openAsset === assetId) this.versionSet = vs;  // ignore if user moved on
+    } catch (e) {
+      if (this.openAsset === assetId) this.versionSet = { versioned: false, error: e.message };
+    } finally {
+      this.versionsBusy = false;
+    }
+  }
+
+  async setDisplayed(memberId) {
+    if (!this.versionSet?.stack_id) return;
+    this.versionsBusy = true; this.error = '';
+    try {
+      await post('/versions/api/set-displayed',
+        { stack_id: this.versionSet.stack_id, member_id: memberId });
+      await this.loadVersions(this.openAsset);  // refresh the strip
+      await this.load(true);                     // media path + faces changed
+    } catch (e) {
+      this.error = e.message;
+    } finally {
+      this.versionsBusy = false;
+    }
+  }
+
+  async setRole(member, role) {
+    const next = member.role === role ? null : role;  // click the active chip to clear
+    try {
+      const r = await post('/versions/api/set-role',
+        { gramps_id: this.versionSet.gramps_id, asset_id: member.asset_id, role: next });
+      member.role = r.role;
+      this.requestUpdate();
+    } catch (e) {
+      this.error = e.message;
+    }
+  }
+
+  async setVersionLabel(member, label) {
+    try {
+      const r = await post('/versions/api/set-label',
+        { gramps_id: this.versionSet.gramps_id, asset_id: member.asset_id, label });
+      member.label = r.label;
+    } catch (e) {
+      this.error = e.message;
+    }
+  }
+
+  renderVersions() {
+    const vs = this.versionSet;
+    if (!vs || !vs.versioned) return nothing;
+    if (!vs.managed) {
+      const gid = this.openPhoto?.gramps_id || '<id>';
+      return html`<div class="version-strip">
+        <div class="vhead">Versions</div>
+        <div class="vintro">In an Immich stack but not opted in. Tag any member
+          <code>Gramps/Base/${gid}</code> in Immich to manage versions here.</div>
+      </div>`;
+    }
+    const ROLES = [['original', 'Original'], ['ai', 'AI'], ['crop', 'Crop'],
+                   ['duplicate', 'Duplicate'], ['verso', 'Verso']];
+    return html`<div class="version-strip">
+      <div class="vhead">Versions <span class="hint">(${vs.members.length})</span> ${this.versionsBusy ? mdSpinner : nothing}</div>
+      <div class="vintro">The highlighted version is shown in Gramps; changing it repoints the Gramps media (same id).</div>
+      ${vs.members.map((m) => html`
+        <div class="vrow ${m.is_displayed ? 'displayed' : ''}">
+          <img class="vthumb" loading="lazy" src=${m.thumb_url} alt="">
+          <div class="vinfo">
+            <div class="vfile">${m.filename || m.asset_id.slice(0, 8)}</div>
+            ${m.is_displayed
+              ? html`<span class="vtag">● shown in Gramps</span>`
+              : mdBtn('filled', 'Set displayed', this.versionsBusy,
+                  () => this.setDisplayed(m.asset_id))}
+          </div>
+          <md-chip-set class="vroles">
+            ${ROLES.map(([k, lab]) => html`<md-filter-chip label=${lab}
+              ?selected=${m.role === k} @click=${() => this.setRole(m, k)}></md-filter-chip>`)}
+          </md-chip-set>
+          <md-outlined-text-field class="vnote" label="Note" .value=${m.label || ''}
+            @change=${(e) => this.setVersionLabel(m, e.target.value)}></md-outlined-text-field>
+        </div>`)}
+    </div>`;
   }
 
   renderDetail() {
@@ -230,14 +328,12 @@ class FacesPage extends BifrostElement {
         style="left:${r[0]}%;top:${r[1]}%;width:${r[2] - r[0]}%;height:${r[3] - r[1]}%">
         <span>${f.label || f.immich_name}</span></div>`;
     });
-    return html`<div class="overlay" @click=${(e) => { if (e.currentTarget === e.target) this.openAsset = null; }}>
-      <div class="detail-card">
-        <div class="detail-head">
-          <strong>${p.title}</strong>
-          <span class="hint">${p.synced ? p.gramps_id : 'not in Gramps'}</span>
-          <span class="spacer"></span>
-          <md-icon-button @click=${() => (this.openAsset = null)}>✕</md-icon-button>
-        </div>
+    return html`<md-dialog class="photo-dialog" open @closed=${() => this.closeDetail()}>
+      <span slot="headline">${p.title}
+        <span class="hint" style="font-weight:400;font-size:.8rem">${p.synced ? p.gramps_id : 'not in Gramps'}</span>
+      </span>
+      <div slot="content">
+        ${this.renderVersions()}
         ${p.is_manual ? html`<div class="alert">A face here was drawn manually in Immich; default pad is 0%.</div>` : nothing}
         <div class="detail-body">
           <div class="imgwrap">
@@ -248,7 +344,10 @@ class FacesPage extends BifrostElement {
           </div>
         </div>
       </div>
-    </div>`;
+      <div slot="actions">
+        <md-text-button @click=${() => this.closeDetail()}>Close</md-text-button>
+      </div>
+    </md-dialog>`;
   }
 
   faceRow(f) {

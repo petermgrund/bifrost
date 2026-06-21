@@ -334,13 +334,20 @@ async def photo_listing(
             "faces": face_rows,
         })
 
+    # Non-displayed members of a managed version set are NOT separate photos —
+    # they live in the displayed photo's VERSIONS strip (like Immich hides stack
+    # children from the timeline). Keep them out of the grid so they don't show
+    # as confusing "not in Gramps" tiles.
+    version_member_ids = {r["asset_id"] for r in
+                          conn.execute("SELECT asset_id FROM immich_version_members").fetchall()}
+
     # Tagged-but-unsynced assets: visible (greyed) so media creation has an
     # honest home here when the sync module lands in Phase 2.
     try:
         sync_tag = await immich.resolve_tag_id(SYNC_TAG)
         if sync_tag:
             for item in await immich.search_assets_by_tag(sync_tag):
-                if item["id"] in synced:
+                if item["id"] in synced or item["id"] in version_member_ids:
                     continue
                 photos.append({
                     "asset_id": item["id"],
@@ -354,6 +361,12 @@ async def photo_listing(
                 })
     except Exception as exc:  # noqa: BLE001 — grid still useful without these
         log.warning("Could not list unsynced tagged assets: %s", exc)
+
+    # Version counts (cheap DB lookup — no Immich calls) so the grid can show vN.
+    vcounts = {r["gramps_id"]: r["member_count"] for r in
+               conn.execute("SELECT gramps_id, member_count FROM immich_versions").fetchall()}
+    for p in photos:
+        p["version_count"] = vcounts.get(p.get("gramps_id"), 0)
 
     photos.sort(key=lambda p: ((not p["synced"]), p["title"].lower()))
     return {

@@ -19,3 +19,8 @@ services:
       - /opt/stacks/immich-to-gramps/person_map.yaml:/legacy/person_map.yaml
       # boundary GeoJSON sidecars (status display on the Places page)
       - /mnt/storage/gramps/static-boundaries:/boundaries:ro
+      # Dev: live-edit the frontend (CSS/JS/HTML) — changes apply on a browser
+      # refresh, no rebuild. The image still bakes these; the mounts override
+      # with the working tree. (Python changes still need `compose build`.)
+      - ./bifrost/web/static:/app/bifrost/web/static
+      - ./bifrost/web/templates:/app/bifrost/web/templates

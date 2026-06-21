@@ -104,6 +104,36 @@ MIGRATIONS: list[str] = [
     """
     ALTER TABLE reserved_ids ADD COLUMN assigned_at TEXT;
     """,
+    # 6 — Immich image versioning (docs/IMMICH_VERSIONING.md). An Immich STACK is
+    # one logical photo's version set; the stack's primaryAssetId is the version
+    # displayed in Gramps. Versioning is a Bifrost-owned pointer layer because
+    # Immich assets are immutable (each version is a separate asset id) — so the
+    # change signal is "a different asset became primary", NOT a checksum drift
+    # (contrast doc_versions, which diffs a mutating checksum on a stable id).
+    # Durable/load-bearing state (membership, displayed=primaryAssetId, role tags)
+    # lives in IMMICH; these tables are a rebuildable cache + Bifrost-owned soft
+    # notes/ordering. The stable Gramps base id/handle never move — only the
+    # media's path/mime/Immich-ID attribute repoint.
+    """
+    CREATE TABLE immich_versions (
+        gramps_id        TEXT PRIMARY KEY,
+        stack_id         TEXT NOT NULL,
+        current_asset_id TEXT NOT NULL,
+        current_checksum TEXT NOT NULL,
+        member_count     INTEGER NOT NULL,
+        updated_at       TEXT NOT NULL
+    );
+
+    CREATE TABLE immich_version_members (
+        gramps_id TEXT NOT NULL,
+        asset_id  TEXT NOT NULL,
+        checksum  TEXT NOT NULL,
+        role      TEXT,
+        label     TEXT,
+        seq       INTEGER NOT NULL,
+        PRIMARY KEY (gramps_id, asset_id)
+    );
+    """,
 ]
 
 

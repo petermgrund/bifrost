@@ -23,25 +23,34 @@ async def sync_page(request: Request):
     return templates.TemplateResponse(request, "sync.html", {})
 
 
-@router.post("/api/immich/preview")
-async def immich_preview(request: Request):
-    st = _state(request)
-    gen = sync_immich.sync(st.gramps, st.immich, st.conn, st.cfg.sync_immich, apply=False)
-    run_id, events = await record_run(st.conn, "sync.immich.preview", gen)
-    return {"run_id": run_id, "apply": False, "events": [e.__dict__ for e in events]}
-
-
 class ImmichBody(BaseModel):
     # Manual gramps-id assignments for NEW assets: {immich_asset_id: chosen_id}.
     manual_ids: dict[str, str] = {}
+    # versions_only: run ONLY the version phase (stack primary → displayed version).
+    versions_only: bool = False
+
+
+def _immich_job(body: ImmichBody, preview: bool) -> str:
+    name = "sync.immich.versions" if body.versions_only else "sync.immich"
+    return f"{name}.preview" if preview else name
+
+
+@router.post("/api/immich/preview")
+async def immich_preview(request: Request, body: ImmichBody = ImmichBody()):
+    st = _state(request)
+    gen = sync_immich.sync(st.gramps, st.immich, st.conn, st.cfg.sync_immich,
+                           apply=False, versions_only=body.versions_only)
+    run_id, events = await record_run(st.conn, _immich_job(body, True), gen)
+    return {"run_id": run_id, "apply": False, "events": [e.__dict__ for e in events]}
 
 
 @router.post("/api/immich/apply")
 async def immich_apply(request: Request, body: ImmichBody = ImmichBody()):
     st = _state(request)
     gen = sync_immich.sync(st.gramps, st.immich, st.conn, st.cfg.sync_immich,
-                           apply=True, manual_ids=body.manual_ids)
-    run_id, events = await record_run(st.conn, "sync.immich", gen)
+                           apply=True, manual_ids=body.manual_ids,
+                           versions_only=body.versions_only)
+    run_id, events = await record_run(st.conn, _immich_job(body, False), gen)
     # Media and faces changed — every cached view is stale.
     st.caches.clear()
     return {"run_id": run_id, "apply": True, "events": [e.__dict__ for e in events]}

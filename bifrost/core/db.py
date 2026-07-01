@@ -134,6 +134,23 @@ MIGRATIONS: list[str] = [
         PRIMARY KEY (gramps_id, asset_id)
     );
     """,
+    # 7 — the a-series scan register (archive-scheme/SCHEME.md §2). One row per
+    # capture FILE (recto scan, verso scan, re-scan: each its own number),
+    # numbered a000101 upward in scanning order. Append-only LOG, not a catalog:
+    # numbers are never reused and a deleted scan leaves a permanent gap. Object
+    # identity lives in the random-6 id (reserved_ids/Gramps); physical location
+    # in the call number. The b-series belongs to a different family tree and is
+    # not tracked here.
+    """
+    CREATE TABLE scan_register (
+        scan_no    TEXT PRIMARY KEY,
+        container  TEXT,
+        role       TEXT,
+        object_id  TEXT,
+        captured   TEXT,
+        note       TEXT
+    );
+    """,
 ]
 
 

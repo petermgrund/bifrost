@@ -1,118 +1,93 @@
-import { BifrostElement, html, api, summarize, mdBtn } from './core.js';
+/* Home — pending work across every surface, a tree snapshot, recent runs.
+   One tolerant /api/inbox call; a down service shows as "unavailable". */
+import { BifrostElement, html, nothing, api, statusIcon } from './core.js';
 
-/* Relative, human time from an ISO/space timestamp. */
-function relTime(iso) {
-  if (!iso) return '';
-  const d = new Date(iso.includes('T') ? iso : iso.replace(' ', 'T'));
-  const s = Math.floor((Date.now() - d.getTime()) / 1000);
-  if (s < 60) return 'just now';
-  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
-  const days = Math.floor(s / 86400);
-  if (days < 7) return `${days}d ago`;
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-}
-
-function runResult(r) {
-  if (!r.summary) return r.status === 'ok' ? 'No changes' : '';
-  try { return summarize(JSON.parse(r.summary).data, true); } catch { return ''; }
-}
-
-/* Plain-English label for an internal job id (e.g. sync.paperless.versions). */
-const JOB_LABELS = {
-  'sync.paperless': 'Paperless → Gramps',
-  'sync.paperless.versions': 'Paperless version sync',
-  'sync.paperless.transcriptions': 'Rewrite transcriptions',
-  'sync.paperless.resync-media': 'Resync media version',
-  'sync.immich': 'Immich → Gramps',
-  'ocr.gemini': 'Gemini OCR',
-  'places.boundaries': 'Place boundaries',
-  'citations.save': 'Citation created',
-  'faces.apply': 'Faces applied',
-  'faces.link': 'Face linked',
-  'faces.repad': 'Face padding',
-};
-function jobLabel(job) {
-  if (!job) return '';
-  const preview = job.endsWith('.preview');
-  const base = preview ? job.slice(0, -8) : job;
-  const label = JOB_LABELS[base]
-    || base.replace(/[._-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-  return preview ? `${label} (preview)` : label;
-}
+const SNAPSHOT = [
+  ['people', 'People'], ['events', 'Events'], ['places', 'Places'],
+  ['citations', 'Citations'], ['media', 'Media'], ['sources', 'Sources'],
+];
 
 class InboxPage extends BifrostElement {
   static properties = {
-    data: { state: true }, error: { state: true }, loading: { state: true },
+    data: { state: true },
+    busy: { state: true },
+    error: { state: true },
   };
+
   constructor() {
     super();
-    this.data = null; this.error = ''; this.loading = false;
+    this.data = null;
+    this.busy = false;
+    this.error = '';
   }
+
   connectedCallback() {
     super.connectedCallback();
     this.load();
   }
+
   async load(refresh = false) {
-    this.loading = true; this.error = '';
+    this.busy = true;
     try {
       this.data = await api(`/api/inbox${refresh ? '?refresh=1' : ''}`);
+      this.error = '';
     } catch (e) {
       this.error = e.message;
     } finally {
-      this.loading = false;
+      this.busy = false;
     }
-  }
-
-  runRow(r) {
-    const [dot, label] = r.status === 'ok' ? ['ok', 'Done']
-      : r.status === 'error' ? ['error', 'Failed'] : ['warn', r.status || '—'];
-    return html`<tr>
-      <td>${jobLabel(r.job)}</td>
-      <td class="bf-muted">${runResult(r)}</td>
-      <td><span style="display:inline-flex;align-items:center;gap:8px"><span class="bf-dot bf-dot--${dot}"></span>${label}</span></td>
-      <td class="bf-muted">${relTime(r.started_at)}</td>
-    </tr>`;
   }
 
   render() {
-    if (this.loading && !this.data) {
-      return html`<div class="bf-state bf-state--loading"><div class="bf-spinner"></div>
-        <div class="bf-state__desc">Loading…</div></div>`;
+    if (!this.data) {
+      return html`<h5>Home</h5>
+        <p class="hint">${this.error || 'Loading…'}</p>
+        ${!this.error ? html`<progress class="circle"></progress>` : nothing}`;
     }
-    if (this.error && !this.data) {
-      return html`<div class="bf-state bf-state--error">
-        <div class="bf-state__title">Couldn't load the home page</div>
-        <div class="bf-state__desc">${this.error}</div>
-        ${mdBtn('filled', 'Retry', false, () => this.load(true))}</div>`;
-    }
-    const errs = this.data.errors || [];
-    const runs = this.data.runs || [];
-    return html`<div class="bf-page">
-      <div class="bf-page__head" style="flex-direction:row;align-items:flex-end;gap:var(--bf-space-4)">
-        <div style="flex:1">
-          <h1 class="bf-page__title">Overview</h1>
-          <p class="bf-page__desc">What ran recently.</p>
-        </div>
-        <span style="display:inline-flex;align-items:center;gap:8px;font:var(--bf-body-small);color:var(--bf-on-surface-variant)">
-          <span class="bf-dot bf-dot--${errs.length ? 'warn' : 'ok'}"></span>${errs.length
-            ? `${errs.length} service${errs.length === 1 ? '' : 's'} unavailable` : 'All services reachable'}</span>
-        <md-text-button ?disabled=${this.loading}
-          @click=${() => this.load(true)}>${this.loading ? 'Refreshing…' : 'Refresh'}</md-text-button>
+    const d = this.data;
+    return html`
+      <div class="row">
+        <h5 class="max">Home</h5>
+        <button class="border" ?disabled=${this.busy} @click=${() => this.load(true)}>
+          <i>refresh</i><span>${this.busy ? 'Refreshing…' : 'Refresh'}</span></button>
+      </div>
+      ${this.error ? html`<p class="error-text">${this.error}</p>` : nothing}
+
+      <div class="grid">
+        ${SNAPSHOT.map(([key, label]) => html`
+          <article class="s6 m4 l2 border center-align">
+            <h4>${d.snapshot?.[key] ?? '—'}</h4>
+            <div class="hint">${label}</div>
+          </article>`)}
       </div>
 
-      <div class="bf-card">
-        <div class="bf-card__head">
-          <div class="bf-card__title">Recent runs</div>
-          <div class="bf-card__desc">The last operations across every pipeline.</div>
-        </div>
-        ${runs.length ? html`<table class="bf-table">
-          <thead><tr><th style="width:175px">Pipeline</th><th>Result</th>
-            <th style="width:120px">Status</th><th style="width:110px">When</th></tr></thead>
-          <tbody>${runs.map((r) => this.runRow(r))}</tbody>
-        </table>` : html`<div class="bf-summary">No runs yet.</div>`}
-      </div>
-    </div>`;
+      <h6>Needs attention</h6>
+      <article class="border no-padding">
+        ${(d.attention || []).map((it, i) => html`
+          ${i ? html`<div class="divider"></div>` : nothing}
+          <a class="row padding wave" href=${it.href}>
+            <div class="max">${it.label}</div>
+            ${it.n === null
+              ? html`<span class="hint">unavailable</span>`
+              : html`<span class="chip small ${it.n ? 'fill' : ''}">${it.n}</span>`}
+            <i>chevron_right</i>
+          </a>`)}
+      </article>
+
+      <h6>Recent runs</h6>
+      <article class="border">
+        ${(d.runs || []).length ? html`
+          <table class="stripes">
+            <thead><tr><th></th><th>Job</th><th>Started</th><th>Summary</th></tr></thead>
+            <tbody>${d.runs.map((r) => html`<tr>
+              <td>${statusIcon(r.status)}</td>
+              <td class="mono">${r.job}</td>
+              <td class="hint">${(r.started_at || '').slice(0, 16).replace('T', ' ')}</td>
+              <td class="hint">${r.summary || ''}</td>
+            </tr>`)}</tbody>
+          </table>`
+        : html`<p class="hint">No runs yet.</p>`}
+      </article>`;
   }
 }
 customElements.define('inbox-page', InboxPage);

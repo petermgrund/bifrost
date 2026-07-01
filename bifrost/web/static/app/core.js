@@ -1,4 +1,6 @@
-/* Shared Lit base + helpers for Bifrost pages. */
+/* Shared Lit base + helpers for Bifrost pages. UI controls are BeerCSS
+   (vendored in static/vendor/) — plain elements + classes, no web-component
+   framework beyond Lit itself. */
 import { LitElement, html, css, nothing } from 'lit';
 
 export { html, css, nothing };
@@ -15,16 +17,39 @@ export async function api(path, opts = {}) {
 export const post = (path, body) =>
   api(path, { method: 'POST', body: JSON.stringify(body || {}) });
 
-/* ---- Material 3 control helpers ----
-   The <md-*> custom elements are registered globally by the vendored
-   @material/web bundle (loaded in base.html); pages just use the tags.
-   mdBtn picks the element because Lit can't interpolate tag names. */
-export function mdBtn(variant, label, disabled, onClick) {
-  return variant === 'filled'
-    ? html`<md-filled-button ?disabled=${disabled} @click=${onClick}>${label}</md-filled-button>`
-    : html`<md-outlined-button ?disabled=${disabled} @click=${onClick}>${label}</md-outlined-button>`;
+/* ---- BeerCSS control helpers ----
+   btn keeps the old (variant, label, disabled, onClick) shape the pages
+   already use: filled = default BeerCSS button, outlined = .border,
+   text = .transparent. */
+export function btn(variant, label, disabled, onClick) {
+  const cls = variant === 'filled' ? '' : variant === 'text' ? 'transparent primary-text' : 'border';
+  return html`<button class="${cls}" ?disabled=${disabled} @click=${onClick}>${label}</button>`;
 }
-export const mdSpinner = html`<md-circular-progress indeterminate style="width:24px;height:24px"></md-circular-progress>`;
+export const spinner = html`<progress class="circle small"></progress>`;
+
+export const chip = (label, on, onClick) =>
+  html`<button class="chip ${on ? 'fill' : ''}" @click=${onClick}>${label}</button>`;
+
+export const switchEl = (on, onChange) =>
+  html`<label class="switch"><input type="checkbox" ?checked=${on}
+    @change=${(e) => onChange(e.target.checked)}><span></span></label>`;
+
+/* Text field: BeerCSS .field.label.border wrapping an input (or textarea when
+   opts.rows is set). Label floats; opts: {type, rows, mono, style, onEnter}. */
+export function field(label, value, onInput, opts = {}) {
+  const input = opts.rows
+    ? html`<textarea rows=${opts.rows} .value=${value ?? ''} @input=${onInput}></textarea>`
+    : html`<input type=${opts.type || 'text'} class="${opts.mono ? 'mono' : ''}"
+        .value=${value ?? ''} @input=${onInput}
+        @keydown=${(e) => { if (e.key === 'Enter' && opts.onEnter) opts.onEnter(e); }}>`;
+  return html`<div class="field label border ${opts.rows ? 'textarea' : ''}"
+    style=${opts.style || nothing}>${input}<label>${label}</label></div>`;
+}
+
+/* Tab bar: BeerCSS .tabs. `pick` gets the tab key. */
+export const tabsBar = (tabs, active, pick) =>
+  html`<div class="tabs left-align">${tabs.map((t) =>
+    html`<a class="${t.key === active ? 'active' : ''}" @click=${() => pick(t.key)}>${t.label}</a>`)}</div>`;
 
 /* Components render into light DOM so the global stylesheet themes them and
    existing class names keep working — no per-component style porting. */
@@ -42,8 +67,6 @@ const ACTION_WORDS = {
   titles_updated: ['update', 'updated', 'title'],
   dates_updated: ['set', 'set', 'date'],
   descs_updated: ['update', 'updated', 'description'],
-  faces_linked: ['link', 'linked', 'face'],
-  places_linked: ['link', 'linked', 'place'],
   tx_created: ['add', 'added', 'transcription'],
   tx_updated: ['rewrite', 'rewrote', 'transcription'],
   transcribed: ['transcribe', 'transcribed', 'document'],

@@ -19,8 +19,10 @@ plus a uniform **2‑char code** from the same safe alphabet. The category lette
 | `VGRN54_v##.jpg` | A **scan of the verso** (back side) of a physical print — handwriting, stamps, dates. | PC files only |
 | `VGRN54_a##.jpg` | An **AI‑edited** version (only that it was AI‑edited — the kind of edit is not tracked). | PC files only |
 
-`##` = 2 characters from the safe alphabet, just enough to keep a handful of
-crops/dupes per image distinct.
+`##` = a plain decimal ordinal `01`–`99` *(amended 2026-07-01 — SCHEME.md §1)*.
+The safe alphabet exists for the handwritten 6-char base; suffixes are
+machine-only filing and never appear alone on a verso, so ordinary numbers are
+clearer (`_a01` was already the de-facto practice).
 
 ## Rules
 
@@ -49,3 +51,14 @@ crops/dupes per image distinct.
 The suffix codes (`_o`, `_c##`, `_d##`, `_a##`) are a personal filing
 convention — they are **not** minted into Gramps and not tracked in Bifrost's
 database. Only the base id is a real Gramps object id.
+
+## Not to be confused with scan numbers
+
+The base id identifies an **object** (the photograph, front and back together).
+A **scan number** (`a000277`) identifies one **capture file** in the a-series
+digitization log — masters, the `archive-static/a0/` web copies, contact
+sheets, and ArchivesSpace digital objects are named/identified by scan number,
+while the object id names the item record (AS `component_id`, Gramps media id,
+the penciled verso). One object commonly has two scan numbers (recto + verso).
+The register lives in Bifrost (`scan_register`, IDs tab / `/idgen/api/scans`);
+the full three-register scheme is `/opt/stacks/archive-scheme/SCHEME.md`.

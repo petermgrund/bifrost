@@ -4,59 +4,35 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Bifrost{% endblock %}</title>
-  <script>
-    // Light mode only — dark mode removed for now. Set explicitly so the M3
-    // [data-theme] tokens resolve to the light scheme on first paint.
-    document.documentElement.dataset.theme = 'light';
-  </script>
   <link rel="icon" type="image/svg+xml" href="/static/bifrost_logo.svg">
-  <link rel="stylesheet" href="/static/bifrost.css?v=3">
-  <link rel="stylesheet" href="/static/bifrost-tokens.css?v=3">
-  <link rel="stylesheet" href="/static/bifrost-kit.css?v=3">
-  <link rel="stylesheet" href="/static/bifrost-md-theme.css?v=3">
+  <!-- BeerCSS (vendored, offline) + the small Bifrost brand layer. -->
+  <link rel="stylesheet" href="/static/vendor/beer.min.css">
+  <link rel="stylesheet" href="/static/bifrost.css">
   <script type="importmap">
   { "imports": { "lit": "/static/vendor/lit-all.min.js" } }
   </script>
-  <!-- Material 3 web components (vendored, offline). Registers the <md-*> elements. -->
-  <script type="module" src="/static/vendor/material-web.js"></script>
+  <script type="module" src="/static/vendor/beer.min.js"></script>
+  {% block head %}{% endblock %}
 </head>
-<body>
+<body class="light">
   {% set p = request.url.path %}
-  <div class="bf-app">
-    <header class="bf-appbar">
-      <a class="bf-brand" href="/">
-        <svg width="30" height="22" viewBox="0 0 30 22" aria-hidden="true"><path d="M3 20 A12 12 0 0 1 27 20" fill="none" stroke="var(--bf-tertiary)" stroke-width="2.6" stroke-linecap="round"/><path d="M7 20 A8 8 0 0 1 23 20" fill="none" stroke="var(--bf-warning)" stroke-width="2.6" stroke-linecap="round"/><path d="M11 20 A4 4 0 0 1 19 20" fill="none" stroke="var(--bf-primary)" stroke-width="2.6" stroke-linecap="round"/></svg>
-        Bifrost
+  <nav class="left">
+    <header>
+      <a href="/" title="Bifrost">
+        <svg width="30" height="22" viewBox="0 0 30 22" aria-hidden="true"><path d="M3 20 A12 12 0 0 1 27 20" fill="none" stroke="var(--tertiary)" stroke-width="2.6" stroke-linecap="round"/><path d="M7 20 A8 8 0 0 1 23 20" fill="none" stroke="var(--warning)" stroke-width="2.6" stroke-linecap="round"/><path d="M11 20 A4 4 0 0 1 19 20" fill="none" stroke="var(--primary)" stroke-width="2.6" stroke-linecap="round"/></svg>
       </a>
-      <div style="flex:1"></div>
     </header>
+    <a class="{{ 'active' if p == '/' else '' }}" href="/"><i>home</i><div>Home</div></a>
+    <a class="{{ 'active' if p.startswith('/transcribe') else '' }}" href="/transcribe"><i>edit_note</i><div>Transcribe</div></a>
+    <a class="{{ 'active' if p.startswith('/sync') else '' }}" href="/sync/paperless"><i>description</i><div>Paperless</div></a>
+    <a class="{{ 'active' if p.startswith('/citations') else '' }}" href="/citations"><i>format_quote</i><div>Citations</div></a>
+    <a class="{{ 'active' if p.startswith('/places') else '' }}" href="/places"><i>map</i><div>Places</div></a>
+    <a class="{{ 'active' if p.startswith('/idgen') else '' }}" href="/idgen"><i>tag</i><div>IDs</div></a>
+  </nav>
 
-    <div class="bf-shell">
-      <nav class="bf-nav">
-        <div class="bf-nav__group">
-          <div class="bf-nav__label">Overview</div>
-          <a class="bf-nav__item {{ 'bf-nav__item--active' if p == '/' else '' }}" href="/"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.6 12 3l9 6.6V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Home</a>
-        </div>
-        <div class="bf-nav__group">
-          <div class="bf-nav__label">Add</div>
-          <a class="bf-nav__item {{ 'bf-nav__item--active' if p.startswith('/transcribe') else '' }}" href="/transcribe"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Transcribe</a>
-          <a class="bf-nav__item {{ 'bf-nav__item--active' if p.startswith('/sync') else '' }}" href="/sync"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 0 0-14-4L4 9"/><path d="M4 5v4h4"/><path d="M4 13a8 8 0 0 0 14 4l2-2"/><path d="M20 19v-4h-4"/></svg>Sync</a>
-        </div>
-        <div class="bf-nav__group">
-          <div class="bf-nav__label">Curate</div>
-          <a class="bf-nav__item {{ 'bf-nav__item--active' if p.startswith('/faces') else '' }}" href="/faces"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 10h.01M15 10h.01"/><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0"/></svg>Faces</a>
-          <a class="bf-nav__item {{ 'bf-nav__item--active' if p.startswith('/citations') else '' }}" href="/citations"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 16V6a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H9l-4 4z"/><path d="M9 9h6M9 12h4"/></svg>Citations</a>
-        </div>
-        <div class="bf-nav__group">
-          <div class="bf-nav__label">Tools</div>
-          <a class="bf-nav__item {{ 'bf-nav__item--active' if p.startswith('/places') else '' }}" href="/places"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s7-6 7-11a7 7 0 1 0-14 0c0 5 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>Places</a>
-          <a class="bf-nav__item {{ 'bf-nav__item--active' if p.startswith('/idgen') else '' }}" href="/idgen"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h6.6a2 2 0 0 1 1.4.6l8 8a2 2 0 0 1 0 2.8l-5.6 5.6a2 2 0 0 1-2.8 0l-8-8A2 2 0 0 1 4 11.6z"/><path d="M8 8h.01"/></svg>IDs</a>
-        </div>
-      </nav>
-
-      <div class="bf-content"><main>{% block content %}{% endblock %}</main></div>
-    </div>
-  </div>
+  <main class="responsive">
+    {% block content %}{% endblock %}
+  </main>
 
   {% block scripts %}{% endblock %}
 </body>

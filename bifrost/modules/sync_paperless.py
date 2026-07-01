@@ -30,8 +30,8 @@ from typing import AsyncIterator
 from ..core.clients import GrampsClient, PaperlessClient
 from ..core.config import SyncPaperlessConfig
 from ..core.events import SyncEvent
+from ..core.ids import generate_gramps_id, generate_handle, validate_manual_ids
 from .citations import next_sequential_id
-from .sync_immich import generate_gramps_id, generate_handle, validate_manual_ids
 
 log = logging.getLogger("bifrost.sync.paperless")
 
@@ -267,7 +267,7 @@ async def sync(
     existing_ids = await gramps.list_media_gramps_ids()
     # Manual ids: validate against what's really in Gramps; keep the auto
     # generator clear of reserved ids and the chosen manual ids (keyed by doc id).
-    from . import idgen  # lazy: idgen imports generate_gramps_id from sync_immich
+    from . import idgen  # lazy import to avoid a module cycle
     valid_manual, rejected_manual = validate_manual_ids(manual_ids, set(existing_ids))
     existing_ids |= idgen.unminted_reserved(conn)
     existing_ids |= set(valid_manual.values())

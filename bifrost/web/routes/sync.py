@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
-from ...modules import ocr, sync_immich, sync_paperless
+from ...modules import ocr, sync_paperless
 from ...modules.sync_paperless import _doc_gramps_id
 from ..runs import record_run
 
@@ -18,42 +19,28 @@ def _state(request: Request):
 
 @router.get("")
 async def sync_page(request: Request):
+    # Sync is now split into one page per source — land on Paperless.
+    return RedirectResponse(url="/sync/paperless")
+
+
+@router.get("/paperless")
+async def paperless_page(request: Request):
     from ..app import templates  # late import to avoid cycle
 
-    return templates.TemplateResponse(request, "sync.html", {})
+    return templates.TemplateResponse(request, "paperless.html", {})
 
 
-class ImmichBody(BaseModel):
-    # Manual gramps-id assignments for NEW assets: {immich_asset_id: chosen_id}.
-    manual_ids: dict[str, str] = {}
-    # versions_only: run ONLY the version phase (stack primary → displayed version).
-    versions_only: bool = False
-
-
-def _immich_job(body: ImmichBody, preview: bool) -> str:
-    name = "sync.immich.versions" if body.versions_only else "sync.immich"
-    return f"{name}.preview" if preview else name
-
-
-@router.post("/api/immich/preview")
-async def immich_preview(request: Request, body: ImmichBody = ImmichBody()):
-    st = _state(request)
-    gen = sync_immich.sync(st.gramps, st.immich, st.conn, st.cfg.sync_immich,
-                           apply=False, versions_only=body.versions_only)
-    run_id, events = await record_run(st.conn, _immich_job(body, True), gen)
-    return {"run_id": run_id, "apply": False, "events": [e.__dict__ for e in events]}
-
-
-@router.post("/api/immich/apply")
-async def immich_apply(request: Request, body: ImmichBody = ImmichBody()):
-    st = _state(request)
-    gen = sync_immich.sync(st.gramps, st.immich, st.conn, st.cfg.sync_immich,
-                           apply=True, manual_ids=body.manual_ids,
-                           versions_only=body.versions_only)
-    run_id, events = await record_run(st.conn, _immich_job(body, False), gen)
-    # Media and faces changed — every cached view is stale.
-    st.caches.clear()
-    return {"run_id": run_id, "apply": True, "events": [e.__dict__ for e in events]}
+@router.get("/api/paperless/config")
+async def paperless_config(request: Request):
+    """Read-only config for the Paperless Settings tab."""
+    cfg = _state(request).cfg.sync_paperless
+    return {
+        "sync_tags": list(cfg.sync_tags),
+        "public_url": cfg.public_url,
+        "gramps_public_url": cfg.gramps_public_url,
+        "transcription_tag_id": cfg.transcription_tag_id,
+        "ocr_tag": cfg.ocr_tag,
+    }
 
 
 class PaperlessBody(BaseModel):

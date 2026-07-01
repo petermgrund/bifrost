@@ -87,10 +87,8 @@ def test_clients_follow_redirects():
     """Regression: Gramps 308-redirects POST /objects -> /objects/. httpx must
     follow (requests did by default); otherwise create_media gets the redirect
     HTML body and .json() raises 'Expecting value: line 1 column 1 (char 0)'."""
-    from bifrost.core.clients import GrampsClient, ImmichClient, PaperlessClient
+    from bifrost.core.clients import GrampsClient, PaperlessClient
     g = GrampsClient("http://x/api", "u", "p")
-    i = ImmichClient("http://x", "k")
     p = PaperlessClient("http://x", "t")
     assert g._client.follow_redirects
-    assert i._client.follow_redirects
     assert p._client.follow_redirects

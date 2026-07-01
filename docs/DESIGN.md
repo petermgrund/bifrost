@@ -5,6 +5,14 @@
 **Status:** draft v1 — agreed direction, pre-implementation
 **Date:** 2026-06-10
 
+> **2026-07-01 update:** the Immich integration described below (sync, faces,
+> stack versioning) has been **removed** — archival photos move to
+> ArchivesSpace (`archive-scheme/SCHEME.md`), whose source module will take
+> that slot. The UI now runs on vendored **BeerCSS** (the Material-web bundle
+> and the multi-file token/kit CSS are gone). Surfaces: Home · Transcribe ·
+> Paperless sync · Citations · Places · IDs (media ids + the a-series scan
+> register). Read the rest as history where it conflicts.
+
 ## 1. What and why
 
 Bifrost consolidates the Gramps tooling that grew up as independent projects —

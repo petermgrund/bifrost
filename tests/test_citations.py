@@ -44,7 +44,7 @@ def test_prompt_includes_existing_source_style():
 
 
 def test_schema_required_paths():
-    assert set(COMPOSE_SCHEMA["required"]) == {"citation", "notes", "quality"}
+    assert set(COMPOSE_SCHEMA["required"]) == {"analysis", "citation", "notes", "quality"}
     assert COMPOSE_SCHEMA["properties"]["citation"]["properties"]["confidence"]["maximum"] == 4
     # house style: no citation dates, no source list entries
     assert "date" not in COMPOSE_SCHEMA["properties"]["citation"]["properties"]

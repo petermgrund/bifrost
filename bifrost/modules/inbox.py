@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import sqlite3
 
-from . import boundaries, citations, faces as faces_mod, ocr
+from . import boundaries, citations, ocr
 from .sync_paperless import _doc_gramps_id
-from ..core.clients import GrampsClient, ImmichClient, PaperlessClient
+from ..core.clients import GrampsClient, PaperlessClient
 from ..core.config import Config
 
 
@@ -30,7 +30,7 @@ async def _places_missing(gramps: GrampsClient, cfg) -> int:
 
 
 async def gather(
-    gramps: GrampsClient, immich: ImmichClient, paperless: PaperlessClient,
+    gramps: GrampsClient, paperless: PaperlessClient,
     conn: sqlite3.Connection, cfg: Config,
 ) -> dict:
     items: list[dict] = []
@@ -40,23 +40,6 @@ async def gather(
         items.append({"key": key, "label": label, "href": href, "n": None})
         errors.append(key)
 
-    # Faces + Immich photos: one listing covers all three counts.
-    try:
-        listing = await faces_mod.photo_listing(gramps, immich, conn)
-        photos = listing.get("photos", [])
-        unlinked = sum(1 for p in photos for f in p.get("faces", [])
-                       if f.get("status") == "unlinked")
-        items.append({"key": "faces", "label": "faces to link",
-                      "href": "/faces?filter=unlinked", "n": unlinked})
-        items.append({"key": "faces_pending", "label": "faces pending apply",
-                      "href": "/faces?filter=pending", "n": listing.get("pending_total", 0)})
-        items.append({"key": "immich", "label": "photos to sync",
-                      "href": "/sync", "n": sum(1 for p in photos if not p.get("synced"))})
-    except Exception:  # noqa: BLE001
-        fail("faces", "faces to link", "/faces?filter=unlinked")
-        fail("faces_pending", "faces pending apply", "/faces?filter=pending")
-        fail("immich", "photos to sync", "/sync")
-
     async def add(key, label, href, coro_fn):
         try:
             items.append({"key": key, "label": label, "href": href, "n": await coro_fn()})
@@ -65,7 +48,7 @@ async def gather(
 
     await add("paperless", "documents to sync", "/sync",
               lambda: _paperless_pending(paperless, cfg.sync_paperless))
-    await add("ocr", "docs tagged for OCR", "/sync",
+    await add("ocr", "docs tagged for OCR", "/transcribe",
               lambda: ocr.pending_count(paperless, conn, cfg.sync_paperless))
     await add("places", "places missing boundaries", "/places?filter=missing",
               lambda: _places_missing(gramps, cfg.places))

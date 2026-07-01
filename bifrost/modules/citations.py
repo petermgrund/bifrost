@@ -24,7 +24,7 @@ import yaml
 
 from ..core.clients import GrampsClient
 from ..core.clients.anthropic import AnthropicClient
-from .sync_immich import generate_handle
+from ..core.ids import generate_handle
 
 log = logging.getLogger("bifrost.citations")
 

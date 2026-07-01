@@ -14,7 +14,7 @@ import sqlite3
 from datetime import datetime
 
 from ..core.clients import GrampsClient
-from .sync_immich import generate_gramps_id
+from ..core.ids import generate_gramps_id
 
 
 def _now() -> str:
@@ -40,9 +40,12 @@ def mark_minted(conn: sqlite3.Connection, gramps_id: str) -> None:
             (_now(), gramps_id))
 
 
-async def generate(conn: sqlite3.Connection, gramps: GrampsClient, count: int) -> list[str]:
+async def generate(
+    conn: sqlite3.Connection, gramps: GrampsClient, count: int, note: str | None = None
+) -> list[str]:
     """Mint `count` fresh random-6 ids that collide with neither existing Gramps
-    media nor any prior reservation, and record them as reserved."""
+    media nor any prior reservation, and record them as reserved. An optional
+    note (e.g. which batch/container they're destined for) applies to the lot."""
     count = max(1, min(int(count), 50))
     pool = await gramps.list_media_gramps_ids() | reserved_ids(conn)
     now = _now()
@@ -53,8 +56,8 @@ async def generate(conn: sqlite3.Connection, gramps: GrampsClient, count: int) -
     with conn:
         conn.executemany(
             "INSERT INTO reserved_ids (gramps_id, created_at, minted_at, note)"
-            " VALUES (?, ?, NULL, NULL)",
-            [(g, now) for g in new_ids])
+            " VALUES (?, ?, NULL, ?)",
+            [(g, now, note) for g in new_ids])
     return new_ids
 
 
@@ -100,7 +103,7 @@ async def listing(conn: sqlite3.Connection, gramps: GrampsClient) -> list[dict]:
     }
     rows = []
     for r in conn.execute(
-            "SELECT gramps_id, created_at, minted_at, assigned_at FROM reserved_ids "
+            "SELECT gramps_id, created_at, minted_at, assigned_at, note FROM reserved_ids "
             "ORDER BY created_at DESC, gramps_id"):
         gid = r["gramps_id"]
         is_minted = bool(r["minted_at"]) or gid in live
@@ -113,6 +116,7 @@ async def listing(conn: sqlite3.Connection, gramps: GrampsClient) -> list[dict]:
             # "assigned" only matters while still un-minted; minting supersedes it.
             "assigned": bool(r["assigned_at"]) and not is_minted,
             "assigned_at": r["assigned_at"],
+            "note": r["note"],
             "source_system": src[0] if src else None,
             "source_title": src[1] if src else None,
         })

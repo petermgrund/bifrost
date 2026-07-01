@@ -1,4 +1,4 @@
-import { BifrostElement, html, nothing, api, post, iconYes, iconNo, iconNa, mdBtn, mdSpinner } from './core.js';
+import { BifrostElement, html, nothing, api, post, iconYes, iconNo, iconNa, btn, spinner, chip, field } from './core.js';
 
 class PlacesPage extends BifrostElement {
   static properties = {
@@ -78,7 +78,7 @@ class PlacesPage extends BifrostElement {
   }
 
   render() {
-    if (!this.rows) return html`<h1>Places</h1><div class="hint">Loading…</div>`;
+    if (!this.rows) return html`<h5>Places</h5><p class="hint">Loading…</p>`;
     const q = this.query.toLowerCase();
     const filtered = this.rows
       .filter((r) => !q || r.name.toLowerCase().includes(q) || r.gramps_id.toLowerCase().includes(q))
@@ -87,54 +87,50 @@ class PlacesPage extends BifrostElement {
         (this.filter === 'relation' && r.osm_id) ||
         (this.filter === 'missing' && r.osm_id && !r.has_boundary));
     const missing = this.rows.filter((r) => r.osm_id && !r.has_boundary).length;
-    const chip = (f, label) => html`<md-filter-chip label=${label}
-      ?selected=${this.filter === f} @click=${() => (this.filter = f)}></md-filter-chip>`;
     return html`
-      <div class="pagehead">
-        <h1>Places</h1>
-        <span class="spacer"></span>
-        ${missing ? mdBtn('filled',
+      <div class="row">
+        <h5 class="max">Places</h5>
+        ${missing ? btn('filled',
           this.busy === 'all' ? 'Generating…' : `Generate missing (${missing})`,
-          !!this.busy, this.generateMissing) : nothing}
-        ${this.busy === 'all' ? mdSpinner : nothing}
-        ${mdBtn('outlined', 'Refresh', false, () => this.load(true))}
+          !!this.busy, () => this.generateMissing()) : nothing}
+        ${this.busy === 'all' ? spinner : nothing}
+        ${btn('outlined', 'Refresh', false, () => this.load(true))}
       </div>
-      <p class="hint">Boundary polygons from OpenStreetMap — the outlines on the
-      Gramps place minimaps. Relations cover admin areas (cities, counties);
-      ways cover building footprints (a house, a farm).</p>
-      <div class="toolbar">
-        <md-outlined-text-field type="search" label="Search places…" .value=${this.query}
-          @input=${(e) => (this.query = e.target.value)}></md-outlined-text-field>
-        <md-chip-set>
-          ${chip('relation', 'With OSM link')}${chip('missing', 'Missing boundary')}${chip('all', 'All places')}
-        </md-chip-set>
+      <p class="hint">OSM boundary polygons for the Gramps place minimap.</p>
+      <div class="row wrap">
+        ${field('Search places…', this.query, (e) => (this.query = e.target.value), { type: 'search', style: 'max-width:16rem' })}
+        ${chip('With OSM link', this.filter === 'relation', () => (this.filter = 'relation'))}
+        ${chip('Missing boundary', this.filter === 'missing', () => (this.filter = 'missing'))}
+        ${chip('All places', this.filter === 'all', () => (this.filter = 'all'))}
         <span class="hint">${filtered.length} shown</span>
         ${this.status ? html`<span class="hint action-failed">${this.status}</span>` : nothing}
       </div>
-      <table class="results">
-        <tr><th>id</th><th>place</th><th>OSM</th><th>boundary</th><th></th></tr>
-        ${filtered.map((r) => html`<tr>
-          <td class="hint">${r.gramps_id}</td>
+      <table class="stripes">
+        <thead><tr><th>id</th><th>place</th><th>OSM</th><th>boundary</th><th></th></tr></thead>
+        <tbody>${filtered.map((r) => html`<tr>
+          <td class="hint mono">${r.gramps_id}</td>
           <td>${this.grampsUrl
-            ? html`<a href="${this.grampsUrl}/place/${r.gramps_id}" target="_blank">${r.name}</a>`
+            ? html`<a class="link" href="${this.grampsUrl}/place/${r.gramps_id}" target="_blank">${r.name}</a>`
             : r.name}</td>
           <td class="hint">${r.osm_id
-            ? html`<a href="https://www.openstreetmap.org/${r.osm_type}/${r.osm_id}" target="_blank">${r.osm_type} ${r.osm_id}</a>`
-            : html`<md-outlined-text-field class="relinput" label="relation/way id or URL"
-                @keydown=${(e) => { if (e.key === 'Enter') this.addRelation(r, e.target.value); }}
-                @change=${(e) => this.addRelation(r, e.target.value)}></md-outlined-text-field>`}</td>
+            ? html`<a class="link" href="https://www.openstreetmap.org/${r.osm_type}/${r.osm_id}" target="_blank">${r.osm_type} ${r.osm_id}</a>`
+            : html`<div class="field border small" style="max-width:14rem">
+                <input placeholder="relation/way id or URL"
+                  @keydown=${(e) => { if (e.key === 'Enter') this.addRelation(r, e.target.value); }}
+                  @change=${(e) => this.addRelation(r, e.target.value)}>
+              </div>`}</td>
           <td title=${!r.osm_id ? 'no OSM link yet' : r.has_boundary ? 'boundary present' : 'no boundary — generate'}>
             ${!r.osm_id ? iconNa : r.has_boundary ? iconYes : iconNo}</td>
-          <td>${r.osm_id ? html`<md-text-button class="applyone" ?disabled=${!!this.busy}
+          <td>${r.osm_id ? html`<button class="transparent primary-text small" ?disabled=${!!this.busy}
             @click=${() => this.generate(r, r.has_boundary)}>
-            ${this.busy === r.handle ? '…' : r.has_boundary ? 'Regenerate' : 'Generate'}</md-text-button>` : nothing}</td>
-        </tr>`)}
+            ${this.busy === r.handle ? '…' : r.has_boundary ? 'Regenerate' : 'Generate'}</button>` : nothing}</td>
+        </tr>`)}</tbody>
       </table>
-      ${this.failures.length ? html`<h3 class="action-failed">Failed (${this.failures.length})</h3>
-        <table class="results">
-          ${this.failures.map((f) => html`<tr>
-            <td class="hint">${f.gramps_id}</td><td>${f.title}</td>
-            <td class="hint action-failed">${f.detail}</td></tr>`)}
+      ${this.failures.length ? html`<h6 class="action-failed">Failed (${this.failures.length})</h6>
+        <table class="stripes">
+          <tbody>${this.failures.map((f) => html`<tr>
+            <td class="hint mono">${f.gramps_id}</td><td>${f.title}</td>
+            <td class="hint action-failed">${f.detail}</td></tr>`)}</tbody>
         </table>` : nothing}`;
   }
 }

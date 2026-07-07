@@ -104,7 +104,7 @@ export class SyncPage extends BifrostElement {
   renderEmpty() {
     return html`
       <nav>
-        ${btn('Run preview', this.running, () => this.runPreview())}
+        ${btn('Run', this.running, () => this.runPreview())}
       </nav>`;
   }
 
@@ -163,7 +163,7 @@ export class SyncPage extends BifrostElement {
   renderApplied() {
     const summary = summarize(this.applied?.events?.find((e) => e.kind === 'summary')?.data, true);
     return html`
-      <p>${statusLine('ok', `Applied to Gramps ${summary || 'done.'}`)}</p>
+      <p>${statusLine('ok', `${summary || 'done.'}`)}</p>
       <nav>
         ${this.config?.gramps_public_url ? html`<a class="button"
           href=${this.config.gramps_public_url} target="_blank" rel="noopener">Open in Gramps</a>` : nothing}

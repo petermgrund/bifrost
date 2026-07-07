@@ -10,7 +10,7 @@ import sqlite3
 from pathlib import Path
 
 MIGRATIONS: list[str] = [
-    # 1 — initial schema (docs/DESIGN.md §4)
+    # 1 initial
     """
     CREATE TABLE person_links (
         gramps_handle    TEXT NOT NULL,
@@ -63,9 +63,7 @@ MIGRATIONS: list[str] = [
         PRIMARY KEY (run_id, seq)
     );
     """,
-    # 2 — per-(person, photo) face padding. The Gramps rect is always the
-    # materialization of Immich's detected box + this pad; absence means the
-    # default applies (0.15, or 0.0 on Sync/ManualFaces-tagged assets).
+    # 2 per-(person, photo) face padding
     """
     CREATE TABLE face_pads (
         gramps_handle TEXT NOT NULL,
@@ -75,10 +73,7 @@ MIGRATIONS: list[str] = [
         PRIMARY KEY (gramps_handle, asset_id)
     );
     """,
-    # 3 — UI-generated media-id reservations. Codes minted ahead of time in the
-    # ID-generator tab are reserved here so the auto-generator never reuses them;
-    # manual id entry at sync time DOES accept a reserved id. minted_at flips when
-    # the id is actually created in Gramps.
+    # 3 — UI-generated media-id reservation
     """
     CREATE TABLE reserved_ids (
         gramps_id  TEXT PRIMARY KEY,
@@ -87,8 +82,7 @@ MIGRATIONS: list[str] = [
         note       TEXT
     );
     """,
-    # 4 — Gemini OCR ledger. A doc is (re-)OCR'd only when not already recorded
-    # here (or on force), so a run doesn't re-spend Gemini on every pass.
+    # 4 Gemini OCR ledger
     """
     CREATE TABLE ocr_state (
         paperless_id INTEGER PRIMARY KEY,
@@ -97,12 +91,41 @@ MIGRATIONS: list[str] = [
         ocr_at       TEXT NOT NULL
     );
     """,
-    # 5 — manual "assigned" step between reserved and minted. Set when Peter has
-    # physically labelled a photo (verso) with a reserved id but hasn't yet synced
-    # it into Gramps. Purely a Bifrost-side flag; cleared on unassign, moot once
-    # minted_at flips.
+    # 5 manual "assigned"
     """
     ALTER TABLE reserved_ids ADD COLUMN assigned_at TEXT;
+    """,
+    # 6 Immich image versioning
+    """
+    CREATE TABLE immich_versions (
+        gramps_id        TEXT PRIMARY KEY,
+        stack_id         TEXT NOT NULL,
+        current_asset_id TEXT NOT NULL,
+        current_checksum TEXT NOT NULL,
+        member_count     INTEGER NOT NULL,
+        updated_at       TEXT NOT NULL
+    );
+
+    CREATE TABLE immich_version_members (
+        gramps_id TEXT NOT NULL,
+        asset_id  TEXT NOT NULL,
+        checksum  TEXT NOT NULL,
+        role      TEXT,
+        label     TEXT,
+        seq       INTEGER NOT NULL,
+        PRIMARY KEY (gramps_id, asset_id)
+    );
+    """,
+    # 7
+    """
+    CREATE TABLE scan_register (
+        scan_no    TEXT PRIMARY KEY,
+        container  TEXT,
+        role       TEXT,
+        object_id  TEXT,
+        captured   TEXT,
+        note       TEXT
+    );
     """,
 ]
 

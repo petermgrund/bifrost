@@ -1,3 +1,3 @@
-"""Bifrost — one console for everything Gramps."""
+"""Bifrost"""
 
 __version__ = "0.1.0"

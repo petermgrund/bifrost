@@ -50,19 +50,30 @@ async def listing(gramps: GrampsClient, boundaries_dir: Path | None) -> list[dic
     return rows
 
 
-async def set_relation(gramps: GrampsClient, handle: str, osm_type: str, osm_id: int) -> dict:
+async def set_relation(
+    gramps: GrampsClient, handle: str, osm_type: str, osm_id: int, replace: bool = False,
+) -> dict:
     """Add an OSM relation/way URL to a place, matching the tree's convention
-    (type 'OSM URL'). Refuses if the place already carries one."""
+    (type 'OSM URL'). Refuses if the place already carries one, unless
+    replace=True — then the existing OSM URL is rewritten in place."""
     place = await gramps.get_place(handle)
-    if osm_ref_from_place(place):
+    existing = osm_ref_from_place(place)
+    if existing and not replace:
         raise ValueError("place already has an OSM URL")
-    place.setdefault("urls", []).append({
-        "_class": "Url",
-        "path": f"https://www.openstreetmap.org/{osm_type}/{osm_id}",
-        "desc": "",
-        "type": "OSM URL",
-        "private": False,
-    })
+    path = f"https://www.openstreetmap.org/{osm_type}/{osm_id}"
+    if existing:
+        for url in place.get("urls", []):
+            if OSM_REF_RE.search(url.get("path") or ""):
+                url["path"] = path
+                break
+    else:
+        place.setdefault("urls", []).append({
+            "_class": "Url",
+            "path": path,
+            "desc": "",
+            "type": "OSM URL",
+            "private": False,
+        })
     await gramps.update_place(handle, place)
     return {"handle": handle, "osm_type": osm_type, "osm_id": osm_id}
 

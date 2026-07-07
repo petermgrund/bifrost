@@ -10,3 +10,4 @@ venv/
 .venv/
 *.log
 .DS_Store
+config.yaml.pre-immich-removal.bak

@@ -1,8 +1,4 @@
-"""Typed events — the contract between domain modules and everything else.
-
-Domain modules are async generators yielding SyncEvents. The web layer fans
-them out to SSE and the run_events table; the CLI renders them as log lines.
-Preview is the same generator run with apply=False, yielding would_* actions.
+"""Typed events 
 """
 
 from __future__ import annotations
@@ -23,11 +19,11 @@ class SyncEvent:
     kind: Kind
     entity: Entity | None = None
     action: Action | None = None
-    source_id: str | None = None  # Immich UUID / Paperless ID / OSM relation
+    source_id: str | None = None 
     gramps_id: str | None = None
     title: str | None = None
     detail: str | None = None
-    data: dict | None = None  # structured extras (e.g. counts in summary)
+    data: dict | None = None
 
     def to_json(self) -> str:
         return json.dumps(

@@ -6,10 +6,6 @@ gramps:
   username: "REPLACE_ME"
   password: "REPLACE_ME"
 
-immich:
-  base_url: "http://100.89.34.77:2283"
-  api_key: "REPLACE_ME"
-
 paperless:
   base_url: "http://100.89.34.77:8010"
   api_token: "REPLACE_ME"
@@ -17,22 +13,7 @@ paperless:
 # Resolved relative to this file's directory if not absolute.
 database: data/bifrost.db
 
-faces:
-  # Write-through export for the legacy pipeline (Phase 1 shim, removed in
-  # Phase 2). Path as seen inside the container; see docker-compose.yml.
-  person_map_export: "/legacy/person_map.yaml"
-
 sync:
-  immich:
-    sync_tags: ["Sync/Gramps"]
-    public_url: "https://your-immich-public-url"
-    # When an Immich originalPath starts with immich_prefix, strip it and
-    # prepend gramps_prefix (a volume mount under /app/media in Gramps).
-    path_mappings:
-      - immich_prefix: "/usr/src/app/upload/upload/"
-        gramps_prefix: "immich/"
-    # Gramps tag handle marking places eligible for GPS-based linking.
-    place_tag_handle: "REPLACE_ME"
   paperless:
     sync_tags: ["doc", "img"]
     public_url: "https://your-paperless-public-url"
@@ -42,17 +23,10 @@ sync:
     gramps_url_field_id: 0
     date_qualifier_field_id: null
     date_meaning_field_id: null
-    # Custom field ids used by the upload wizard's metadata form
-    family_group_field_id: null
-    source_url_field_id: null
-    source_url_access_field_id: null
     # Paperless tag id marking documents with a transcription to sync
     transcription_tag_id: null
     # Paperless tag NAME marking docs to transcribe in place with Gemini OCR
     ocr_tag: "Gemini OCR"
-    # House-style master doc (path inside the container); the upload wizard feeds
-    # its Paperless section to the LLM for metadata autofill
-    house_style_path: "/app/house_style_master.md"
 
 anthropic:
   # Used by the citation generator to compose EE citation text (editable

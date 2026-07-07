@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --primary:#1b56c4; --on-primary:#ffffff;
+  --primary-container:#dde6fb; --on-primary-container:#0a2a73;
+  --appbar:#26408b; --on-appbar:#ffffff;
+  --surface:#ffffff; --surface-1:#f5f6f8; --surface-2:#e9ebef;
+  --on-surface:#1f1f24; --on-surface-variant:#5b5f66;
+  --outline:#c3c6cc; --outline-variant:#e4e6ea;
+  --success:#1e7d4f; --success-container:#d4f3e0; --on-success-container:#08351f;
+  --warning:#9a6700; --warning-container:#ffe8b8; --on-warning-container:#3a2700;
+  --error:#b3261e;
+  --update:#2563d6; --update-container:#dbe8fd; --on-update-container:#0b357f;
+}
+[data-accent="indigo"]{ --primary:#4a5bae; --primary-container:#dee0ff; --on-primary-container:#00164e; --appbar:#3a448c; }
+[data-accent="teal"]{ --primary:#106a63; --primary-container:#cdeae5; --on-primary-container:#00201d; --appbar:#0a4d48; }
+[data-appbar="light"]{ --appbar:#ffffff; --on-appbar:#1f1f24; }
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+@keyframes bf-spin{to{transform:rotate(360deg);}}
+</style>
+</helmet>
+
+<div data-accent="{{accent}}" data-appbar="{{appBar}}" style="height:100vh;display:flex;flex-direction:column;overflow:hidden;background:var(--surface);color:var(--on-surface);font:400 14px/1.4 Roboto, system-ui, sans-serif;">
+
+  <!-- ============ APP BAR ============ -->
+  <header style="flex:none;height:64px;display:flex;align-items:center;gap:6px;padding:0 12px 0 6px;background:var(--appbar);color:var(--on-appbar);box-shadow:0 1px 0 var(--outline-variant);z-index:2;">
+    <button aria-label="Menu" style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;border-radius:50%;border:none;background:transparent;color:inherit;cursor:pointer;" style-hover="background:color-mix(in srgb, currentColor 14%, transparent)"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+    <span style="font:500 22px/1 Roboto;letter-spacing:.2px;margin-left:4px;">Bifrost</span>
+    <div style="flex:1;"></div>
+    <button aria-label="Add" style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;border-radius:50%;border:none;background:transparent;color:inherit;cursor:pointer;" style-hover="background:color-mix(in srgb, currentColor 14%, transparent)"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+    <button aria-label="Account" style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;border-radius:50%;border:none;background:transparent;color:inherit;cursor:pointer;" style-hover="background:color-mix(in srgb, currentColor 14%, transparent)"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="9.5" r="3"/><path d="M5.8 19a6.4 6.4 0 0 1 12.4 0"/></svg></button>
+    <button aria-label="Search" style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;border-radius:50%;border:none;background:transparent;color:inherit;cursor:pointer;" style-hover="background:color-mix(in srgb, currentColor 14%, transparent)"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg></button>
+  </header>
+
+  <!-- ============ SHELL ============ -->
+  <div style="flex:1;min-height:0;display:flex;">
+
+    <!-- DRAWER -->
+    <nav style="flex:none;width:256px;height:100%;overflow:auto;background:var(--surface);border-right:1px solid var(--outline-variant);padding:8px 0;">
+      <a style="display:flex;align-items:center;gap:18px;height:46px;padding:0 24px;color:var(--on-surface);text-decoration:none;font:400 15px/1 Roboto;cursor:pointer;border-left:3px solid transparent;" style-hover="background:var(--surface-1)"><span style="display:flex;color:var(--on-surface-variant);"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.6 12 3l9 6.6V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg></span>Home</a>
+
+      <div style="height:1px;background:var(--outline-variant);margin:8px 16px;"></div>
+
+      <a style="display:flex;align-items:center;gap:18px;height:46px;padding:0 24px;color:var(--on-surface);text-decoration:none;font:400 15px/1 Roboto;cursor:pointer;border-left:3px solid transparent;" style-hover="background:var(--surface-1)"><span style="display:flex;color:var(--on-surface-variant);"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4m0 0 4 4m-4-4-4 4M5 20h14"/></svg></span>Upload</a>
+      <a style="display:flex;align-items:center;gap:18px;height:46px;padding:0 24px;color:var(--on-surface);text-decoration:none;font:400 15px/1 Roboto;cursor:pointer;border-left:3px solid transparent;" style-hover="background:var(--surface-1)"><span style="display:flex;color:var(--on-surface-variant);"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg></span>Transcribe</a>
+      <a style="display:flex;align-items:center;gap:18px;height:46px;padding:0 24px;color:var(--on-primary-container);text-decoration:none;font:500 15px/1 Roboto;cursor:pointer;border-left:3px solid var(--primary);background:var(--primary-container);"><span style="display:flex;color:var(--on-primary-container);"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V7z"/><path d="M14 3v4h4"/></svg></span>Paperless</a>
+      <a style="display:flex;align-items:center;gap:18px;height:46px;padding:0 24px;color:var(--on-surface);text-decoration:none;font:400 15px/1 Roboto;cursor:pointer;border-left:3px solid transparent;" style-hover="background:var(--surface-1)"><span style="display:flex;color:var(--on-surface-variant);"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.4"/><path d="m4 18 5-5 4 4 2-2 4 4"/></svg></span>Immich</a>
+
+      <div style="height:1px;background:var(--outline-variant);margin:8px 16px;"></div>
+
+      <a style="display:flex;align-items:center;gap:18px;height:46px;padding:0 24px;color:var(--on-surface);text-decoration:none;font:400 15px/1 Roboto;cursor:pointer;border-left:3px solid transparent;" style-hover="background:var(--surface-1)"><span style="display:flex;color:var(--on-surface-variant);"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 10h.01M15 10h.01"/><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0"/></svg></span>Faces</a>
+      <a style="display:flex;align-items:center;gap:18px;height:46px;padding:0 24px;color:var(--on-surface);text-decoration:none;font:400 15px/1 Roboto;cursor:pointer;border-left:3px solid transparent;" style-hover="background:var(--surface-1)"><span style="display:flex;color:var(--on-surface-variant);"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 16V6a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H9l-4 4z"/><path d="M9 9h6M9 12h4"/></svg></span>Citations</a>
+
+      <div style="height:1px;background:var(--outline-variant);margin:8px 16px;"></div>
+
+      <a style="display:flex;align-items:center;gap:18px;height:46px;padding:0 24px;color:var(--on-surface);text-decoration:none;font:400 15px/1 Roboto;cursor:pointer;border-left:3px solid transparent;" style-hover="background:var(--surface-1)"><span style="display:flex;color:var(--on-surface-variant);"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s7-6 7-11a7 7 0 1 0-14 0c0 5 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/></svg></span>Places</a>
+      <a style="display:flex;align-items:center;gap:18px;height:46px;padding:0 24px;color:var(--on-surface);text-decoration:none;font:400 15px/1 Roboto;cursor:pointer;border-left:3px solid transparent;" style-hover="background:var(--surface-1)"><span style="display:flex;color:var(--on-surface-variant);"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V5M4 19h16M8 16v-4M12 16V8M16 16v-6"/></svg></span>Activity</a>
+      <a style="display:flex;align-items:center;gap:18px;height:46px;padding:0 24px;color:var(--on-surface);text-decoration:none;font:400 15px/1 Roboto;cursor:pointer;border-left:3px solid transparent;" style-hover="background:var(--surface-1)"><span style="display:flex;color:var(--on-surface-variant);"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h6.6a2 2 0 0 1 1.4.6l8 8a2 2 0 0 1 0 2.8l-5.6 5.6a2 2 0 0 1-2.8 0l-8-8A2 2 0 0 1 4 11.6z"/><path d="M8 8h.01"/></svg></span>IDs</a>
+    </nav>
+
+    <!-- CONTENT -->
+    <main style="flex:1;min-height:0;overflow:auto;background:var(--surface);">
+      <div style="max-width:1060px;padding:28px 40px 72px;">
+
+        <h1 style="font:400 28px/36px Roboto;margin:0 0 4px;color:var(--on-surface);">Paperless &rarr; Gramps</h1>
+        <p style="font:400 15px/22px Roboto;margin:0 0 18px;color:var(--on-surface-variant);">Tagged Paperless documents become Gramps media objects</p>
+
+        <!-- TABS -->
+        <div style="display:flex;gap:36px;border-bottom:1px solid var(--outline-variant);">
+          <button onClick="{{setPreviewTab}}" style="background:none;border:none;cursor:pointer;font:500 15px/1 Roboto;padding:14px 2px;margin-bottom:-1px;border-bottom:3px solid {{previewTabBorder}};color:{{previewTabColor}};">Preview</button>
+          <button onClick="{{setHistoryTab}}" style="background:none;border:none;cursor:pointer;font:500 15px/1 Roboto;padding:14px 2px;margin-bottom:-1px;border-bottom:3px solid {{historyTabBorder}};color:{{historyTabColor}};">History</button>
+          <button onClick="{{setSettingsTab}}" style="background:none;border:none;cursor:pointer;font:500 15px/1 Roboto;padding:14px 2px;margin-bottom:-1px;border-bottom:3px solid {{settingsTabBorder}};color:{{settingsTabColor}};">Settings</button>
+        </div>
+
+        <p style="font:400 14px/20px Roboto;margin:18px 0 20px;color:var(--on-surface-variant);">{{caption}}</p>
+
+        <!-- ===== PREVIEW: empty ===== -->
+        <sc-if value="{{showPreviewEmpty}}" hint-placeholder-val="{{true}}">
+          <div style="border:1px solid var(--outline-variant);border-radius:12px;background:var(--surface);padding:24px;">
+            <div style="font:500 18px/1.3 Roboto;color:var(--on-surface);">Dry-run preview</div>
+            <div style="font:400 14px/20px Roboto;color:var(--on-surface-variant);margin-top:4px;">run test</div>
+            <div style="margin-top:20px;border:1px dashed var(--outline);border-radius:12px;background:var(--surface-1);padding:44px 24px;display:flex;flex-direction:column;align-items:center;gap:10px;text-align:center;">
+              <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="var(--on-surface-variant)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V7z"/><path d="M14 3v4h4"/><path d="M9 13h6M9 16h4"/></svg>
+              <div style="font:500 16px/1.3 Roboto;color:var(--on-surface);">... </div>
+              <div style="font:400 14px/20px Roboto;color:var(--on-surface-variant);max-width:400px;">Scan documents tagged <strong>doc</strong> or <strong>img</strong></div>
+              <button onClick="{{runPreview}}" style="margin-top:10px;display:inline-flex;align-items:center;gap:8px;height:40px;padding:0 24px;border-radius:999px;border:none;background:var(--primary);color:var(--on-primary);font:500 14px Roboto;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.18);" style-hover="filter:brightness(1.07)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 4 14 8-14 8z"/></svg>Run preview</button>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- ===== PREVIEW: results ===== -->
+        <sc-if value="{{showPreviewResults}}" hint-placeholder-val="{{false}}">
+          <div style="border:1px solid var(--outline-variant);border-radius:12px;background:var(--surface);padding:24px;">
+            <div style="font:500 18px/1.3 Roboto;color:var(--on-surface);">Dry run preview</div>
+            <div style="font:400 14px/20px Roboto;color:var(--on-surface-variant);margin-top:4px;">nothing is saved yet</div>
+
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:18px;">
+              <button onClick="{{filterAll}}" style="display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 14px;border-radius:8px;font:500 13px Roboto;cursor:pointer;border:1px solid var(--outline);background:transparent;{{allChip}}">All 11</button>
+              <button onClick="{{filterCreate}}" style="display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 14px;border-radius:8px;font:500 13px Roboto;cursor:pointer;border:1px solid var(--outline);background:transparent;{{createChip}}"><span style="width:9px;height:9px;border-radius:50%;background:var(--success);"></span>Create 6</button>
+              <button onClick="{{filterUpdate}}" style="display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 14px;border-radius:8px;font:500 13px Roboto;cursor:pointer;border:1px solid var(--outline);background:transparent;{{updateChip}}"><span style="width:9px;height:9px;border-radius:50%;background:var(--update);"></span>Update 2</button>
+              <button onClick="{{filterSkip}}" style="display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 14px;border-radius:8px;font:500 13px Roboto;cursor:pointer;border:1px solid var(--outline);background:transparent;{{skipChip}}"><span style="width:9px;height:9px;border-radius:50%;background:var(--outline);"></span>Skip 3</button>
+            </div>
+
+            <table style="width:100%;border-collapse:separate;border-spacing:0;margin-top:18px;border:1px solid var(--outline-variant);border-radius:8px;overflow:hidden;">
+              <thead>
+                <tr style="background:var(--surface-1);">
+                  <th style="width:46px;padding:11px 14px;border-bottom:1px solid var(--outline-variant);"><input type="checkbox" checked="{{allWritableChecked}}" onChange="{{toggleAll}}" style="width:18px;height:18px;accent-color:var(--primary);cursor:pointer;margin:0;vertical-align:middle;"></th>
+                  <th style="font:500 11px/1.4 Roboto;text-transform:uppercase;letter-spacing:.07em;color:var(--on-surface-variant);text-align:left;padding:11px 14px;border-bottom:1px solid var(--outline-variant);width:104px;">Action</th>
+                  <th style="font:500 11px/1.4 Roboto;text-transform:uppercase;letter-spacing:.07em;color:var(--on-surface-variant);text-align:left;padding:11px 14px;border-bottom:1px solid var(--outline-variant);">Paperless doc</th>
+                  <th style="font:500 11px/1.4 Roboto;text-transform:uppercase;letter-spacing:.07em;color:var(--on-surface-variant);text-align:left;padding:11px 14px;border-bottom:1px solid var(--outline-variant);width:210px;">Media object</th>
+                  <th style="font:500 11px/1.4 Roboto;text-transform:uppercase;letter-spacing:.07em;color:var(--on-surface-variant);text-align:left;padding:11px 14px;border-bottom:1px solid var(--outline-variant);width:180px;">Detail</th>
+                </tr>
+              </thead>
+              <tbody>
+                <sc-for list="{{rows}}" as="r" hint-placeholder-count="6">
+                  <tr style="{{r.rowStyle}}">
+                    <td style="padding:12px 14px;border-top:1px solid var(--outline-variant);vertical-align:middle;"><input type="checkbox" checked="{{r.checked}}" disabled="{{r.notWritable}}" onChange="{{r.toggle}}" style="width:18px;height:18px;accent-color:var(--primary);cursor:pointer;margin:0;vertical-align:middle;"></td>
+                    <td style="padding:12px 14px;border-top:1px solid var(--outline-variant);vertical-align:middle;"><span style="{{r.pillStyle}}">{{r.pillLabel}}</span></td>
+                    <td style="padding:12px 14px;border-top:1px solid var(--outline-variant);vertical-align:middle;font:400 14px Roboto;color:var(--on-surface);">{{r.file}}</td>
+                    <td style="padding:12px 14px;border-top:1px solid var(--outline-variant);vertical-align:middle;">
+                      <sc-if value="{{r.showSelect}}" hint-placeholder-val="{{false}}">
+                        <span style="position:relative;display:inline-block;">
+                          <select value="{{r.selectValue}}" onChange="{{r.onSelect}}" style="appearance:none;-webkit-appearance:none;height:38px;padding:0 32px 0 12px;border:1px solid var(--outline);border-radius:4px;background:var(--surface);font:400 13px Roboto;color:var(--on-surface);cursor:pointer;min-width:170px;" style-focus="outline:2px solid var(--primary);outline-offset:-1px;border-color:var(--primary)">
+                            <sc-for list="{{r.options}}" as="opt" hint-placeholder-count="3">
+                              <option value="{{opt.value}}">{{opt.label}}</option>
+                            </sc-for>
+                          </select>
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--on-surface-variant)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;right:9px;top:50%;transform:translateY(-50%);pointer-events:none;"><path d="m6 9 6 6 6-6"/></svg>
+                        </span>
+                      </sc-if>
+                      <sc-if value="{{r.showText}}" hint-placeholder-val="{{true}}">
+                        <span style="font:400 13px Roboto;color:var(--on-surface-variant);">{{r.media}}</span>
+                      </sc-if>
+                    </td>
+                    <td style="padding:12px 14px;border-top:1px solid var(--outline-variant);vertical-align:middle;font:400 13px Roboto;color:var(--on-surface-variant);">{{r.detail}}</td>
+                  </tr>
+                </sc-for>
+              </tbody>
+            </table>
+
+            <div style="font:400 14px/20px Roboto;color:var(--on-surface-variant);margin-top:12px;">{{summary}}</div>
+
+            <div style="display:flex;align-items:center;gap:16px;margin-top:18px;padding-top:16px;border-top:1px solid var(--outline-variant);">
+              <div style="flex:1;">
+                <div style="font:500 14px Roboto;color:var(--on-surface);">Manual ID assignment</div>
+                <div style="font:400 13px/18px Roboto;color:var(--on-surface-variant);margin-top:2px;">{{idHint}}</div>
+              </div>
+              <button onClick="{{toggleId}}" aria-label="Toggle reserved IDs" style="position:relative;flex:none;width:52px;height:32px;border-radius:999px;border:2px solid transparent;padding:0;cursor:pointer;transition:background .2s, border-color .2s;{{idTrack}}">
+                <span style="position:absolute;top:50%;transform:translateY(-50%);border-radius:50%;transition:all .2s;{{idThumb}}"></span>
+              </button>
+            </div>
+
+            <div style="display:flex;align-items:center;gap:12px;margin-top:20px;">
+              <button onClick="{{apply}}" style="display:inline-flex;align-items:center;gap:8px;height:40px;padding:0 24px;border-radius:999px;border:none;background:var(--primary);color:var(--on-primary);font:500 14px Roboto;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.18);" style-hover="filter:brightness(1.07)">{{applyLabel}}</button>
+              <button onClick="{{rerun}}" style="display:inline-flex;align-items:center;height:40px;padding:0 22px;border-radius:999px;border:1px solid var(--outline);background:transparent;color:var(--primary);font:500 14px Roboto;cursor:pointer;" style-hover="background:color-mix(in srgb, var(--primary) 8%, transparent)">Re-run preview</button>
+              <button style="display:inline-flex;align-items:center;height:40px;padding:0 12px;border:none;background:transparent;color:var(--primary);font:500 14px Roboto;cursor:pointer;border-radius:999px;" style-hover="background:color-mix(in srgb, var(--primary) 8%, transparent)">Export preview</button>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- ===== PREVIEW: applied ===== -->
+        <sc-if value="{{showApplied}}" hint-placeholder-val="{{false}}">
+          <div style="border:1px solid var(--success);background:var(--success-container);color:var(--on-success-container);border-radius:12px;padding:24px;display:flex;gap:16px;align-items:flex-start;">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex:none;margin-top:2px;"><circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-6"/></svg>
+            <div style="flex:1;">
+              <div style="font:500 18px/1.3 Roboto;">Applied to Gramps</div>
+              <div style="font:400 14px/20px Roboto;margin-top:4px;">{{appliedSummary}}</div>
+              <div style="display:flex;align-items:center;gap:12px;margin-top:18px;">
+                <button style="display:inline-flex;align-items:center;gap:8px;height:40px;padding:0 22px;border-radius:999px;border:none;background:var(--success);color:#fff;font:500 14px Roboto;cursor:pointer;" style-hover="filter:brightness(1.06)">Open in Gramps Web</button>
+                <button onClick="{{runAnother}}" style="display:inline-flex;align-items:center;height:40px;padding:0 12px;border:none;background:transparent;color:var(--on-success-container);font:500 14px Roboto;cursor:pointer;border-radius:999px;" style-hover="background:color-mix(in srgb, var(--on-success-container) 8%, transparent)">Run another preview</button>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- ===== HISTORY ===== -->
+        <sc-if value="{{showHistory}}" hint-placeholder-val="{{false}}">
+          <div style="border:1px solid var(--outline-variant);border-radius:12px;background:var(--surface);padding:24px;">
+            <div style="font:500 18px/1.3 Roboto;color:var(--on-surface);">Recent runs</div>
+            <div style="font:400 14px/20px Roboto;color:var(--on-surface-variant);margin-top:4px;">Every Paperless &rarr; Gramps run, newest first.</div>
+            <table style="width:100%;border-collapse:separate;border-spacing:0;margin-top:18px;border:1px solid var(--outline-variant);border-radius:8px;overflow:hidden;">
+              <thead>
+                <tr style="background:var(--surface-1);">
+                  <th style="font:500 11px/1.4 Roboto;text-transform:uppercase;letter-spacing:.07em;color:var(--on-surface-variant);text-align:left;padding:11px 14px;border-bottom:1px solid var(--outline-variant);">Result</th>
+                  <th style="font:500 11px/1.4 Roboto;text-transform:uppercase;letter-spacing:.07em;color:var(--on-surface-variant);text-align:left;padding:11px 14px;border-bottom:1px solid var(--outline-variant);width:150px;">Status</th>
+                  <th style="font:500 11px/1.4 Roboto;text-transform:uppercase;letter-spacing:.07em;color:var(--on-surface-variant);text-align:left;padding:11px 14px;border-bottom:1px solid var(--outline-variant);width:140px;">When</th>
+                </tr>
+              </thead>
+              <tbody>
+                <sc-for list="{{runs}}" as="run" hint-placeholder-count="4">
+                  <tr>
+                    <td style="padding:12px 14px;border-top:1px solid var(--outline-variant);font:400 14px Roboto;color:var(--on-surface);">{{run.result}}</td>
+                    <td style="padding:12px 14px;border-top:1px solid var(--outline-variant);"><span style="display:inline-flex;align-items:center;gap:8px;font:400 14px Roboto;color:var(--on-surface);"><span style="width:9px;height:9px;border-radius:50%;flex:none;{{run.dotStyle}}"></span>{{run.label}}</span></td>
+                    <td style="padding:12px 14px;border-top:1px solid var(--outline-variant);font:400 13px Roboto;color:var(--on-surface-variant);">{{run.when}}</td>
+                  </tr>
+                </sc-for>
+              </tbody>
+            </table>
+          </div>
+        </sc-if>
+
+        <!-- ===== SETTINGS ===== -->
+        <sc-if value="{{showSettings}}" hint-placeholder-val="{{false}}">
+          <div style="border:1px solid var(--outline-variant);border-radius:12px;background:var(--surface);overflow:hidden;">
+
+            <button onClick="{{toggleScope}}" style="display:flex;align-items:flex-start;gap:16px;width:100%;text-align:left;background:transparent;border:none;cursor:pointer;padding:20px 24px;" style-hover="background:var(--surface-1)">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--on-surface-variant)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-top:5px;flex:none;transition:transform .2s;transform:rotate({{scopeRot}});"><path d="m9 6 6 6-6 6"/></svg>
+              <div style="flex:1;">
+                <div style="font:400 22px/28px Roboto;color:var(--on-surface);">Sync scope</div>
+                <div style="font:400 14px/20px Roboto;color:var(--on-surface-variant);margin-top:4px;">Which Paperless documents are imported, and the tags that mark them.</div>
+              </div>
+            </button>
+            <sc-if value="{{scopeOpen}}" hint-placeholder-val="{{false}}">
+              <div style="padding:0 24px 24px 60px;display:flex;flex-direction:column;gap:18px;">
+                <div>
+                  <div style="font:500 12px Roboto;color:var(--on-surface-variant);margin-bottom:8px;">Sync tags</div>
+                  <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                    <span style="display:inline-flex;align-items:center;gap:8px;height:32px;padding:0 12px;border-radius:8px;background:var(--primary-container);color:var(--on-primary-container);font:500 13px Roboto;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h6.6a2 2 0 0 1 1.4.6l8 8a2 2 0 0 1 0 2.8l-5.6 5.6a2 2 0 0 1-2.8 0l-8-8A2 2 0 0 1 4 11.6z"/><path d="M8 8h.01"/></svg>doc</span>
+                    <span style="display:inline-flex;align-items:center;gap:8px;height:32px;padding:0 12px;border-radius:8px;background:var(--primary-container);color:var(--on-primary-container);font:500 13px Roboto;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h6.6a2 2 0 0 1 1.4.6l8 8a2 2 0 0 1 0 2.8l-5.6 5.6a2 2 0 0 1-2.8 0l-8-8A2 2 0 0 1 4 11.6z"/><path d="M8 8h.01"/></svg>img</span>
+                  </div>
+                </div>
+                <div style="display:flex;gap:18px;flex-wrap:wrap;">
+                  <div style="flex:1;min-width:240px;">
+                    <div style="font:500 12px Roboto;color:var(--on-surface-variant);margin-bottom:6px;">Paperless public URL</div>
+                    <input value="https://paperless.grund.family" style="width:100%;font:400 14px Roboto;color:var(--on-surface);background:var(--surface);border:1px solid var(--outline);border-radius:6px;padding:11px 14px;" style-focus="outline:2px solid var(--primary);outline-offset:-1px;border-color:var(--primary)">
+                  </div>
+                  <div style="flex:1;min-width:240px;">
+                    <div style="font:500 12px Roboto;color:var(--on-surface-variant);margin-bottom:6px;">Gramps public URL</div>
+                    <input value="https://gramps.grund.family" style="width:100%;font:400 14px Roboto;color:var(--on-surface);background:var(--surface);border:1px solid var(--outline);border-radius:6px;padding:11px 14px;" style-focus="outline:2px solid var(--primary);outline-offset:-1px;border-color:var(--primary)">
+                  </div>
+                </div>
+              </div>
+            </sc-if>
+
+            <div style="height:1px;background:var(--outline-variant);"></div>
+
+            <button onClick="{{toggleNote}}" style="display:flex;align-items:flex-start;gap:16px;width:100%;text-align:left;background:transparent;border:none;cursor:pointer;padding:20px 24px;" style-hover="background:var(--surface-1)">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--on-surface-variant)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-top:5px;flex:none;transition:transform .2s;transform:rotate({{noteRot}});"><path d="m9 6 6 6-6 6"/></svg>
+              <div style="flex:1;">
+                <div style="font:400 22px/28px Roboto;color:var(--on-surface);">Transcription</div>
+                <div style="font:400 14px/20px Roboto;color:var(--on-surface-variant);margin-top:4px;">How a document&rsquo;s OCR text flows into Gramps as a Transcription note.</div>
+              </div>
+            </button>
+            <sc-if value="{{noteOpen}}" hint-placeholder-val="{{false}}">
+              <div style="padding:0 24px 24px 60px;display:flex;flex-direction:column;gap:18px;">
+                <div style="display:flex;align-items:center;gap:16px;max-width:560px;">
+                  <div style="flex:1;">
+                    <div style="font:500 14px Roboto;color:var(--on-surface);">Attach transcription as a Gramps note</div>
+                    <div style="font:400 13px/18px Roboto;color:var(--on-surface-variant);margin-top:2px;">Creates or updates a &ldquo;Transcription&rdquo; note on the media object.</div>
+                  </div>
+                  <button onClick="{{toggleNoteSwitch}}" aria-label="Toggle transcription note" style="position:relative;flex:none;width:52px;height:32px;border-radius:999px;border:2px solid transparent;padding:0;cursor:pointer;transition:background .2s, border-color .2s;{{noteTrack}}">
+                    <span style="position:absolute;top:50%;transform:translateY(-50%);border-radius:50%;transition:all .2s;{{noteThumb}}"></span>
+                  </button>
+                </div>
+                <div>
+                  <div style="font:500 12px Roboto;color:var(--on-surface-variant);margin-bottom:6px;">Transcription tag</div>
+                  <input value="has-transcription" style="width:100%;max-width:300px;font:400 14px Roboto;color:var(--on-surface);background:var(--surface);border:1px solid var(--outline);border-radius:6px;padding:11px 14px;" style-focus="outline:2px solid var(--primary);outline-offset:-1px;border-color:var(--primary)">
+                </div>
+              </div>
+            </sc-if>
+
+            <div style="height:1px;background:var(--outline-variant);"></div>
+
+            <button onClick="{{toggleVersion}}" style="display:flex;align-items:flex-start;gap:16px;width:100%;text-align:left;background:transparent;border:none;cursor:pointer;padding:20px 24px;" style-hover="background:var(--surface-1)">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--on-surface-variant)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-top:5px;flex:none;transition:transform .2s;transform:rotate({{versionRot}});"><path d="m9 6 6 6-6 6"/></svg>
+              <div style="flex:1;">
+                <div style="font:400 22px/28px Roboto;color:var(--on-surface);">Document versions</div>
+                <div style="font:400 14px/20px Roboto;color:var(--on-surface-variant);margin-top:4px;">Keep Gramps pointed at whichever version you select in Paperless.</div>
+              </div>
+            </button>
+            <sc-if value="{{versionOpen}}" hint-placeholder-val="{{false}}">
+              <div style="padding:0 24px 24px 60px;display:flex;flex-direction:column;gap:14px;">
+                <div style="display:flex;align-items:center;gap:16px;max-width:560px;">
+                  <div style="flex:1;">
+                    <div style="font:500 14px Roboto;color:var(--on-surface);">Auto-repoint when the selected version changes</div>
+                    <div style="font:400 13px/18px Roboto;color:var(--on-surface-variant);margin-top:2px;">A scheduled job repoints the Gramps media to the version you pick.</div>
+                  </div>
+                  <button onClick="{{toggleVersionSwitch}}" aria-label="Toggle auto-repoint" style="position:relative;flex:none;width:52px;height:32px;border-radius:999px;border:2px solid transparent;padding:0;cursor:pointer;transition:background .2s, border-color .2s;{{versionTrack}}">
+                    <span style="position:absolute;top:50%;transform:translateY(-50%);border-radius:50%;transition:all .2s;{{versionThumb}}"></span>
+                  </button>
+                </div>
+                <div style="display:inline-flex;align-items:center;gap:10px;font:400 13px/18px Roboto;color:var(--on-surface-variant);background:var(--surface-1);border:1px solid var(--outline-variant);border-radius:8px;padding:10px 14px;max-width:560px;">
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 2"/></svg>
+                  Last checked 14 minutes ago &middot; next run in 46 minutes.
+                </div>
+              </div>
+            </sc-if>
+
+            <div style="height:1px;background:var(--outline-variant);"></div>
+
+            <button onClick="{{toggleIds}}" style="display:flex;align-items:flex-start;gap:16px;width:100%;text-align:left;background:transparent;border:none;cursor:pointer;padding:20px 24px;" style-hover="background:var(--surface-1)">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--on-surface-variant)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-top:5px;flex:none;transition:transform .2s;transform:rotate({{idsRot}});"><path d="m9 6 6 6-6 6"/></svg>
+              <div style="flex:1;">
+                <div style="font:400 22px/28px Roboto;color:var(--on-surface);">Media IDs</div>
+                <div style="font:400 14px/20px Roboto;color:var(--on-surface-variant);margin-top:4px;">Whether new media get an auto-generated random-6 ID or one you pre-assign.</div>
+              </div>
+            </button>
+            <sc-if value="{{idsOpen}}" hint-placeholder-val="{{false}}">
+              <div style="padding:0 24px 24px 60px;">
+                <div style="display:inline-flex;border:1px solid var(--outline);border-radius:999px;overflow:hidden;">
+                  <button onClick="{{setSeq}}" style="border:none;cursor:pointer;font:500 14px Roboto;padding:0 18px;height:38px;{{seqSeg}}">Random-6 (auto)</button>
+                  <button onClick="{{setRes}}" style="border:none;cursor:pointer;font:500 14px Roboto;padding:0 18px;height:38px;border-left:1px solid var(--outline);{{resSeg}}">Pre-assigned random-6</button>
+                </div>
+              </div>
+            </sc-if>
+
+          </div>
+        </sc-if>
+
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{
+  &quot;$preview&quot;: { &quot;width&quot;: 1280, &quot;height&quot;: 860 },
+  &quot;accent&quot;: { &quot;editor&quot;: &quot;enum&quot;, &quot;options&quot;: [&quot;blue&quot;, &quot;indigo&quot;, &quot;teal&quot;], &quot;default&quot;: &quot;teal&quot;, &quot;tsType&quot;: &quot;'blue'|'indigo'|'teal'&quot; },
+  &quot;appBar&quot;: { &quot;editor&quot;: &quot;enum&quot;, &quot;options&quot;: [&quot;solid&quot;, &quot;light&quot;], &quot;default&quot;: &quot;solid&quot;, &quot;tsType&quot;: &quot;'solid'|'light'&quot; }
+}">
+class Component extends DCLogic {
+  state = {
+    tab: 'preview', previewed: false, applied: false,
+    filter: 'all', excluded: {}, idMine: false, assignedIds: {}, noteOn: true, versionOn: true,
+    open: { scope: true, note: false, version: false, ids: false }
+  };
+
+  renderVals() {
+    const s = this.state;
+
+    const all = [
+      { action:'create', file:'1881 Census \u2014 Whitby.pdf',        media:'M3K8PQ', detail:'census \u00b7 1881' },
+      { action:'create', file:'Marriage cert \u2014 Ada Hale.jpg',     media:'R9F2WT', detail:'certificate \u00b7 1881' },
+      { action:'create', file:'Baptism \u2014 Edward Hale.pdf',        media:'J7X4NB', detail:'parish \u00b7 1854' },
+      { action:'create', file:'Death cert \u2014 Mary Hale.pdf',       media:'D5H8YK', detail:'certificate \u00b7 1909' },
+      { action:'create', file:'Ship manifest \u2014 SS Olympic.tif',   media:'P2Q6CF', detail:'immigration \u00b7 1911' },
+      { action:'create', file:'Will & probate \u2014 J. Hale.pdf',     media:'T8M3RW', detail:'probate \u00b7 1921' },
+      { action:'update', file:'Parish register, vol. 2.pdf',           media:'H6N2XJ',          detail:'new OCR text attached' },
+      { action:'update', file:'Trade directory, 1888.pdf',             media:'B4W9TM',          detail:'title & date corrected' },
+      { action:'skip',   file:'Census 1871 \u2014 Whitby.pdf',         media:'K3R8FN',          detail:'already imported' },
+      { action:'skip',   file:'Newspaper clipping.jpg',                media:'\u2014',          detail:'no tags \u2014 excluded' },
+      { action:'skip',   file:'Receipt scan.pdf',                      media:'\u2014',          detail:'duplicate of W7K2MN' },
+    ];
+
+    const indexed = all.map((r, i) => ({ ...r, idx: i, writable: r.action !== 'skip' }));
+    const writable = indexed.filter(r => r.writable);
+    const selectedCount = writable.filter(r => !s.excluded[r.idx]).length;
+    const allWritableChecked = writable.length > 0 && selectedCount === writable.length;
+    const skipCount = indexed.filter(r => r.action === 'skip').length;
+    const selCreate = writable.filter(r => !s.excluded[r.idx] && r.action === 'create').length;
+    const selUpdate = writable.filter(r => !s.excluded[r.idx] && r.action === 'update').length;
+
+    const toggleRow = (idx) => this.setState(st => {
+      const ex = { ...st.excluded };
+      if (ex[idx]) delete ex[idx]; else ex[idx] = true;
+      return { excluded: ex };
+    });
+    const toggleAll = () => this.setState(() => {
+      if (selectedCount === writable.length) {
+        const ex = {}; writable.forEach(r => { ex[r.idx] = true; }); return { excluded: ex };
+      }
+      return { excluded: {} };
+    });
+
+    const pill = (a) => {
+      const base = 'display:inline-flex;align-items:center;font:500 12px Roboto;border-radius:999px;padding:3px 11px;';
+      if (a === 'create') return base + 'background:var(--success-container);color:var(--on-success-container);';
+      if (a === 'update') return base + 'background:var(--update-container);color:var(--on-update-container);';
+      return base + 'background:transparent;color:var(--on-surface-variant);border:1px solid var(--outline-variant);';
+    };
+    const label = (a) => a.charAt(0).toUpperCase() + a.slice(1);
+
+    const idPool = [
+      { value:'K7F9MP', label:'K7F9MP' },
+      { value:'Q3M8RD', label:'Q3M8RD' },
+      { value:'X2T6KP', label:'X2T6KP' },
+      { value:'B9N4WJ', label:'B9N4WJ' },
+      { value:'H4R8TM', label:'H4R8TM' },
+      { value:'P2W7CK', label:'P2W7CK' },
+      { value:'T6Y3FN', label:'T6Y3FN' },
+    ];
+    const createIdxs = indexed.filter(r => r.action === 'create').map(r => r.idx);
+    const defaultIdFor = {};
+    createIdxs.forEach((idx, i) => { defaultIdFor[idx] = idPool[i % idPool.length].value; });
+    const setAssigned = (idx, val) => this.setState(st => ({ assignedIds: { ...st.assignedIds, [idx]: val } }));
+
+    const visible = s.filter === 'all' ? indexed : indexed.filter(r => r.action === s.filter);
+    const rows = visible.map(r => {
+      const showSelect = s.idMine && r.action === 'create';
+      return {
+        file: r.file, media: r.media, detail: r.detail,
+        pillStyle: pill(r.action), pillLabel: label(r.action),
+        checked: r.writable && !s.excluded[r.idx],
+        notWritable: !r.writable,
+        rowStyle: (r.writable && s.excluded[r.idx]) ? 'opacity:.45;' : '',
+        toggle: () => toggleRow(r.idx),
+        showSelect,
+        showText: !showSelect,
+        options: idPool,
+        selectValue: s.assignedIds[r.idx] != null ? s.assignedIds[r.idx] : defaultIdFor[r.idx],
+        onSelect: (e) => setAssigned(r.idx, e.target.value),
+      };
+    });
+
+    const chip = (on) => on
+      ? 'background:var(--primary-container);color:var(--on-primary-container);border-color:transparent;'
+      : 'color:var(--on-surface-variant);';
+
+    const tabColor  = (t) => s.tab === t ? 'var(--primary)' : 'var(--on-surface-variant)';
+    const tabBorder = (t) => s.tab === t ? 'var(--primary)' : 'transparent';
+
+    const sw = (on) => ({
+      track: on ? 'background:var(--primary);border-color:var(--primary);' : 'background:var(--surface-2);border-color:var(--outline);',
+      thumb: on ? 'left:26px;width:22px;height:22px;background:#fff;' : 'left:8px;width:14px;height:14px;background:var(--outline);',
+    });
+    const idSw = sw(s.idMine);
+    const noteSw = sw(s.noteOn);
+    const versionSw = sw(s.versionOn);
+
+    const seg = (on) => on ? 'background:var(--primary-container);color:var(--on-primary-container);' : 'background:transparent;color:var(--on-surface-variant);';
+
+    const dot = (k) => k === 'ok' ? 'background:var(--success);' : k === 'warn' ? 'background:var(--warning);' : 'background:var(--error);';
+    const runs = [
+      { result:'6 media created, 2 updated',                 dotStyle:dot('ok'),    label:'Done',    when:'2 hours ago' },
+      { result:'1 document re-pointed to v3',                dotStyle:dot('ok'),    label:'Done',    when:'yesterday' },
+      { result:'14 transcription notes rebuilt',             dotStyle:dot('ok'),    label:'Done',    when:'2 days ago' },
+      { result:'Apply blocked \u2014 Gramps unreachable',    dotStyle:dot('error'), label:'Failed',  when:'last week' },
+    ];
+
+    const togglePanel = (k) => this.setState(st => ({ open: { ...st.open, [k]: !st.open[k] } }));
+    const rot = (k) => s.open[k] ? '90deg' : '0deg';
+
+    const caption = s.tab === 'preview'
+      ? 'Nothing is written to Gramps until you apply.'
+      : s.tab === 'history'
+      ? 'A log of past Paperless \u2192 Gramps operations.'
+      : 'Changes here affect every Paperless \u2192 Gramps sync.';
+
+    return {
+      accent: this.props.accent || 'teal',
+      appBar: this.props.appBar || 'solid',
+
+      caption,
+      setPreviewTab:  () => this.setState({ tab: 'preview' }),
+      setHistoryTab:  () => this.setState({ tab: 'history' }),
+      setSettingsTab: () => this.setState({ tab: 'settings' }),
+      previewTabColor: tabColor('preview'),  previewTabBorder: tabBorder('preview'),
+      historyTabColor: tabColor('history'),  historyTabBorder: tabBorder('history'),
+      settingsTabColor: tabColor('settings'),settingsTabBorder: tabBorder('settings'),
+
+      showPreviewEmpty:   s.tab === 'preview' && !s.previewed && !s.applied,
+      showPreviewResults: s.tab === 'preview' && s.previewed && !s.applied,
+      showApplied:        s.tab === 'preview' && s.applied,
+      showHistory:        s.tab === 'history',
+      showSettings:       s.tab === 'settings',
+
+      runPreview: () => this.setState({ previewed: true }),
+      rerun: () => this.setState({ previewed: false, excluded: {}, filter: 'all' }),
+      apply: () => this.setState({ applied: true }),
+      runAnother: () => this.setState({ applied: false, previewed: false, excluded: {}, filter: 'all' }),
+
+      rows, allWritableChecked, toggleAll,
+      filterAll: () => this.setState({ filter: 'all' }),
+      filterCreate: () => this.setState({ filter: 'create' }),
+      filterUpdate: () => this.setState({ filter: 'update' }),
+      filterSkip: () => this.setState({ filter: 'skip' }),
+      allChip: chip(s.filter === 'all'),
+      createChip: chip(s.filter === 'create'),
+      updateChip: chip(s.filter === 'update'),
+      skipChip: chip(s.filter === 'skip'),
+
+      summary: selectedCount + ' of ' + writable.length + ' changes selected \u00b7 ' + skipCount + ' skipped (already in Gramps).',
+      applyLabel: selectedCount === 0 ? 'Apply changes' : 'Apply ' + selectedCount + ' change' + (selectedCount === 1 ? '' : 's'),
+      appliedSummary: selCreate + ' media created, ' + selUpdate + ' updated \u00b7 transcription notes attached.',
+
+      idMine: s.idMine,
+      toggleId: () => this.setState(st => ({ idMine: !st.idMine })),
+      idTrack: idSw.track, idThumb: idSw.thumb,
+      idHint: s.idMine
+        ? 'Choose a pre-assigned random-6 ID (reserved or assigned) for each new media object below.'
+        : 'New media get an auto-generated random-6 ID.',
+
+      runs,
+
+      toggleScope:   () => togglePanel('scope'),
+      toggleNote:    () => togglePanel('note'),
+      toggleVersion: () => togglePanel('version'),
+      toggleIds:     () => togglePanel('ids'),
+      scopeOpen: s.open.scope, noteOpen: s.open.note, versionOpen: s.open.version, idsOpen: s.open.ids,
+      scopeRot: rot('scope'), noteRot: rot('note'), versionRot: rot('version'), idsRot: rot('ids'),
+
+      toggleNoteSwitch: () => this.setState(st => ({ noteOn: !st.noteOn })),
+      noteTrack: noteSw.track, noteThumb: noteSw.thumb,
+      toggleVersionSwitch: () => this.setState(st => ({ versionOn: !st.versionOn })),
+      versionTrack: versionSw.track, versionThumb: versionSw.thumb,
+
+      setSeq: () => this.setState({ idMine: false }),
+      setRes: () => this.setState({ idMine: true }),
+      seqSeg: seg(!s.idMine), resSeg: seg(s.idMine),
+    };
+  }
+}
+</script>
+</body>
+</html>

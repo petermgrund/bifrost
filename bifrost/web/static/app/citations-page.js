@@ -1,67 +1,37 @@
-import { BifrostElement, html, nothing, api, post } from './core.js';
+/* Citation generator — look up one media by Gramps ID; the generator flow
+   (describe → review → save) runs in a modal, like the Places dialog. The
+   free-text dump is the one composing path (LLM); 'Write manually' is the
+   no-LLM fallback. */
+import { BifrostElement, html, nothing, api, post, btn, spinner, field, statusLine } from './core.js';
 
-const shuffle = (arr) => {
-  const a = arr.slice();
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-};
-
-/* Citation generator: media → source → details → review/save.
-   Or event mode: cycle uncited events → compose a citation for the event
-   (media optional) → review/save; the citation auto-attaches to the event. */
 class CitationsPage extends BifrostElement {
   static properties = {
-    mode: { state: true },          // media | event
-    step: { state: true },          // event | media | describe | details | review
+    step: { state: true },          // describe | review (inside the modal)
     ctx: { state: true },           // types, sources, repositories, llm
-    media: { state: true },         // media listing
-    mediaQuery: { state: true },
-    originFilter: { state: true },
-    pick: { state: true },          // { media, source, repository, recordType, event }
-    fields: { state: true },        // entered field values
+    mediaId: { state: true },
+    pick: { state: true },          // { media, source, repository }; modal open when media set
     draft: { state: true },         // composed/edited draft
     busy: { state: true },
     error: { state: true },
+    loadError: { state: true },
     saved: { state: true },
-    sourceQuery: { state: true },
     dump: { state: true },
     matched: { state: true },
-    wizard: { state: true },
-    repoQuery: { state: true },
-    eventQueue: { state: true },    // shuffled light uncited-event list
-    eventPos: { state: true },
-    event: { state: true },         // current event detail
-    eventBusy: { state: true },
-    reviewFrom: { state: true },    // step to return to from review's Back
   };
 
   constructor() {
     super();
-    this.mode = 'media';
-    this.step = 'media';
+    this.step = 'describe';
     this.ctx = null;
-    this.media = [];
-    this.mediaQuery = '';
-    this.originFilter = 'paperless';
-    this.pick = { media: null, source: null, repository: null, recordType: null, event: null };
-    this.fields = {};
+    this.mediaId = '';
+    this.pick = { media: null, source: null, repository: null };
     this.draft = null;
     this.busy = false;
     this.error = '';
+    this.loadError = '';
     this.saved = null;
-    this.sourceQuery = '';
     this.dump = '';
     this.matched = null;
-    this.wizard = false;
-    this.repoQuery = '';
-    this.eventQueue = null;
-    this.eventPos = 0;
-    this.event = null;
-    this.eventBusy = false;
-    this.reviewFrom = 'details';
   }
 
   connectedCallback() {
@@ -70,105 +40,48 @@ class CitationsPage extends BifrostElement {
   }
 
   async load() {
+    this.loadError = '';
     try {
-      [this.ctx, this.media] = await Promise.all([
-        api('/citations/api/context'),
-        api('/citations/api/media'),
-      ]);
+      this.ctx = await api('/citations/api/context');
     } catch (e) {
-      this.error = e.message;
+      this.loadError = e.message;
     }
   }
 
   reset() {
-    this.step = this.mode === 'event' ? 'event' : 'media';
-    this.pick = { media: null, source: null, repository: null, recordType: null, event: null };
-    this.fields = {};
+    this.step = 'describe';
+    this.pick = { media: null, source: null, repository: null };
     this.draft = null;
     this.error = '';
     this.saved = null;
     this.dump = '';
     this.matched = null;
-    this.wizard = false;
   }
 
-  /* ---- event-cite mode ---- */
-  async enterEventMode() {
-    this.mode = 'event';
-    this.reset();
-    if (!this.eventQueue) {
-      this.eventBusy = true;
-      try {
-        const evs = await api('/citations/api/uncited-events');
-        this.eventQueue = shuffle(evs);
-        this.eventPos = 0;
-        await this.loadEvent();
-      } catch (e) {
-        this.error = e.message;
-      } finally {
-        this.eventBusy = false;
-      }
-    }
+  closeModal() {
+    const dlg = this.renderRoot.querySelector('dialog');
+    if (dlg?.open) dlg.close();          // fires @close, which resets the flow
+    else this.reset();
   }
 
-  enterMediaMode() {
-    this.mode = 'media';
-    this.reset();
+  /* The dialog must sit in the browser's top layer (showModal) — rendered
+     inline it would be clipped to the section expander's content box. */
+  updated() {
+    const dlg = this.renderRoot.querySelector('dialog');
+    if (dlg && !dlg.open) dlg.showModal();
   }
 
-  async loadEvent() {
-    const row = this.eventQueue?.[this.eventPos];
-    if (!row) { this.event = null; return; }
-    this.eventBusy = true;
-    this.event = null;
-    try {
-      this.event = await api(`/citations/api/event/${row.handle}`);
-    } catch (e) {
-      this.error = e.message;
-    } finally {
-      this.eventBusy = false;
-    }
-  }
-
-  nextEvent() {
-    if (!this.eventQueue?.length) return;
-    this.eventPos = (this.eventPos + 1) % this.eventQueue.length;
-    this.loadEvent();
-  }
-
-  dropCurrentEvent() {
-    // remove the just-cited event from the queue so counts stay honest
-    if (!this.eventQueue) return;
-    this.eventQueue = this.eventQueue.filter((_, i) => i !== this.eventPos);
-    if (this.eventPos >= this.eventQueue.length) this.eventPos = 0;
-  }
-
-  startCitingEvent(media) {
-    // The event is the subject (its facts feed the composer as event_context);
-    // the dump is for describing the SOURCE, media is an optional attachment.
-    this.pick = { ...this.pick, media: media || null, event: this.event,
-      source: null, repository: null, recordType: null };
-    this.dump = '';
-    this.matched = null;
-    this.draft = null;
-    this.error = '';
-    this.step = 'describe';
-  }
-
-  /* ---- compose / save ---- */
-  async compose() {
+  /* ---- lookup / compose / save ---- */
+  async lookupMedia() {
+    if (this.busy) return;
+    const id = this.mediaId.trim();
+    if (!id) { this.error = 'Enter a Gramps media ID.'; return; }
     this.busy = true;
     this.error = '';
     try {
-      this.draft = await post('/citations/api/compose', {
-        record_type: this.pick.recordType?.key || null,
-        fields: this.fields,
-        media_handle: this.pick.media?.handle || null,
-        source_handle: this.pick.source?.handle || null,
-        event_context: this.pick.event?.context || null,
-      });
-      this.reviewFrom = 'details';
-      this.step = 'review';
+      const m = await api(`/citations/api/media/${encodeURIComponent(id)}`);
+      this.step = 'describe';
+      this.pick = { ...this.pick, media: m };
     } catch (e) {
       this.error = e.message;
     } finally {
@@ -183,14 +96,12 @@ class CitationsPage extends BifrostElement {
       const r = await post('/citations/api/compose-dump', {
         dump: this.dump,
         media_handle: this.pick.media?.handle || null,
-        event_context: this.pick.event?.context || null,
       });
       this.draft = r.draft;
       this.matched = { source: r.matched_source, repository: r.matched_repository };
       this.pick = { ...this.pick,
         source: r.matched_source || null,
         repository: r.matched_repository || null };
-      this.reviewFrom = 'describe';
       this.step = 'review';
     } catch (e) {
       this.error = e.message;
@@ -208,7 +119,6 @@ class CitationsPage extends BifrostElement {
       notes: { first_reference: '', short_reference: '', abstract: '' },
       quality: null,
     };
-    this.reviewFrom = this.step;
     this.step = 'review';
   }
 
@@ -221,9 +131,7 @@ class CitationsPage extends BifrostElement {
         media_handle: this.pick.media?.handle || null,
         repository_handle: this.pick.repository?.handle || null,
         source_handle: this.pick.source?.handle || null,
-        event_handle: this.pick.event?.handle || null,
       });
-      if (this.pick.event) this.dropCurrentEvent();
     } catch (e) {
       this.error = e.message;
     } finally {
@@ -233,274 +141,107 @@ class CitationsPage extends BifrostElement {
 
   /* ---- render ---- */
   render() {
-    if (!this.ctx) return html`<h1>Citations</h1><div class="hint">${this.error || 'Loading…'}</div>`;
-    const first = this.mode === 'event' ? 'event' : 'media';
-    const steps = [first, 'describe', 'details', 'review'];
-    const atStart = this.step === first;
-    return html`
-      <div class="pagehead">
-        <h1>Citations</h1>
-        <div class="tabs">
-          ${steps.map((s, i) => html`<button class="tab ${this.step === s ? 'active' : ''}"
-            ?disabled=${steps.indexOf(this.step) < i}
-            @click=${() => { if (steps.indexOf(this.step) > i) this.step = s; }}>
-            ${i + 1}. ${s}</button>`)}
-        </div>
-        <span class="spacer"></span>
-        ${!atStart ? html`<button @click=${this.reset}>Start over</button>` : nothing}
-      </div>
-      <div class="toolbar">
-        <button class="chip ${this.mode === 'media' ? 'active' : ''}"
-          @click=${this.enterMediaMode}>Cite media</button>
-        <button class="chip ${this.mode === 'event' ? 'active' : ''}"
-          @click=${this.enterEventMode}>Cite uncited events</button>
-      </div>
-      ${this.error ? html`<div class="alert">${this.error}</div>` : nothing}
-      ${{
-        event: () => this.renderEvent(),
-        media: () => this.renderMedia(),
-        describe: () => this.renderDescribe(),
-        details: () => this.renderDetails(),
-        review: () => this.renderReview(),
-      }[this.step]()}
-    `;
-  }
-
-  renderEvent() {
-    if (this.eventBusy && !this.event) return html`<div class="hint">Loading…</div>`;
-    if (!this.eventQueue) return html`<div class="hint">Loading…</div>`;
-    if (!this.eventQueue.length) {
-      return html`<div class="syncpanel"><h2>All events cited</h2>
-        <p class="hint">No events are missing a citation. Nice.</p></div>`;
+    if (this.loadError && !this.ctx) {
+      return html`
+        <p>${statusLine('error', this.loadError)}</p>
+        <nav>${btn('Retry', false, () => this.load())}</nav>`;
     }
-    const e = this.event;
-    const pos = `${this.eventPos + 1} of ${this.eventQueue.length} uncited`;
+    if (!this.ctx) return html`<progress class="circle"></progress>`;
+    const lookingUp = this.busy && !this.pick.media;
     return html`
-      <div class="toolbar">
-        <span class="hint">${pos}</span>
-        <span class="spacer"></span>
-        <button @click=${() => this.nextEvent()}>Skip — next random ↻</button>
-      </div>
-      ${!e ? html`<div class="hint">Loading event…</div>` : html`
-        <div class="syncpanel">
-          <h2>${e.summary || e.type}</h2>
-          <p class="hint">
-            ${e.type}${e.date ? html` · ${e.date}` : nothing}${e.place ? html` · ${e.place}` : nothing}
-            · <a href="${this.ctx.gramps_url || ''}/event/${e.gramps_id}" target="_blank">${e.gramps_id}</a>
-          </p>
-          ${e.participants.length ? html`<p class="hint">People:
-            ${e.participants.map((p, i) => html`${i ? ', ' : ''}${p.name}${p.life}${p.role && p.role !== 'Primary' ? ` (${p.role.toLowerCase()})` : ''}`)}</p>` : nothing}
-          <div class="toolbar">
-            <button class="primary" @click=${() => this.startCitingEvent(null)}>
-              Create citation for this event →</button>
-          </div>
-        </div>
-        ${e.media.length ? html`
-          <p class="hint">…or start from a related media object (it'll be attached to the citation too):</p>
-          <div class="cardlist" style="max-height:40vh">
-            ${e.media.map((m) => html`<div class="card" @click=${() => this.startCitingEvent(m)}>
-              <span class="cid">${m.gramps_id}</span>
-              <span class="name">${m.title}</span>
-              ${m.cited ? html`<span class="badge unlinked">cited</span>` : nothing}
-            </div>`)}
-          </div>` : nothing}`}`;
+      <nav class="wrap">
+        ${field('Gramps media ID', this.mediaId, (e) => (this.mediaId = e.target.value),
+          { mono: true, upper: true, width: 'small', onEnter: () => this.lookupMedia() })}
+        ${btn(lookingUp ? 'Looking up…' : 'Look up', lookingUp, () => this.lookupMedia())}
+        ${lookingUp ? spinner : nothing}
+      </nav>
+      ${!this.pick.media && this.error ? html`<p>${statusLine('error', this.error)}</p>` : nothing}
+      ${this.pick.media ? this.renderModal() : nothing}`;
   }
 
-  renderMedia() {
-    const q = this.mediaQuery.toLowerCase();
-    const rows = this.media
-      .filter((m) => m.origin === this.originFilter)
-      .filter((m) => !q || m.title.toLowerCase().includes(q)
-        || m.gramps_id.toLowerCase().includes(q)).slice(0, 80);
-    const chip = (f, label) => html`<button class="chip ${this.originFilter === f ? 'active' : ''}"
-      @click=${() => (this.originFilter = f)}>${label}</button>`;
+  renderModal() {
+    const m = this.pick.media;
     return html`
-      <div class="toolbar">
-        <input type="search" placeholder="Search media…" .value=${this.mediaQuery}
-          @input=${(e) => (this.mediaQuery = e.target.value)}>
-        ${chip('paperless', 'Paperless')}${chip('immich', 'Immich')}
-        <span class="hint">${rows.length} shown</span>
-      </div>
-      <div class="cardlist" style="max-height:60vh">
-        ${rows.map((m) => html`<div class="card"
-          @click=${() => { this.pick = { ...this.pick, media: m }; this.step = 'describe'; }}>
-          <span class="cid">${m.gramps_id}</span>
-          <span class="name">${m.title}</span>
-          ${m.cited ? html`<span class="badge unlinked">cited</span>` : nothing}
-        </div>`)}
-      </div>`;
-  }
-
-  citingLine() {
-    const ev = this.pick.event, m = this.pick.media;
-    if (!ev && !m) return nothing;
-    return html`<p class="hint">Citing:
-      ${ev ? html`event <strong>${ev.summary || ev.type}</strong>` : nothing}
-      ${ev && m ? ' from ' : nothing}
-      ${m ? html`media <strong>${m.title}</strong>` : (ev ? nothing : '')}</p>`;
-  }
-
-  eventFacts() {
-    const e = this.pick.event;
-    if (!e) return nothing;
-    return html`<div class="eventfacts">
-      ${e.context.split('\n').map((line) => html`<div>${line}</div>`)}
-      <div class="hint">These facts are sent to the composer automatically.</div>
-    </div>`;
+      <dialog class="large" @close=${() => this.reset()}>
+        <nav>
+          <h5 class="max small">${m.title}</h5>
+          <button class="circle transparent" @click=${() => this.closeModal()} aria-label="Close">
+            <i>close</i></button>
+        </nav>
+        <p class="mono small-text">${m.gramps_id}</p>
+        ${this.error ? html`<p>${statusLine('error', this.error)}</p>` : nothing}
+        ${this.saved ? this.renderSaved()
+          : this.step === 'review' ? this.renderReview()
+          : this.renderDescribe()}
+      </dialog>`;
   }
 
   renderDescribe() {
-    const ev = this.pick.event;
     return html`
-      ${this.citingLine()}
-      ${this.eventFacts()}
-      <div class="syncpanel">
-        <h2>Describe the ${ev ? 'source record' : 'record'}</h2>
-        <textarea rows="7" placeholder=${ev
-          ? 'Describe the record that evidences this event: what it is (census, parish register, certificate…), the archive or website, page/entry numbers, the URL you found it at. The event facts above are already included.'
-          : "Dump everything you know: what the record is, who's in it, dates, page/entry numbers, archive references, the URL you found it at…"}
-          .value=${this.dump} @input=${(e) => (this.dump = e.target.value)}></textarea>
-        <div class="toolbar">
-          ${this.ctx.llm ? html`<button class="primary"
-            ?disabled=${this.busy || (!this.dump.trim() && !ev)}
-            @click=${this.composeDump}>${this.busy ? 'Composing…' : 'Compose citation'}</button>` : nothing}
-          <button @click=${() => (this.wizard = !this.wizard)}>
-            ${this.wizard ? 'Hide' : 'Structured wizard'}</button>
-        </div>
-        <p class="hint">Matches an existing source when one fits; drafts a new one when none does.</p>
-      </div>
-      ${this.wizard ? this.renderWizard() : nothing}`;
+      ${field('Enter info about record',
+        this.dump, (e) => (this.dump = e.target.value), { rows: 7 })}
+      <nav>
+        ${this.ctx.llm ? btn(this.busy ? 'Composing…' : 'Compose citation',
+          this.busy || !this.dump.trim(), () => this.composeDump()) : nothing}
+        ${btn('Write manually', this.busy, () => this.manualDraft())}
+        ${this.busy ? spinner : nothing}
+      </nav>`;
   }
 
-  renderWizard() {
-    const q = this.sourceQuery.toLowerCase();
-    const matches = this.ctx.sources.filter((s) =>
-      !q || s.title.toLowerCase().includes(q) || s.abbrev.toLowerCase().includes(q)).slice(0, 30);
+  renderSaved() {
     return html`
-      ${this.citingLine()}
-      <h2>Existing source</h2>
-      <div class="toolbar">
-        <input type="search" placeholder="Search sources…" .value=${this.sourceQuery}
-          @input=${(e) => (this.sourceQuery = e.target.value)}>
-      </div>
-      <div class="cardlist" style="max-height:38vh">
-        ${matches.map((s) => html`<div class="card"
-          @click=${() => { this.pick = { ...this.pick, source: s, recordType: null }; this.step = 'details'; }}>
-          <span class="name">${s.title}</span>
-          <span class="meta">${s.gramps_id}</span>
-        </div>`)}
-      </div>
-      <h2>…or a new source</h2>
-      <div class="toolbar" style="flex-wrap:wrap">
-        ${Object.entries(this.ctx.groups).map(([gk, glabel]) => html`
-          <div style="width:100%"><span class="hint">${glabel}</span></div>
-          ${this.ctx.types.filter((t) => t.group === gk).map((t) => html`
-            <button class="chip" @click=${() => {
-              this.pick = { ...this.pick, source: null, recordType: t };
-              this.step = 'details';
-            }}>${t.label}</button>`)}`)}
-      </div>`;
-  }
-
-  renderDetails() {
-    const t = this.pick.recordType;
-    const src = this.pick.source;
-    if (!t && !src) {
-      // reached with nothing selected (e.g. Back from a dump-composed draft)
-      return html`<p class="hint">Nothing to fill in here — this citation was
-        composed from a description.</p>
-        <div class="toolbar">
-          <button @click=${() => (this.step = 'describe')}>Back to describe</button>
-          ${this.draft ? html`<button class="primary"
-            @click=${() => (this.step = 'review')}>Back to review</button>` : nothing}
-        </div>`;
-    }
-    const fieldRow = (key, label, req, hint) => html`
-      <label class="fieldrow">
-        <span>${label}${req ? ' *' : ''}</span>
-        <input type="text" .value=${this.fields[key] || ''} placeholder=${hint || ''}
-          @input=${(e) => (this.fields = { ...this.fields, [key]: e.target.value })}>
-      </label>`;
-    return html`
-      ${this.citingLine()}
-      <p class="hint">${src ? html`→ ${src.abbrev || src.title}` : html`→ new ${t.label}`}</p>
-      <div class="fieldform">
-        ${src ? html`
-          ${fieldRow('locator', 'Locator within the source (page, entry, dwelling…)', true)}
-          ${fieldRow('person', 'Person(s) / item of interest', true)}
-          ${fieldRow('event_date', 'Date of the record entry', false)}
-          ${fieldRow('extra', 'Anything else relevant', false)}
-        ` : t.fields.map((f) => fieldRow(f.key, f.label, f.req, f.hint))}
-      </div>
-      <div class="toolbar">
-        ${this.ctx.llm
-          ? html`<button class="primary" ?disabled=${this.busy} @click=${this.compose}>
-              ${this.busy ? 'Composing…' : 'Compose citation'}</button>`
-          : nothing}
-        <button @click=${this.manualDraft}>Write manually</button>
-      </div>`;
+      <p>${statusLine('ok', 'Saved to Gramps.')}</p>
+      <table>
+        <tbody>${Object.entries(this.saved).map(([k, v]) => html`<tr><td>${k}</td><td>${v}</td></tr>`)}</tbody>
+      </table>
+      <nav>
+        ${btn('Close', false, () => this.closeModal())}
+      </nav>`;
   }
 
   renderReview() {
-    if (this.saved) {
-      return html`<div class="syncpanel">
-        <h2>Saved</h2>
-        <table class="results">
-          ${Object.entries(this.saved).map(([k, v]) => html`<tr><td>${k}</td><td>${v}</td></tr>`)}
-        </table>
-        <div class="toolbar">
-          ${this.mode === 'event'
-            ? html`<button class="primary" @click=${() => { this.reset(); this.loadEvent(); }}>
-                Next event →</button>`
-            : html`<button class="primary" @click=${this.reset}>New citation</button>`}
-        </div>
-      </div>`;
-    }
     const d = this.draft;
     const m = this.matched;
     const matchedBanner = m && (m.source || m.repository)
-      ? html`<p class="hint">${m.source
+      ? html`<p class="small-text">${m.source
           ? html`Using existing source <strong>${m.source.gramps_id}</strong> — ${m.source.title}`
           : html`New source in existing repository <strong>${m.repository.gramps_id}</strong> — ${m.repository.name}`}</p>`
       : nothing;
-    const bind = (obj, key, multiline = false) => multiline
-      ? html`<textarea rows="4" .value=${obj[key] || ''}
-          @input=${(e) => { obj[key] = e.target.value; }}></textarea>`
-      : html`<input type="text" .value=${String(obj[key] ?? '')}
-          @input=${(e) => { obj[key] = e.target.value; }}>`;
+    const bind = (obj, key, label, multiline = false) =>
+      field(label, obj[key], (e) => { obj[key] = e.target.value; }, multiline ? { rows: 4 } : {});
     return html`
       ${matchedBanner}
-      ${d.quality ? html`<p class="hint">${d.quality.source_type} source ·
+      ${d.quality ? html`<p class="small-text">${d.quality.source_type} source ·
         ${d.quality.information_type.toLowerCase()} information ·
         ${d.quality.evidence_type.toLowerCase()} evidence — ${d.quality.note}</p>` : nothing}
-      <div class="reviewgrid">
-        ${d.repository ? html`<div class="syncpanel"><h2>New repository</h2>
-          <label class="fieldrow"><span>Name</span>${bind(d.repository, 'name')}</label>
-          <label class="fieldrow"><span>Type</span>${bind(d.repository, 'type')}</label>
-          <label class="fieldrow"><span>URL</span>${bind(d.repository, 'url')}</label>
-          <label class="fieldrow"><span>Call number</span>${bind(d, 'call_number')}</label>
+      <div class="grid">
+        ${d.repository ? html`<div class="s12 m6"><h6 class="small">New repository</h6>
+          ${bind(d.repository, 'name', 'Name')}
+          ${bind(d.repository, 'type', 'Type')}
+          ${bind(d.repository, 'url', 'URL')}
+          ${bind(d, 'call_number', 'Call number')}
         </div>` : nothing}
-        ${d.source ? html`<div class="syncpanel"><h2>New source</h2>
-          <label class="fieldrow"><span>Title</span>${bind(d.source, 'title')}</label>
-          <label class="fieldrow"><span>Author</span>${bind(d.source, 'author')}</label>
-          <label class="fieldrow"><span>Pub. info</span>${bind(d.source, 'pubinfo')}</label>
-          <label class="fieldrow"><span>Abbreviation</span>${bind(d.source, 'abbrev')}</label>
+        ${d.source ? html`<div class="s12 m6"><h6 class="small">New source</h6>
+          ${bind(d.source, 'title', 'Title')}
+          ${bind(d.source, 'author', 'Author')}
+          ${bind(d.source, 'pubinfo', 'Pub. info')}
+          ${bind(d.source, 'abbrev', 'Abbreviation')}
         </div>` : nothing}
-        <div class="syncpanel"><h2>Citation</h2>
-          <label class="fieldrow"><span>Page / locator</span>${bind(d.citation, 'page')}</label>
-          <label class="fieldrow"><span>Confidence (0–4)</span>${bind(d.citation, 'confidence')}</label>
+        <div class="s12 m6"><h6 class="small">Citation</h6>
+          ${bind(d.citation, 'page', 'Page / locator')}
+          ${bind(d.citation, 'confidence', 'Confidence (0–4)')}
         </div>
-        <div class="syncpanel"><h2>Notes</h2>
-          <label class="fieldrow"><span>First reference</span>${bind(d.notes, 'first_reference', true)}</label>
-          <label class="fieldrow"><span>Short reference</span>${bind(d.notes, 'short_reference', true)}</label>
-          <label class="fieldrow"><span>Abstract</span>${bind(d.notes, 'abstract', true)}</label>
+        <div class="s12 m6"><h6 class="small">Notes</h6>
+          ${bind(d.notes, 'first_reference', 'First reference', true)}
+          ${bind(d.notes, 'short_reference', 'Short reference', true)}
+          ${bind(d.notes, 'abstract', 'Abstract', true)}
         </div>
       </div>
-      <div class="toolbar">
-        <button class="primary" ?disabled=${this.busy} @click=${this.save}>
-          ${this.busy ? 'Saving…' : 'Save to Gramps'}</button>
-        <button @click=${() => (this.step = this.reviewFrom || 'details')}>Back</button>
-      </div>`;
+      <nav>
+        ${btn(this.busy ? 'Saving…' : 'Save to Gramps', this.busy, () => this.save())}
+        ${btn('Back', this.busy, () => (this.step = 'describe'))}
+        ${this.busy ? spinner : nothing}
+      </nav>`;
   }
 }
 

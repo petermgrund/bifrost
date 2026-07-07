@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 from ...core.clients.anthropic import AnthropicError
@@ -17,9 +18,8 @@ def _state(request: Request):
 
 @router.get("")
 async def citations_page(request: Request):
-    from ..app import templates  # late import to avoid cycle
-
-    return templates.TemplateResponse(request, "citations.html", {})
+    # Bifrost is a single page now — deep-link to the section.
+    return RedirectResponse(url="/#citations")
 
 
 @router.get("/api/context")
@@ -39,6 +39,16 @@ async def get_media(request: Request, uncited: bool = False, refresh: bool = Fal
     if st.caches.get(key) is None or refresh:
         st.caches[key] = await citations.media_listing(st.gramps, uncited_only=uncited)
     return st.caches[key]
+
+
+@router.get("/api/media/{gramps_id}")
+async def get_media_by_id(request: Request, gramps_id: str):
+    st = _state(request)
+    media = await st.gramps.get_media_by_gramps_id(gramps_id.strip().upper())
+    if not media:
+        raise HTTPException(404, f"no Gramps media '{gramps_id}'")
+    return {"handle": media["handle"], "gramps_id": media["gramps_id"],
+            "title": media.get("desc") or media["gramps_id"]}
 
 
 @router.get("/api/uncited-events")
@@ -135,7 +145,4 @@ async def save(request: Request, body: SaveBody):
     for key in list(st.caches):
         if key.startswith("citations_"):
             st.caches.pop(key, None)
-    # the upload wizard caches all events with a cited flag — a save that
-    # attaches a citation to an event makes that flag stale.
-    st.caches.pop("upload_events", None)
     return created

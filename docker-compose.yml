@@ -4,18 +4,18 @@ services:
     container_name: bifrost
     restart: unless-stopped
     ports:
-      # Bound to tailnet + loopback only — never eth0.
-      - "100.89.34.77:8800:8800"
-      - "127.0.0.1:8800:8800"
+      # Bound to all interfaces — private home LAN (eir 192.168.1.69) + tailnet + localhost.
+      - "8800:8800"
     volumes:
       - ./config.yaml:/app/config.yaml:ro
       - ./data:/app/data
-      # House-style master doc — read by the upload wizard for LLM field
-      # autofill. Bind-mounted so edits apply without an image rebuild.
+      # House-style master doc — read by the citation composer (resolves to
+      # /app/house_style_master.md). Bind-mounted so edits apply without a rebuild.
       - ./house_style_master.md:/app/house_style_master.md:ro
-      # Phase 1 shim: write-through person_map.yaml export for the legacy
-      # pipeline (file bind mount; the export truncates in place, preserving
-      # the inode). Remove in Phase 2.
-      - /opt/stacks/immich-to-gramps/person_map.yaml:/legacy/person_map.yaml
       # boundary GeoJSON sidecars (status display on the Places page)
       - /mnt/storage/gramps/static-boundaries:/boundaries:ro
+      # Dev: live-edit the frontend (CSS/JS/HTML) — changes apply on a browser
+      # refresh, no rebuild. The image still bakes these; the mounts override
+      # with the working tree. (Python changes still need `compose build`.)
+      - ./bifrost/web/static:/app/bifrost/web/static
+      - ./bifrost/web/templates:/app/bifrost/web/templates

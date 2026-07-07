@@ -1,22 +1,130 @@
-import { BifrostElement, html } from './core.js';
-import './sync-panels.js';
+/* Transcribe section — three flat stanzas, no cards:
+   • Run OCR: Gramps media id its Paperless doc Gemini OCR in place 
+     Transcription note rewritten on the media (POST /transcribe/api/run).
+   • Resync one note: re-pull the doc's current text into one media's note,
+     no OCR spend (POST /sync/api/paperless/resync-media, apply).
+   • Rewrite all notes: rebuild every Transcription note. */
+import { BifrostElement, html, nothing, api, post, summarize, spinner, btn, field, statusLine } from './core.js';
 
-/* Transcribe = turn document images into text/notes (Gemini OCR), plus the
-   transcription-note maintenance tasks. Distinct from Sync (which moves media
-   into Gramps). All use the /sync/api/* endpoints under the hood. */
 class TranscribePage extends BifrostElement {
+  static properties = {
+    ocrId: { state: true },
+    ocrBusy: { state: true },
+    ocrResult: { state: true },      // {kind, body} | null
+    resyncId: { state: true },
+    resyncBusy: { state: true },
+    resyncResult: { state: true },
+    rewriteBusy: { state: true },
+    rewriteResult: { state: true },
+    config: { state: true },
+  };
+
+  constructor() {
+    super();
+    this.ocrId = '';
+    this.ocrBusy = false;
+    this.ocrResult = null;
+    this.resyncId = '';
+    this.resyncBusy = false;
+    this.resyncResult = null;
+    this.rewriteBusy = false;
+    this.rewriteResult = null;
+    this.config = null;
+  }
+
+  connectedCallback() {
+    super.connectedCallback();
+    this.loadConfig();
+  }
+
+  async loadConfig() {
+    try { this.config = await api('/transcribe/api/config'); } catch { this.config = null; }
+  }
+
+  grampsLink(id) {
+    return this.config?.gramps_public_url
+      ? html`<a class="link" href="${this.config.gramps_public_url}/media/${id}"
+          target="_blank" rel="noopener">open in Gramps</a>` : nothing;
+  }
+
+  async runOcr() {
+    if (this.ocrBusy) return;
+    const media_id = this.ocrId.trim();
+    if (!media_id) { this.ocrResult = { kind: 'error', body: 'Enter a Gramps media ID.' }; return; }
+    this.ocrResult = null; this.ocrBusy = true;
+    try {
+      const r = await post('/transcribe/api/run', { media_id });
+      const ocrC = r.ocr_events.find((e) => e.kind === 'summary')?.data;
+      const txC = r.tx_events.find((e) => e.kind === 'summary')?.data;
+      const errs = (ocrC?.errors || 0) + (txC?.errors || 0);
+      this.ocrResult = { kind: errs ? 'error' : 'ok', body: html`${r.media_id}
+        ${summarize(ocrC, true)}, ${summarize(txC, true)}${this.grampsLink(media_id)}` };
+    } catch (e) {
+      this.ocrResult = { kind: 'error', body: e.message };
+    } finally {
+      this.ocrBusy = false;
+    }
+  }
+
+  async resync() {
+    if (this.resyncBusy) return;
+    const media_id = this.resyncId.trim();
+    if (!media_id) { this.resyncResult = { kind: 'error', body: 'Enter a media ID.' }; return; }
+    this.resyncResult = null; this.resyncBusy = true;
+    try {
+      const r = await post('/sync/api/paperless/resync-media', { media_id, apply: true });
+      const c = r.events.find((e) => e.kind === 'summary')?.data;
+      this.resyncResult = { kind: c?.errors ? 'error' : 'ok',
+        body: `${r.media_id} is saved as #${r.doc_id}, ${summarize(c, true) || 'no change'}` };
+    } catch (e) {
+      this.resyncResult = { kind: 'error', body: e.message };
+    } finally {
+      this.resyncBusy = false;
+    }
+  }
+
+  async resyncAll() {
+    if (this.resyncBusy) return;
+    this.resyncResult = null; this.resyncBusy = true;
+    try {
+      const r = await post('/sync/api/paperless/apply', { transcriptions_only: true, force_transcriptions: true });
+      const c = r.events.find((e) => e.kind === 'summary')?.data;
+      this.resyncResult = { kind: c?.errors ? 'error' : 'ok', body: summarize(c, true) || 'No changes' };
+    } catch (e) {
+      this.resyncResult = { kind: 'error', body: e.message };
+    } finally {
+      this.resyncBusy = false;
+    }
+  }
+
   render() {
     return html`
-      <h1>Transcribe</h1>
-      <sync-panel source="ocr" label="Gemini OCR → Paperless"
-        blurb="Documents you tag are transcribed by Gemini and written into the same Paperless document's text (in place) and tagged for transcription, so the next Gramps sync turns it into a note automatically. Preview is free; Apply calls Gemini."></sync-panel>
+      <h6 class="small">Run OCR on a media object</h6>
+      <nav class="wrap">
+        ${field('Gramps media ID', this.ocrId, (e) => (this.ocrId = e.target.value),
+          { mono: true, upper: true, width: 'small', onEnter: () => this.runOcr() })}
+        ${btn(this.ocrBusy ? 'Transcribing…' : 'Run', this.ocrBusy, () => this.runOcr())}
+        ${this.ocrBusy ? spinner : nothing}
+      </nav>
+      ${this.ocrResult ? html`<p>${statusLine(this.ocrResult.kind, this.ocrResult.body)}</p>` : nothing}
 
-      <h2>Maintenance</h2>
-      <resync-panel></resync-panel>
-      <sync-panel source="paperless" label="Rewrite all transcription notes" maintenance
-        blurb="Re-writes every transcription note from current Paperless content, ignoring change hashes."
-        .body=${{ transcriptions_only: true, force_transcriptions: true }}></sync-panel>
-    `;
+      <div class="large-space"></div>
+      <h6 class="small">Resync a single note</h6>
+      <nav class="wrap">
+        ${field('Gramps media ID', this.resyncId, (e) => (this.resyncId = e.target.value),
+          { mono: true, upper: true, width: 'small', onEnter: () => this.resync() })}
+        ${btn(this.resyncBusy ? 'Resyncing…' : 'Resync', this.resyncBusy, () => this.resync())}
+        ${this.resyncBusy ? spinner : nothing}
+        ${this.resyncResult ? statusLine(this.resyncResult.kind, this.resyncResult.body) : nothing}
+      </nav>
+
+      <div class="large-space"></div>
+      <h6 class="small">Resync all notes</h6>
+      <nav class="wrap">
+        ${btn(this.resyncBusy ? 'Resyncing…' : 'Resync all notes', this.resyncBusy, () => this.resyncAll())}
+        ${this.resyncBusy ? spinner : nothing}
+        ${this.resyncResult ? statusLine(this.resyncResult.kind, this.resyncResult.body) : nothing}
+      </nav>`;
   }
 }
 customElements.define('transcribe-page', TranscribePage);

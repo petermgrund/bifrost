@@ -1,21 +1,4 @@
-"""Paperless → Gramps sync (port of paperless_to_gramps.py — the archive
-backbone; the first sync ever built, ported with corresponding care).
-
-Four phases, in the legacy order, as one async generator:
-1. Media sync — tagged docs become Gramps Media; gramps_id + gramps_url are
-   written back to Paperless custom fields (the idempotency keys live in
-   Paperless, exactly as before).
-2. Version sync — original_checksum changes update path/mime and, for
-   img-tagged docs, clear face rects on every backlinked object.
-3. Date/title sync — Media.desc follows the Paperless title (unless the
-   media carries the skip-title-sync Gramps tag); Media.date follows the
-   per-doc Date-qualifier custom field (the qualifier IS the opt-in).
-4. Transcriptions — OCR content becomes a Transcription Note (plus a
-   Translation Note when the delimiter is present), tracked by content hash.
-
-State: doc_versions and transcription_state tables (imported from
-versions.json / transcriptions.json, which stay frozen). Preview is the same
-generator with apply=False.
+"""Paperless to Gramps sync
 """
 
 from __future__ import annotations
@@ -30,8 +13,8 @@ from typing import AsyncIterator
 from ..core.clients import GrampsClient, PaperlessClient
 from ..core.config import SyncPaperlessConfig
 from ..core.events import SyncEvent
+from ..core.ids import generate_gramps_id, generate_handle
 from .citations import next_sequential_id
-from .sync_immich import generate_gramps_id, generate_handle, validate_manual_ids
 
 log = logging.getLogger("bifrost.sync.paperless")
 
@@ -62,7 +45,7 @@ BACKLINK_OBJ_TYPES = {
 
 
 # ---------------------------------------------------------------------------
-# Pure helpers (ported verbatim from the legacy script)
+# Pure helpers 
 # ---------------------------------------------------------------------------
 
 def build_gramps_date_from_paperless(doc: dict, qualifier_label: str | None) -> dict | None:
@@ -218,7 +201,7 @@ def _set_tx(conn: sqlite3.Connection, doc_id: int, **fields) -> None:
 
 
 # ---------------------------------------------------------------------------
-# The sync generator — four phases in legacy order
+# The sync generator
 # ---------------------------------------------------------------------------
 
 def _doc_gramps_id(doc: dict, field_id: int) -> str | None:
@@ -254,26 +237,18 @@ async def sync(
     force_transcriptions: bool = False,
     transcriptions_only: bool = False,
     single_doc_id: int | None = None,
-    manual_ids: dict[str, str] | None = None,
     versions_only: bool = False,
 ) -> AsyncIterator[SyncEvent]:
     # versions_only: run ONLY phase 2 (repoint media to the selected Paperless
-    # version). No create / title / date / transcription work — safe for an
-    # unattended scheduled run.
+    # version). No create / title / date / transcription work
     counts = {"created": 0, "skipped": 0, "versions_updated": 0, "baselined": 0,
               "titles_updated": 0, "dates_updated": 0,
               "tx_created": 0, "tx_updated": 0, "tx_skipped": 0, "errors": 0}
 
     existing_ids = await gramps.list_media_gramps_ids()
-    # Manual ids: validate against what's really in Gramps; keep the auto
-    # generator clear of reserved ids and the chosen manual ids (keyed by doc id).
-    from . import idgen  # lazy: idgen imports generate_gramps_id from sync_immich
-    valid_manual, rejected_manual = validate_manual_ids(manual_ids, set(existing_ids))
-    existing_ids |= idgen.unminted_reserved(conn)
-    existing_ids |= set(valid_manual.values())
 
     # Resolve the date-qualifier select options up front: phase 3 needs them,
-    # and phase 1 uses them to show prospective dates on create previews.
+    # and phase 1 uses them to show prospective dates on create previews
     q_options: dict[str, str] = {}
     m_options: dict[str, str] = {}
     q_field = cfg.date_qualifier_field_id
@@ -287,7 +262,7 @@ async def sync(
     if m_field and not transcriptions_only:
         try:
             m_options = await paperless.resolve_custom_field_options(m_field)
-        except Exception:  # noqa: BLE001 — meaning is log-context only
+        except Exception:  # noqa: BLE001
             m_field = None
 
     def _prospective_cols(doc: dict) -> dict:
@@ -322,25 +297,18 @@ async def sync(
             return
         documents = await paperless.list_documents_by_tags(list(tag_map.values()))
         # single_doc_id scopes phase 1 (media create) too, not just the
-        # transcription phase below — the upload wizard mints one doc at a time.
+        # transcription phase below — callers may sync one document at a time.
         if single_doc_id is not None:
             documents = [d for d in documents if d["id"] == single_doc_id]
         yield SyncEvent(kind="started",
                         detail=f"{len(documents)} tagged document(s) in Paperless")
 
-    # ============ Phase 1: media sync (manual-id docs first) ============
-    documents.sort(key=lambda d: 0 if str(d["id"]) in valid_manual else 1)
+    # ============ Phase 1: media sync ============
     for doc in (documents if not versions_only else []):
         doc_id = doc["id"]
         title = doc.get("title", f"Untitled (Paperless #{doc_id})")
         if _doc_gramps_id(doc, cfg.gramps_id_field_id):
             counts["skipped"] += 1
-            continue
-        if str(doc_id) in rejected_manual:
-            counts["errors"] += 1
-            yield SyncEvent(kind="item", entity="doc", action="failed",
-                            source_id=str(doc_id), title=title,
-                            detail=rejected_manual[str(doc_id)])
             continue
 
         try:
@@ -354,15 +322,15 @@ async def sync(
         gramps_path = f"paperless/{metadata['media_filename']}"
 
         if not apply:
-            # Nothing is minted or reserved in preview — ids exist only once
-            # the media is really created.
+            # Nothing is minted in preview — ids exist only once the media
+            # is really created.
             counts["created"] += 1
             yield SyncEvent(kind="item", entity="doc", action="would_create",
                             source_id=str(doc_id), title=title,
                             data={"path": gramps_path, "cols": _prospective_cols(doc)})
             continue
 
-        gramps_id = valid_manual.get(str(doc_id)) or generate_gramps_id(existing_ids)
+        gramps_id = generate_gramps_id(existing_ids)
         handle = generate_handle()
         media_obj = {
             "_class": "Media",
@@ -416,7 +384,6 @@ async def sync(
                         f"duplicate this doc. Fix the custom field manually. ({exc})"),
             )
 
-        idgen.mark_minted(conn, gramps_id)  # no-op unless it was a reserved id
         with conn:
             conn.execute(
                 "INSERT OR REPLACE INTO minted_media"

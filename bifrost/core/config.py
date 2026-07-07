@@ -27,26 +27,9 @@ class GrampsConfig:
 
 
 @dataclass(frozen=True)
-class ImmichConfig:
-    base_url: str
-    api_key: str
-
-
-@dataclass(frozen=True)
 class PaperlessConfig:
     base_url: str
     api_token: str
-
-
-@dataclass(frozen=True)
-class SyncImmichConfig:
-    sync_tags: tuple[str, ...] = ("Sync/Gramps",)
-    public_url: str = ""
-    # Each mapping: when an Immich originalPath starts with immich_prefix,
-    # strip it and prepend gramps_prefix (a mount under /app/media in Gramps).
-    path_mappings: tuple[dict, ...] = ()
-    # Gramps tag handle marking places eligible for GPS-based linking.
-    place_tag_handle: str = ""
 
 
 @dataclass(frozen=True)
@@ -60,17 +43,10 @@ class SyncPaperlessConfig:
     gramps_url_field_id: int = 0
     date_qualifier_field_id: int | None = None
     date_meaning_field_id: int | None = None
-    # Custom field ids used by the upload wizard's metadata form.
-    family_group_field_id: int | None = None
-    source_url_field_id: int | None = None
-    source_url_access_field_id: int | None = None
     # Paperless tag id marking documents with a transcription to sync.
     transcription_tag_id: int | None = None
     # Paperless tag NAME marking documents to (re-)OCR with Gemini in place.
     ocr_tag: str = ""
-    # House-style master doc; the upload wizard feeds its Paperless section to
-    # the LLM for field autofill. Path as seen inside the container.
-    house_style_path: str = "/app/house_style_master.md"
 
 
 @dataclass(frozen=True)
@@ -97,22 +73,11 @@ class GeminiConfig:
 
 
 @dataclass(frozen=True)
-class FacesConfig:
-    # Write-through export of person links in the legacy person_map.yaml
-    # format, kept until Phase 2 retires immich_to_gramps.py --link-faces
-    # (which reads it). None disables the export.
-    person_map_export: Path | None = None
-
-
-@dataclass(frozen=True)
 class Config:
     gramps: GrampsConfig
-    immich: ImmichConfig
     paperless: PaperlessConfig
     db_path: Path
     config_path: Path
-    faces: FacesConfig = FacesConfig()
-    sync_immich: SyncImmichConfig = SyncImmichConfig()
     sync_paperless: SyncPaperlessConfig = SyncPaperlessConfig()
     anthropic: AnthropicConfig = AnthropicConfig()
     gemini: GeminiConfig = GeminiConfig()
@@ -140,15 +105,6 @@ def load_config(path: str | Path | None = None) -> Config:
     db = Path(raw.get("database") or "data/bifrost.db")
     if not db.is_absolute():
         db = cfg_path.parent / db
-    faces_raw = raw.get("faces") or {}
-    export = faces_raw.get("person_map_export")
-    si_raw = (raw.get("sync") or {}).get("immich") or {}
-    sync_immich = SyncImmichConfig(
-        sync_tags=tuple(si_raw.get("sync_tags") or ("Sync/Gramps",)),
-        public_url=(si_raw.get("public_url") or "").rstrip("/"),
-        path_mappings=tuple(si_raw.get("path_mappings") or ()),
-        place_tag_handle=si_raw.get("place_tag_handle") or "",
-    )
     sp_raw = (raw.get("sync") or {}).get("paperless") or {}
     sync_paperless = SyncPaperlessConfig(
         sync_tags=tuple(sp_raw.get("sync_tags") or ("doc", "img")),
@@ -158,22 +114,15 @@ def load_config(path: str | Path | None = None) -> Config:
         gramps_url_field_id=int(sp_raw.get("gramps_url_field_id") or 0),
         date_qualifier_field_id=sp_raw.get("date_qualifier_field_id"),
         date_meaning_field_id=sp_raw.get("date_meaning_field_id"),
-        family_group_field_id=sp_raw.get("family_group_field_id"),
-        source_url_field_id=sp_raw.get("source_url_field_id"),
-        source_url_access_field_id=sp_raw.get("source_url_access_field_id"),
         transcription_tag_id=sp_raw.get("transcription_tag_id"),
         ocr_tag=sp_raw.get("ocr_tag") or "",
-        house_style_path=sp_raw.get("house_style_path") or "/app/house_style_master.md",
     )
     gem_raw = raw.get("gemini") or {}
     return Config(
         gramps=GrampsConfig(**section("gramps", ["base_url", "username", "password"])),
-        immich=ImmichConfig(**section("immich", ["base_url", "api_key"])),
         paperless=PaperlessConfig(**section("paperless", ["base_url", "api_token"])),
         db_path=db,
         config_path=cfg_path,
-        faces=FacesConfig(person_map_export=Path(export) if export else None),
-        sync_immich=sync_immich,
         sync_paperless=sync_paperless,
         anthropic=AnthropicConfig(
             api_key=(raw.get("anthropic") or {}).get("api_key") or "",

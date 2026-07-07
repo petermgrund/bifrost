@@ -1,19 +1,8 @@
-/* Bifrost brand layer over BeerCSS — fonts, palette, and a handful of app
-   utilities. Everything structural comes from vendor/beer.min.css; keep this
-   file small. */
+/* Bifrost brand layer over BeerCSS — palette + a monospace face for codes.
+   The UI text font is BeerCSS's own --font stack (Inter/Roboto/system sans);
+   we do NOT override it. Structure/spacing/tables/expansions are all BeerCSS
+   via its elements + helpers (docs: github.com/beercss/beercss/tree/main/docs). */
 
-@font-face {
-  font-family: "Space Grotesk";
-  font-weight: 600;
-  font-display: swap;
-  src: url("/static/vendor/fonts/space-grotesk-600.woff2") format("woff2");
-}
-@font-face {
-  font-family: "Space Grotesk";
-  font-weight: 700;
-  font-display: swap;
-  src: url("/static/vendor/fonts/space-grotesk-700.woff2") format("woff2");
-}
 @font-face {
   font-family: "Space Mono";
   font-weight: 400;
@@ -27,8 +16,18 @@
   src: url("/static/vendor/fonts/space-mono-700.woff2") format("woff2");
 }
 
-/* Brand palette (from the retired token sheet), applied to BeerCSS's vars.
-   Light mode only — dark stays off until it's designed on purpose. */
+/* Reserve the scrollbar gutter so expanding a section (page grows a
+   scrollbar) doesn't change the page width. */
+html { scrollbar-gutter: stable; }
+
+/* Open sections plainly — no BeerCSS fade/float-down on the content. */
+details::details-content {
+  transition: none;
+  opacity: 1;
+  transform: none;
+}
+
+/* Brand palette applied to BeerCSS's theme vars. Light mode only. */
 :root,
 body.light {
   --primary: #4a5bae;
@@ -40,46 +39,19 @@ body.light {
   --tertiary-container: #ffdbcd;
   --on-tertiary-container: #380d00;
   --error: #ba1a1a;
-  --surface: #fbf8f6;
-  --on-surface: #1c1b19;
-  --outline: #7c766e;
-  /* extension roles (not in BeerCSS): applied/created + pending */
-  --success: #3a6a47;
-  --warning: #b07a00;
 }
 
-h1, h2, h3, h4, h5, h6, nav.left a div, .tabs > a {
-  font-family: "Space Grotesk", var(--font), sans-serif;
-}
-code, .mono, .idchip {
-  font-family: "Space Mono", ui-monospace, monospace;
-}
+/* Monospace only for codes/ids. */
+code, .mono { font-family: "Space Mono", ui-monospace, monospace; }
 
-/* Status icon + action colours (used by tables and run lists). */
-.icon.yes { color: var(--success); }
-.icon.no { color: var(--error); }
-.icon.pend, .icon.na { color: var(--outline); }
-.icon.half { color: var(--warning); }
-.action-created { color: var(--success); }
-.action-assigned { color: var(--warning); }
-.action-failed { color: var(--error); }
-
-/* Muted helper text. */
-.hint { color: var(--outline); font-size: 0.8125rem; line-height: 1.35rem; }
-
-/* Sync-preview action pills. */
-.pill { border-radius: 1rem; padding: 0.1rem 0.6rem; font-size: 0.75rem; font-weight: 600; }
-.pill--create { background: #dcefe0; color: var(--success); }
-.pill--update { background: var(--primary-container); color: var(--on-primary-container); }
-.pill--skip { background: var(--surface-container-high, #eee9e4); color: var(--outline); }
-.pill--error { background: #ffdad6; color: var(--error); }
-
-/* Big copyable id chips on the IDs page. */
-.idchip { font-size: 1.05rem; letter-spacing: 0.08em; }
-
-/* Manual-id inline inputs inside preview tables. */
-input.idinput { width: 7.5rem; text-transform: uppercase; }
-input.idinput.invalid { color: var(--error); }
-
-/* Rail brand mark. */
-nav.left > header { padding-block: 0.75rem; }
+/* Section expanders (Gramps-Web-style): a custom summary row needs a pointer +
+   a chevron that turns when open, and the body indents to align under the
+   title — the only glue BeerCSS doesn't ship. Ditto clickable picker rows and
+   a scroll CAP (BeerCSS's *-height helpers are fixed sizes, not caps). */
+.list li.wave { cursor: pointer; }
+.scroll.capped { max-block-size: 60vh; }
+summary.none { cursor: pointer; }
+summary.none i.chev { transition: transform 0.15s; }
+summary.none :is(h5, h6) { margin: 0; }
+details[open] > summary.none i.chev { transform: rotate(90deg); }
+.section-body { padding: 1rem 0 2rem 2.5rem; }

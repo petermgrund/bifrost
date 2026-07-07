@@ -15,25 +15,14 @@
   {% block head %}{% endblock %}
 </head>
 <body class="light">
-  {% set p = request.url.path %}
-  <nav class="left">
-    <header>
-      <a href="/" title="Bifrost">
-        <svg width="30" height="22" viewBox="0 0 30 22" aria-hidden="true"><path d="M3 20 A12 12 0 0 1 27 20" fill="none" stroke="var(--tertiary)" stroke-width="2.6" stroke-linecap="round"/><path d="M7 20 A8 8 0 0 1 23 20" fill="none" stroke="var(--warning)" stroke-width="2.6" stroke-linecap="round"/><path d="M11 20 A4 4 0 0 1 19 20" fill="none" stroke="var(--primary)" stroke-width="2.6" stroke-linecap="round"/></svg>
-      </a>
-    </header>
-    <a class="{{ 'active' if p == '/' else '' }}" href="/"><i>home</i><div>Home</div></a>
-    <a class="{{ 'active' if p.startswith('/transcribe') else '' }}" href="/transcribe"><i>edit_note</i><div>Transcribe</div></a>
-    <a class="{{ 'active' if p.startswith('/sync') else '' }}" href="/sync/paperless"><i>description</i><div>Paperless</div></a>
-    <a class="{{ 'active' if p.startswith('/citations') else '' }}" href="/citations"><i>format_quote</i><div>Citations</div></a>
-    <a class="{{ 'active' if p.startswith('/places') else '' }}" href="/places"><i>map</i><div>Places</div></a>
-    <a class="{{ 'active' if p.startswith('/idgen') else '' }}" href="/idgen"><i>tag</i><div>IDs</div></a>
-  </nav>
-
   <main class="responsive">
+    <nav>
+      <svg width="30" height="22" viewBox="0 0 30 22" aria-hidden="true"><path d="M3 20 A12 12 0 0 1 27 20" fill="none" stroke="var(--tertiary)" stroke-width="2.6" stroke-linecap="round"/><path d="M7 20 A8 8 0 0 1 23 20" fill="none" stroke="var(--warning, #b07a00)" stroke-width="2.6" stroke-linecap="round"/><path d="M11 20 A4 4 0 0 1 19 20" fill="none" stroke="var(--primary)" stroke-width="2.6" stroke-linecap="round"/></svg>
+      <h5 class="max">Bifrost</h5>
+    </nav>
+    <div class="space"></div>
     {% block content %}{% endblock %}
   </main>
-
   {% block scripts %}{% endblock %}
 </body>
 </html>

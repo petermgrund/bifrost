@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 from ...core.clients.anthropic import AnthropicError
@@ -17,9 +18,8 @@ def _state(request: Request):
 
 @router.get("")
 async def citations_page(request: Request):
-    from ..app import templates  # late import to avoid cycle
-
-    return templates.TemplateResponse(request, "citations.html", {})
+    # Bifrost is a single page now — deep-link to the section.
+    return RedirectResponse(url="/#citations")
 
 
 @router.get("/api/context")

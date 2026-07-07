@@ -19,15 +19,13 @@ def _state(request: Request):
 
 @router.get("")
 async def sync_page(request: Request):
-    # Sync is now split into one page per source — land on Paperless.
-    return RedirectResponse(url="/sync/paperless")
+    # Bifrost is a single page now — deep-link to the section.
+    return RedirectResponse(url="/#sync")
 
 
 @router.get("/paperless")
 async def paperless_page(request: Request):
-    from ..app import templates  # late import to avoid cycle
-
-    return templates.TemplateResponse(request, "paperless.html", {})
+    return RedirectResponse(url="/#sync")
 
 
 @router.get("/api/paperless/config")
@@ -47,8 +45,6 @@ class PaperlessBody(BaseModel):
     force_transcriptions: bool = False
     transcriptions_only: bool = False
     versions_only: bool = False
-    # Manual gramps-id assignments for NEW docs: {paperless_doc_id: chosen_id}.
-    manual_ids: dict[str, str] = {}
 
 
 def _paperless_job(body: PaperlessBody, preview: bool) -> str:
@@ -80,7 +76,7 @@ async def paperless_apply(request: Request, body: PaperlessBody):
     gen = sync_paperless.sync(
         st.paperless, st.gramps, st.conn, st.cfg.sync_paperless,
         apply=True, force_transcriptions=body.force_transcriptions,
-        transcriptions_only=body.transcriptions_only, manual_ids=body.manual_ids,
+        transcriptions_only=body.transcriptions_only,
         versions_only=body.versions_only,
     )
     run_id, events = await record_run(st.conn, _paperless_job(body, False), gen)

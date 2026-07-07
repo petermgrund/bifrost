@@ -30,7 +30,7 @@ from typing import AsyncIterator
 from ..core.clients import GrampsClient, PaperlessClient
 from ..core.config import SyncPaperlessConfig
 from ..core.events import SyncEvent
-from ..core.ids import generate_gramps_id, generate_handle, validate_manual_ids
+from ..core.ids import generate_gramps_id, generate_handle
 from .citations import next_sequential_id
 
 log = logging.getLogger("bifrost.sync.paperless")
@@ -254,7 +254,6 @@ async def sync(
     force_transcriptions: bool = False,
     transcriptions_only: bool = False,
     single_doc_id: int | None = None,
-    manual_ids: dict[str, str] | None = None,
     versions_only: bool = False,
 ) -> AsyncIterator[SyncEvent]:
     # versions_only: run ONLY phase 2 (repoint media to the selected Paperless
@@ -265,12 +264,6 @@ async def sync(
               "tx_created": 0, "tx_updated": 0, "tx_skipped": 0, "errors": 0}
 
     existing_ids = await gramps.list_media_gramps_ids()
-    # Manual ids: validate against what's really in Gramps; keep the auto
-    # generator clear of reserved ids and the chosen manual ids (keyed by doc id).
-    from . import idgen  # lazy import to avoid a module cycle
-    valid_manual, rejected_manual = validate_manual_ids(manual_ids, set(existing_ids))
-    existing_ids |= idgen.unminted_reserved(conn)
-    existing_ids |= set(valid_manual.values())
 
     # Resolve the date-qualifier select options up front: phase 3 needs them,
     # and phase 1 uses them to show prospective dates on create previews.
@@ -328,19 +321,12 @@ async def sync(
         yield SyncEvent(kind="started",
                         detail=f"{len(documents)} tagged document(s) in Paperless")
 
-    # ============ Phase 1: media sync (manual-id docs first) ============
-    documents.sort(key=lambda d: 0 if str(d["id"]) in valid_manual else 1)
+    # ============ Phase 1: media sync ============
     for doc in (documents if not versions_only else []):
         doc_id = doc["id"]
         title = doc.get("title", f"Untitled (Paperless #{doc_id})")
         if _doc_gramps_id(doc, cfg.gramps_id_field_id):
             counts["skipped"] += 1
-            continue
-        if str(doc_id) in rejected_manual:
-            counts["errors"] += 1
-            yield SyncEvent(kind="item", entity="doc", action="failed",
-                            source_id=str(doc_id), title=title,
-                            detail=rejected_manual[str(doc_id)])
             continue
 
         try:
@@ -354,15 +340,15 @@ async def sync(
         gramps_path = f"paperless/{metadata['media_filename']}"
 
         if not apply:
-            # Nothing is minted or reserved in preview — ids exist only once
-            # the media is really created.
+            # Nothing is minted in preview — ids exist only once the media
+            # is really created.
             counts["created"] += 1
             yield SyncEvent(kind="item", entity="doc", action="would_create",
                             source_id=str(doc_id), title=title,
                             data={"path": gramps_path, "cols": _prospective_cols(doc)})
             continue
 
-        gramps_id = valid_manual.get(str(doc_id)) or generate_gramps_id(existing_ids)
+        gramps_id = generate_gramps_id(existing_ids)
         handle = generate_handle()
         media_obj = {
             "_class": "Media",
@@ -416,7 +402,6 @@ async def sync(
                         f"duplicate this doc. Fix the custom field manually. ({exc})"),
             )
 
-        idgen.mark_minted(conn, gramps_id)  # no-op unless it was a reserved id
         with conn:
             conn.execute(
                 "INSERT OR REPLACE INTO minted_media"

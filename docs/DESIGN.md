@@ -9,9 +9,15 @@
 > stack versioning) has been **removed** — archival photos move to
 > ArchivesSpace (`archive-scheme/SCHEME.md`), whose source module will take
 > that slot. The UI now runs on vendored **BeerCSS** (the Material-web bundle
-> and the multi-file token/kit CSS are gone). Surfaces: Home · Transcribe ·
-> Paperless sync · Citations · Places · IDs (media ids + the a-series scan
-> register). Read the rest as history where it conflicts.
+> and the multi-file token/kit CSS are gone). Read the rest as history where
+> it conflicts.
+>
+> **2026-07-06 update:** the ID feature (the IDs tab: reserved-id ledger,
+> manual-id assignment on the Sync preview, and the a-series scan register)
+> has been **removed** — media ids are simply auto-minted by the sync, and
+> the scan register lives with `archive-scheme/SCHEME.md`. The `reserved_ids`
+> and `scan_register` tables stay dormant. Surfaces: Sync · Transcribe ·
+> Citations · Places, as sections of one page.
 
 ## 1. What and why
 

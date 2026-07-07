@@ -15,7 +15,6 @@ from ..core import db
 from ..core.clients import GeminiClient, GrampsClient, PaperlessClient
 from ..core.clients.anthropic import AnthropicClient
 from ..core.config import load_config
-from ..modules import inbox as inbox_mod
 
 WEB_DIR = Path(__file__).parent
 templates = Jinja2Templates(directory=WEB_DIR / "templates")
@@ -67,13 +66,11 @@ async def _no_cache(request: Request, call_next):
 app.mount("/static", _NoCacheStatic(directory=WEB_DIR / "static"), name="static")
 
 from .routes.citations import router as citations_router  # noqa: E402
-from .routes.idgen import router as idgen_router  # noqa: E402
 from .routes.places import router as places_router  # noqa: E402
 from .routes.sync import router as sync_router  # noqa: E402
 from .routes.transcribe import router as transcribe_router  # noqa: E402
 
 app.include_router(citations_router)
-app.include_router(idgen_router)
 app.include_router(places_router)
 app.include_router(sync_router)
 app.include_router(transcribe_router)
@@ -82,31 +79,6 @@ app.include_router(transcribe_router)
 @app.get("/healthz")
 async def healthz() -> dict:
     return {"status": "ok", "version": __version__}
-
-
-@app.get("/api/runs")
-async def recent_runs(request: Request, limit: int = 10):
-    rows = request.app.state.conn.execute(
-        "SELECT id, job, status, started_at, finished_at, summary"
-        " FROM runs ORDER BY id DESC LIMIT ?",
-        (min(limit, 50),),
-    ).fetchall()
-    return [dict(r) for r in rows]
-
-
-@app.get("/api/inbox")
-async def inbox(request: Request, refresh: bool = False):
-    """One tolerant call for the home page: pending work, snapshot, recent runs."""
-    st = request.app.state
-    if st.caches.get("inbox") is None or refresh:
-        st.caches["inbox"] = await inbox_mod.gather(
-            st.gramps, st.paperless, st.conn, st.cfg)
-    data = dict(st.caches["inbox"])
-    rows = st.conn.execute(
-        "SELECT id, job, status, started_at, summary FROM runs ORDER BY id DESC LIMIT 8"
-    ).fetchall()
-    data["runs"] = [dict(r) for r in rows]
-    return data
 
 
 @app.get("/", response_class=HTMLResponse)

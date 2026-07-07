@@ -1,9 +1,46 @@
-/* Shared Lit base + helpers for Bifrost pages. UI controls are BeerCSS
-   (vendored in static/vendor/) — plain elements + classes, no web-component
-   framework beyond Lit itself. */
-import { LitElement, html, css, nothing } from 'lit';
+/* Shared Lit base + the Bifrost UI kit. Controls are BeerCSS (vendored in
+   static/vendor/) — plain elements + classes, no web-component framework
+   beyond Lit itself (docs: github.com/beercss/beercss/tree/main/docs).
 
-export { html, css, nothing };
+   Bifrost is ONE page — a stack of <details> section expanders
+   (bifrost-app.js) in the Gramps-Web settings style. Each section is a
+   switchboard panel between Gramps Web and one outside service (Paperless,
+   Gemini, OSM…), and every panel is built from the same materials so the
+   same idea always looks the same:
+
+   STANZA   h6.small heading (wrapped in a <nav> with right-aligned
+            small-text meta when there's a count) → one-line <p> intro →
+            one <nav class="wrap"> control row (field → chip → btn →
+            statusLine) → data. NO <article> cards — the expander is the
+            only container.
+   INPUTS   field() is the only text input, including inside table cells —
+            never bespoke input markup. Widths via opts.width tokens
+            (small/medium/large → the BeerCSS *-width helpers); id inputs
+            via opts {mono, upper}.
+   BUSY     a running job disables its button, swaps the label to a gerund
+            ('Applying…'), and appends `spinner` in the same row; a
+            standalone wait renders statusLine('busy', …). Every submit has
+            a busy guard — no double fires.
+   RESULTS  every outcome renders through statusLine(): green check for
+            done, red cross for failure, plain secondary text for notices —
+            never bare text, never an icon-font glyph. Run counters become
+            prose via summarize().
+   TABLES   plain <table>, sentence-case headers, emptyRow() when nothing
+            matches. Ids in .mono. Row actions are button.small with a
+            gerund label while busy.
+   FILTERS  chips carry their counts ('Create 12'); add an 'N shown' count
+            only when a search field narrows further.
+   LINKS    inline mentions are a.link (target=_blank rel=noopener); the one
+            primary action after a run may be an <a class="button">.
+   SPACING  BeerCSS helpers only (space, large-space, scroll [+ .capped],
+            left-padding) — no inline styles beyond the bifrost.css glue.
+   BUTTONS  all through btn() — one uniform filled style, no color/variant
+            mixing; order conveys emphasis. Colors via text helpers
+            (green-text, error-text, secondary-text). The text font is
+            BeerCSS's --font (never override); mono only for ids/codes. */
+import { LitElement, html, nothing } from 'lit';
+
+export { html, nothing };
 
 export async function api(path, opts = {}) {
   const resp = await fetch(path, {
@@ -18,38 +55,45 @@ export const post = (path, body) =>
   api(path, { method: 'POST', body: JSON.stringify(body || {}) });
 
 /* ---- BeerCSS control helpers ----
-   btn keeps the old (variant, label, disabled, onClick) shape the pages
-   already use: filled = default BeerCSS button, outlined = .border,
-   text = .transparent. */
-export function btn(variant, label, disabled, onClick) {
-  const cls = variant === 'filled' ? '' : variant === 'text' ? 'transparent primary-text' : 'border';
-  return html`<button class="${cls}" ?disabled=${disabled} @click=${onClick}>${label}</button>`;
+   btn: the ONE button style app-wide — the default filled BeerCSS button.
+   Emphasis comes from position (primary action first), never from color. */
+export function btn(label, disabled, onClick) {
+  return html`<button ?disabled=${disabled} @click=${onClick}>${label}</button>`;
 }
 export const spinner = html`<progress class="circle small"></progress>`;
 
 export const chip = (label, on, onClick) =>
   html`<button class="chip ${on ? 'fill' : ''}" @click=${onClick}>${label}</button>`;
 
-export const switchEl = (on, onChange) =>
-  html`<label class="switch"><input type="checkbox" ?checked=${on}
-    @change=${(e) => onChange(e.target.checked)}><span></span></label>`;
+const WIDTH = { small: 'small-width', medium: 'medium-width', large: 'large-width' };
 
-/* Text field: BeerCSS .field.label.border wrapping an input (or textarea when
-   opts.rows is set). Label floats; opts: {type, rows, mono, style, onEnter}. */
+/* Text field: BeerCSS .field.label.fill (the filled look, per the Gramps Web
+   style guide) wrapping an input (or textarea when opts.rows is set). Label
+   floats; opts: {type, rows, mono, upper, width: small|medium|large, small,
+   onEnter, onChange}. */
 export function field(label, value, onInput, opts = {}) {
+  const oninput = (e) => {
+    if (opts.upper) {
+      const el = e.target;
+      const up = el.value.toUpperCase();
+      if (up !== el.value) {
+        const [s, end] = [el.selectionStart, el.selectionEnd];
+        el.value = up;
+        el.setSelectionRange(s, end);
+      }
+    }
+    onInput(e);
+  };
   const input = opts.rows
-    ? html`<textarea rows=${opts.rows} .value=${value ?? ''} @input=${onInput}></textarea>`
+    ? html`<textarea rows=${opts.rows} .value=${value ?? ''} @input=${oninput}></textarea>`
     : html`<input type=${opts.type || 'text'} class="${opts.mono ? 'mono' : ''}"
-        .value=${value ?? ''} @input=${onInput}
+        .value=${value ?? ''} @input=${oninput}
+        @change=${(e) => { if (opts.onChange) opts.onChange(e); }}
         @keydown=${(e) => { if (e.key === 'Enter' && opts.onEnter) opts.onEnter(e); }}>`;
-  return html`<div class="field label border ${opts.rows ? 'textarea' : ''}"
-    style=${opts.style || nothing}>${input}<label>${label}</label></div>`;
+  return html`<div class="field label fill ${opts.rows ? 'textarea' : ''}
+      ${opts.small ? 'small no-margin' : ''} ${WIDTH[opts.width] || ''}">
+    ${input}<label>${label}</label></div>`;
 }
-
-/* Tab bar: BeerCSS .tabs. `pick` gets the tab key. */
-export const tabsBar = (tabs, active, pick) =>
-  html`<div class="tabs left-align">${tabs.map((t) =>
-    html`<a class="${t.key === active ? 'active' : ''}" @click=${() => pick(t.key)}>${t.label}</a>`)}</div>`;
 
 /* Components render into light DOM so the global stylesheet themes them and
    existing class names keep working — no per-component style porting. */
@@ -59,10 +103,11 @@ export class BifrostElement extends LitElement {
   }
 }
 
-/* Terse one-line summary of a sync run's counters. No filler: only the
-   actions that happened, joined plainly. */
+/* Terse one-line summary of a run's counters. No filler: only the actions
+   that happened, joined plainly. [verb, past verb, noun, plural noun?]. */
 const ACTION_WORDS = {
   created: ['create', 'created', 'item'],
+  generated: ['generate', 'generated', 'boundary', 'boundaries'],
   versions_updated: ['update', 'updated', 'version'],
   titles_updated: ['update', 'updated', 'title'],
   dates_updated: ['set', 'set', 'date'],
@@ -79,7 +124,7 @@ export function summarize(counts, applied) {
   for (const [key, n] of Object.entries(counts)) {
     if (!n || QUIET.has(key)) continue;
     const w = ACTION_WORDS[key];
-    if (w) parts.push(`${applied ? w[1] : w[0]} ${n} ${w[2]}${n === 1 ? '' : 's'}`);
+    if (w) parts.push(`${applied ? w[1] : w[0]} ${n} ${n === 1 ? w[2] : w[3] || `${w[2]}s`}`);
   }
   const errs = counts.errors ? ` · ${counts.errors} error${counts.errors === 1 ? '' : 's'}` : '';
   if (!parts.length) return (applied ? 'No changes' : 'In sync') + errs;
@@ -87,33 +132,28 @@ export function summarize(counts, applied) {
   return verb.charAt(0).toUpperCase() + verb.slice(1) + errs;
 }
 
-export const hasWork = (counts) =>
-  counts && Object.entries(counts).some(([k, v]) => !QUIET.has(k) && v > 0);
-
 /* Small inline SVG status icons — visually unambiguous (shape + color),
-   unlike glyph checkmarks/dashes. */
-export const iconYes = html`<svg class="icon yes" viewBox="0 0 16 16" width="15" height="15" aria-label="yes">
+   unlike glyph checkmarks/dashes. Colored by BeerCSS text helpers. */
+export const iconYes = html`<svg class="green-text" viewBox="0 0 16 16" width="15" height="15" aria-label="yes">
   <path d="M2.5 8.5 L6.5 12.5 L13.5 4" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-export const iconNo = html`<svg class="icon no" viewBox="0 0 16 16" width="15" height="15" aria-label="no">
+export const iconNo = html`<svg class="error-text" viewBox="0 0 16 16" width="15" height="15" aria-label="no">
   <path d="M4 4 L12 12 M12 4 L4 12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>`;
-/* Third state: in-progress / pending / reserved / not-applicable — a hollow ring,
-   a shape distinct from check and cross (not just a colour). */
-export const iconPending = html`<svg class="icon pend" viewBox="0 0 16 16" width="15" height="15" aria-label="pending">
-  <circle cx="8" cy="8" r="5" fill="none" stroke="currentColor" stroke-width="2.2"/></svg>`;
-/* n/a — a dash, for "not applicable yet" (distinct from a real failure). */
-export const iconNa = html`<svg class="icon na" viewBox="0 0 16 16" width="15" height="15" aria-label="n/a">
+/* n/a — a dash, for "not applicable" (distinct from a real failure). */
+export const iconNa = html`<svg class="secondary-text" viewBox="0 0 16 16" width="15" height="15" aria-label="n/a">
   <path d="M4 8 L12 8" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>`;
-/* Half-filled ring — "partway there": used for an id that's been physically
-   assigned (written on a photo) but not yet minted in Gramps. Shape sits between
-   the hollow ring (reserved) and the check (minted). */
-export const iconHalf = html`<svg class="icon half" viewBox="0 0 16 16" width="15" height="15" aria-label="assigned">
-  <circle cx="8" cy="8" r="5" fill="none" stroke="currentColor" stroke-width="2.2"/>
-  <path d="M8 3.6 A4.4 4.4 0 0 1 8 12.4 Z" fill="currentColor"/></svg>`;
 
-/* Map a run/status string to a shape+colour icon. ok→check, error/failed→cross,
-   else (running/pending)→ring. */
-export function statusIcon(status) {
-  if (status === 'ok' || status === 'done') return iconYes;
-  if (status === 'error' || status === 'failed' || status === 'interrupted') return iconNo;
-  return iconPending;
+/* The one status/result line — every job outcome and inline notice renders
+   through this so success, failure, and progress always look the same.
+   kind: 'ok' | 'error' | 'busy' | 'info'. Drop it inline in a control nav,
+   or wrap it in <p> as a stanza's result line. */
+export function statusLine(kind, msg) {
+  if (!msg) return nothing;
+  if (kind === 'busy') return html`<span class="secondary-text">${spinner} ${msg}</span>`;
+  if (kind === 'ok') return html`<span>${iconYes} ${msg}</span>`;
+  if (kind === 'error') return html`<span class="error-text">${iconNo} ${msg}</span>`;
+  return html`<span class="secondary-text">${msg}</span>`;
 }
+
+/* Empty-state row for a table body: emptyRow(colspan, 'No items…'). */
+export const emptyRow = (cols, msg) =>
+  html`<tr><td colspan=${cols} class="secondary-text">${msg}</td></tr>`;

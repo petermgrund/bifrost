@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 from ...modules import boundaries
@@ -19,9 +20,8 @@ def _state(request: Request):
 
 @router.get("")
 async def places_page(request: Request):
-    from ..app import templates  # late import to avoid cycle
-
-    return templates.TemplateResponse(request, "places.html", {})
+    # Bifrost is a single page now — deep-link to the section.
+    return RedirectResponse(url="/#places")
 
 
 @router.get("/api/list")

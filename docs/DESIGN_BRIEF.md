@@ -1,5 +1,11 @@
 # Bifrost — Design Brief (wireframe-first redesign)
 
+> **Historical (2026-07-06):** this brief predates the BeerCSS one-page
+> redesign and describes surfaces since removed (Upload, Faces, Activity,
+> Immich, IDs) and a token/kit CSS system that no longer exists. The current
+> UI conventions live in the header comment of `static/app/core.js` (see
+> README). Kept as design-thinking reference only.
+
 A handoff brief for a UI/UX redesign. **Start with low-fidelity wireframes**
 (structure, IA, component placement) before any visual polish. This is a
 **UI/UX-only** effort — the backend, APIs and data flows are settled and stay

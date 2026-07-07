@@ -1,8 +1,4 @@
-"""The random-6 media-id and handle generators.
-
-One shared home for the safe alphabet (no I/O/L/0/1 — unambiguous when
-hand-written on a photo verso) used by media ids, note ids, and handles.
-See docs/MEDIA_ID_SCHEME.md.
+"""random-6 media-id and handle
 """
 
 from __future__ import annotations

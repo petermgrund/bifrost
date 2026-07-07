@@ -98,12 +98,11 @@ export class SyncPage extends BifrostElement {
   }
 
   renderRunning() {
-    return html`<p>${statusLine('busy', 'Scanning — comparing the source against your Gramps media…')}</p>`;
+    return html`<p>${statusLine('busy', 'Scanning...')}</p>`;
   }
 
   renderEmpty() {
     return html`
-      <p>Preview what a sync would change. Nothing is written until you apply.</p>
       <nav>
         ${btn('Run preview', this.running, () => this.runPreview())}
       </nav>`;
@@ -117,7 +116,7 @@ export class SyncPage extends BifrostElement {
     const shown = this.filter === 'all' ? items : items.filter((e) => this.groupOf(e.action) === this.filter);
 
     return html`
-      <p>${writable} change${writable === 1 ? '' : 's'} ready · ${c.skip} skipped${c.error ? ` · ${c.error} failed` : ''}. Nothing is written until you apply.</p>
+      <p>${writable} change${writable === 1 ? '' : 's'}, ${c.skip} skipped${c.error ? ` · ${c.error} failed` : ''}</p>
 
       <nav class="wrap">
         ${chip(`All ${items.length}`, this.filter === 'all', () => { this.filter = 'all'; })}
@@ -135,7 +134,7 @@ export class SyncPage extends BifrostElement {
           <th>Detail</th>
         </tr></thead>
         <tbody>
-          ${shown.length ? shown.map((e) => this.row(e)) : emptyRow(4, 'No items in this filter.')}
+          ${shown.length ? shown.map((e) => this.row(e)) : emptyRow(4, 'No items')}
         </tbody>
       </table>
 
@@ -164,10 +163,10 @@ export class SyncPage extends BifrostElement {
   renderApplied() {
     const summary = summarize(this.applied?.events?.find((e) => e.kind === 'summary')?.data, true);
     return html`
-      <p>${statusLine('ok', `Applied to Gramps — ${summary || 'done.'}`)}</p>
+      <p>${statusLine('ok', `Applied to Gramps ${summary || 'done.'}`)}</p>
       <nav>
         ${this.config?.gramps_public_url ? html`<a class="button"
-          href=${this.config.gramps_public_url} target="_blank" rel="noopener">Open in Gramps Web</a>` : nothing}
+          href=${this.config.gramps_public_url} target="_blank" rel="noopener">Open in Gramps</a>` : nothing}
         ${btn('Run another preview', false, () => this.runAnother())}
       </nav>`;
   }

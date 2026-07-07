@@ -41,6 +41,16 @@ async def get_media(request: Request, uncited: bool = False, refresh: bool = Fal
     return st.caches[key]
 
 
+@router.get("/api/media/{gramps_id}")
+async def get_media_by_id(request: Request, gramps_id: str):
+    st = _state(request)
+    media = await st.gramps.get_media_by_gramps_id(gramps_id.strip().upper())
+    if not media:
+        raise HTTPException(404, f"no Gramps media '{gramps_id}'")
+    return {"handle": media["handle"], "gramps_id": media["gramps_id"],
+            "title": media.get("desc") or media["gramps_id"]}
+
+
 @router.get("/api/uncited-events")
 async def get_uncited_events(request: Request, refresh: bool = False):
     st = _state(request)

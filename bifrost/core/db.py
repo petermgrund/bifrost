@@ -10,7 +10,7 @@ import sqlite3
 from pathlib import Path
 
 MIGRATIONS: list[str] = [
-    # 1 — initial schema (docs/DESIGN.md §4)
+    # 1 initial
     """
     CREATE TABLE person_links (
         gramps_handle    TEXT NOT NULL,
@@ -63,9 +63,7 @@ MIGRATIONS: list[str] = [
         PRIMARY KEY (run_id, seq)
     );
     """,
-    # 2 — per-(person, photo) face padding. The Gramps rect is always the
-    # materialization of Immich's detected box + this pad; absence means the
-    # default applies (0.15, or 0.0 on Sync/ManualFaces-tagged assets).
+    # 2 per-(person, photo) face padding
     """
     CREATE TABLE face_pads (
         gramps_handle TEXT NOT NULL,
@@ -75,10 +73,7 @@ MIGRATIONS: list[str] = [
         PRIMARY KEY (gramps_handle, asset_id)
     );
     """,
-    # 3 — UI-generated media-id reservations. Codes minted ahead of time in the
-    # ID-generator tab are reserved here so the auto-generator never reuses them;
-    # manual id entry at sync time DOES accept a reserved id. minted_at flips when
-    # the id is actually created in Gramps.
+    # 3 — UI-generated media-id reservation
     """
     CREATE TABLE reserved_ids (
         gramps_id  TEXT PRIMARY KEY,
@@ -87,8 +82,7 @@ MIGRATIONS: list[str] = [
         note       TEXT
     );
     """,
-    # 4 — Gemini OCR ledger. A doc is (re-)OCR'd only when not already recorded
-    # here (or on force), so a run doesn't re-spend Gemini on every pass.
+    # 4 Gemini OCR ledger
     """
     CREATE TABLE ocr_state (
         paperless_id INTEGER PRIMARY KEY,
@@ -97,23 +91,11 @@ MIGRATIONS: list[str] = [
         ocr_at       TEXT NOT NULL
     );
     """,
-    # 5 — manual "assigned" step between reserved and minted. Set when Peter has
-    # physically labelled a photo (verso) with a reserved id but hasn't yet synced
-    # it into Gramps. Purely a Bifrost-side flag; cleared on unassign, moot once
-    # minted_at flips.
+    # 5 manual "assigned"
     """
     ALTER TABLE reserved_ids ADD COLUMN assigned_at TEXT;
     """,
-    # 6 — Immich image versioning (docs/IMMICH_VERSIONING.md). An Immich STACK is
-    # one logical photo's version set; the stack's primaryAssetId is the version
-    # displayed in Gramps. Versioning is a Bifrost-owned pointer layer because
-    # Immich assets are immutable (each version is a separate asset id) — so the
-    # change signal is "a different asset became primary", NOT a checksum drift
-    # (contrast doc_versions, which diffs a mutating checksum on a stable id).
-    # Durable/load-bearing state (membership, displayed=primaryAssetId, role tags)
-    # lives in IMMICH; these tables are a rebuildable cache + Bifrost-owned soft
-    # notes/ordering. The stable Gramps base id/handle never move — only the
-    # media's path/mime/Immich-ID attribute repoint.
+    # 6 Immich image versioning
     """
     CREATE TABLE immich_versions (
         gramps_id        TEXT PRIMARY KEY,
@@ -134,13 +116,7 @@ MIGRATIONS: list[str] = [
         PRIMARY KEY (gramps_id, asset_id)
     );
     """,
-    # 7 — the a-series scan register (archive-scheme/SCHEME.md §2). One row per
-    # capture FILE (recto scan, verso scan, re-scan: each its own number),
-    # numbered a000101 upward in scanning order. Append-only LOG, not a catalog:
-    # numbers are never reused and a deleted scan leaves a permanent gap. Object
-    # identity lives in the random-6 id (reserved_ids/Gramps); physical location
-    # in the call number. The b-series belongs to a different family tree and is
-    # not tracked here.
+    # 7
     """
     CREATE TABLE scan_register (
         scan_no    TEXT PRIMARY KEY,

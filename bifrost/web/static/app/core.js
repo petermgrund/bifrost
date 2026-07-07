@@ -114,7 +114,7 @@ const ACTION_WORDS = {
   descs_updated: ['update', 'updated', 'description'],
   tx_created: ['add', 'added', 'transcription'],
   tx_updated: ['rewrite', 'rewrote', 'transcription'],
-  transcribed: ['transcribe', 'transcribed', 'document'],
+  transcribed: ['transcribe', 'transcribed', 'doc'],
 };
 const QUIET = new Set(['skipped', 'tx_skipped', 'baselined', 'errors']);
 

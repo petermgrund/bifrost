@@ -10,19 +10,19 @@ import './citations-page.js';
 import './places-page.js';
 
 const SECTIONS = [
-  { id: 'sync', title: 'Sync', desc: 'Paperless documents become Gramps media',
+  { id: 'sync', title: 'Sync', desc: 'Create a Gramps media object from a Paperless document',
     body: html`<paperless-sync-page></paperless-sync-page>` },
-  { id: 'transcribe', title: 'Transcribe', desc: 'Gemini OCR for a media object’s document',
+  { id: 'transcribe', title: 'Transcribe', desc: 'Gemini OCR for a Paperless document',
     body: html`<transcribe-page></transcribe-page>` },
-  { id: 'citations', title: 'Citations', desc: 'EE-style repository, source, and citation chains',
+  { id: 'citations', title: 'Citations', desc: 'Generate Gramps citations from Paperless document',
     body: html`<citations-page></citations-page>` },
-  { id: 'places', title: 'Places', desc: 'OSM boundary polygons for the place minimap',
+  { id: 'places', title: 'Places', desc: 'Generate a boundary polygon for a place on a Gramps map',
     body: html`<places-page></places-page>` },
 ];
 
 class BifrostApp extends BifrostElement {
   static properties = {
-    opened: { state: true },   // section ids that have been expanded at least once
+    opened: { state: true }, 
   };
 
   constructor() {

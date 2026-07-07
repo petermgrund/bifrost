@@ -1,8 +1,4 @@
-"""Record a module operation as a run with structured events.
-
-Phase 1 shape: drive the generator to completion, persist every event, return
-them for the response. Live SSE streaming arrives with the sync module
-(Phase 2) — the schema already supports it.
+"""Record a module operation as a run with structured events
 """
 
 from __future__ import annotations

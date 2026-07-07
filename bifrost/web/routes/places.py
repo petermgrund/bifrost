@@ -37,6 +37,7 @@ async def list_places(request: Request, refresh: bool = False):
 class SetRelationBody(BaseModel):
     handle: str
     relation: str  # raw id, "way/N", or a full openstreetmap.org/{relation|way}/N URL
+    replace: bool = False  # rewrite an existing OSM URL instead of refusing
 
 
 @router.post("/api/set-relation")
@@ -52,7 +53,8 @@ async def set_relation(request: Request, body: SetRelationBody):
         raise HTTPException(
             400, "give a relation id, way/<id>, or an openstreetmap.org/{relation|way}/… URL")
     try:
-        result = await boundaries.set_relation(st.gramps, body.handle, kind, oid)
+        result = await boundaries.set_relation(
+            st.gramps, body.handle, kind, oid, replace=body.replace)
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
     st.caches.pop("places", None)

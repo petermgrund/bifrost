@@ -15,10 +15,29 @@
   {% block head %}{% endblock %}
 </head>
 <body class="light">
+  <script>
+    /* Theme before first paint (no light flash), persisted per browser. */
+    if (localStorage.getItem('bifrost-theme') === 'dark')
+      document.body.classList.replace('light', 'dark');
+    function toggleTheme() {
+      const dark = document.body.classList.toggle('dark');
+      document.body.classList.toggle('light', !dark);
+      localStorage.setItem('bifrost-theme', dark ? 'dark' : 'light');
+      syncThemeIcon();
+    }
+    function syncThemeIcon() {
+      document.getElementById('theme-icon').textContent =
+        document.body.classList.contains('dark') ? 'light_mode' : 'dark_mode';
+    }
+    addEventListener('DOMContentLoaded', syncThemeIcon);
+  </script>
   <main class="responsive">
     <nav>
       <svg width="30" height="22" viewBox="0 0 30 22" aria-hidden="true"><path d="M3 20 A12 12 0 0 1 27 20" fill="none" stroke="var(--tertiary)" stroke-width="2.6" stroke-linecap="round"/><path d="M7 20 A8 8 0 0 1 23 20" fill="none" stroke="var(--warning, #b07a00)" stroke-width="2.6" stroke-linecap="round"/><path d="M11 20 A4 4 0 0 1 19 20" fill="none" stroke="var(--primary)" stroke-width="2.6" stroke-linecap="round"/></svg>
       <h5 class="max">Bifrost</h5>
+      <button class="circle transparent" onclick="toggleTheme()" aria-label="Toggle dark mode">
+        <i id="theme-icon">dark_mode</i>
+      </button>
     </nav>
     <div class="space"></div>
     {% block content %}{% endblock %}

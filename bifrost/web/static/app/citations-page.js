@@ -1,15 +1,15 @@
-/* Citation generator: media → describe → review/save. The free-text dump is
-   the one composing path (LLM); 'Write manually' is the no-LLM fallback. */
-import { BifrostElement, html, nothing, api, post, btn, spinner, chip, field, statusLine } from './core.js';
+/* Citation generator — look up one media by Gramps ID; the generator flow
+   (describe → review → save) runs in a modal, like the Places dialog. The
+   free-text dump is the one composing path (LLM); 'Write manually' is the
+   no-LLM fallback. */
+import { BifrostElement, html, nothing, api, post, btn, spinner, field, statusLine } from './core.js';
 
 class CitationsPage extends BifrostElement {
   static properties = {
-    step: { state: true },          // media | describe | review
+    step: { state: true },          // describe | review (inside the modal)
     ctx: { state: true },           // types, sources, repositories, llm
-    media: { state: true },         // media listing
-    mediaQuery: { state: true },
-    originFilter: { state: true },  // paperless | other
-    pick: { state: true },          // { media, source, repository }
+    mediaId: { state: true },
+    pick: { state: true },          // { media, source, repository }; modal open when media set
     draft: { state: true },         // composed/edited draft
     busy: { state: true },
     error: { state: true },
@@ -21,11 +21,9 @@ class CitationsPage extends BifrostElement {
 
   constructor() {
     super();
-    this.step = 'media';
+    this.step = 'describe';
     this.ctx = null;
-    this.media = [];
-    this.mediaQuery = '';
-    this.originFilter = 'paperless';
+    this.mediaId = '';
     this.pick = { media: null, source: null, repository: null };
     this.draft = null;
     this.busy = false;
@@ -44,17 +42,14 @@ class CitationsPage extends BifrostElement {
   async load() {
     this.loadError = '';
     try {
-      [this.ctx, this.media] = await Promise.all([
-        api('/citations/api/context'),
-        api('/citations/api/media'),
-      ]);
+      this.ctx = await api('/citations/api/context');
     } catch (e) {
       this.loadError = e.message;
     }
   }
 
   reset() {
-    this.step = 'media';
+    this.step = 'describe';
     this.pick = { media: null, source: null, repository: null };
     this.draft = null;
     this.error = '';
@@ -63,7 +58,37 @@ class CitationsPage extends BifrostElement {
     this.matched = null;
   }
 
-  /* ---- compose / save ---- */
+  closeModal() {
+    const dlg = this.renderRoot.querySelector('dialog');
+    if (dlg?.open) dlg.close();          // fires @close, which resets the flow
+    else this.reset();
+  }
+
+  /* The dialog must sit in the browser's top layer (showModal) — rendered
+     inline it would be clipped to the section expander's content box. */
+  updated() {
+    const dlg = this.renderRoot.querySelector('dialog');
+    if (dlg && !dlg.open) dlg.showModal();
+  }
+
+  /* ---- lookup / compose / save ---- */
+  async lookupMedia() {
+    if (this.busy) return;
+    const id = this.mediaId.trim();
+    if (!id) { this.error = 'Enter a Gramps media ID.'; return; }
+    this.busy = true;
+    this.error = '';
+    try {
+      const m = await api(`/citations/api/media/${encodeURIComponent(id)}`);
+      this.step = 'describe';
+      this.pick = { ...this.pick, media: m };
+    } catch (e) {
+      this.error = e.message;
+    } finally {
+      this.busy = false;
+    }
+  }
+
   async composeDump() {
     this.busy = true;
     this.error = '';
@@ -122,90 +147,59 @@ class CitationsPage extends BifrostElement {
         <nav>${btn('Retry', false, () => this.load())}</nav>`;
     }
     if (!this.ctx) return html`<progress class="circle"></progress>`;
-    const steps = ['media', 'describe', 'review'];
-    const atStart = this.step === 'media';
-    const n = steps.indexOf(this.step) + 1;
+    const lookingUp = this.busy && !this.pick.media;
     return html`
-      <nav>
-        <span class="small-text max">step ${n} of ${steps.length} — ${this.step}</span>
-        ${!atStart ? btn('Start over', false, () => this.reset()) : nothing}
-      </nav>
-      ${this.error ? html`<p>${statusLine('error', this.error)}</p>` : nothing}
-      ${{
-        media: () => this.renderMedia(),
-        describe: () => this.renderDescribe(),
-        review: () => this.renderReview(),
-      }[this.step]()}
-    `;
-  }
-
-  renderMedia() {
-    const q = this.mediaQuery.toLowerCase();
-    const isPaperless = (m) => m.origin === 'paperless';
-    const inFilter = (m) => (this.originFilter === 'paperless' ? isPaperless(m) : !isPaperless(m));
-    const rows = this.media
-      .filter(inFilter)
-      .filter((m) => !q || m.title.toLowerCase().includes(q)
-        || m.gramps_id.toLowerCase().includes(q)).slice(0, 80);
-    const nPaperless = this.media.filter(isPaperless).length;
-    return html`<div>
-      <h6 class="small">Pick the media to cite</h6>
       <nav class="wrap">
-        ${field('Search media…', this.mediaQuery, (e) => (this.mediaQuery = e.target.value), { type: 'search', width: 'small' })}
-        ${chip(`Paperless ${nPaperless}`, this.originFilter === 'paperless', () => (this.originFilter = 'paperless'))}
-        ${chip(`Other ${this.media.length - nPaperless}`, this.originFilter === 'other', () => (this.originFilter = 'other'))}
-        <span class="small-text">${rows.length} shown</span>
+        ${field('Gramps media ID', this.mediaId, (e) => (this.mediaId = e.target.value),
+          { mono: true, upper: true, width: 'small', onEnter: () => this.lookupMedia() })}
+        ${btn(lookingUp ? 'Looking up…' : 'Look up', lookingUp, () => this.lookupMedia())}
+        ${lookingUp ? spinner : nothing}
       </nav>
-      ${rows.length ? html`
-        <div class="scroll capped">
-          <ul class="list">
-            ${rows.map((m) => html`
-              <li class="wave"
-                @click=${() => { this.pick = { ...this.pick, media: m }; this.step = 'describe'; }}>
-                <span class="mono small-text">${m.gramps_id}</span>
-                <div class="max">${m.title}</div>
-                ${m.cited ? html`<span class="chip small">cited</span>` : nothing}
-              </li>`)}
-          </ul>
-        </div>` : html`<p class="secondary-text">No media match.</p>`}
-    </div>`;
+      ${!this.pick.media && this.error ? html`<p>${statusLine('error', this.error)}</p>` : nothing}
+      ${this.pick.media ? this.renderModal() : nothing}`;
   }
 
-  citingLine() {
+  renderModal() {
     const m = this.pick.media;
-    if (!m) return nothing;
-    return html`<p class="small-text">Citing: media <strong>${m.title}</strong></p>`;
+    return html`
+      <dialog class="large" @close=${() => this.reset()}>
+        <nav>
+          <h5 class="max small">${m.title}</h5>
+          <button class="circle transparent" @click=${() => this.closeModal()} aria-label="Close">
+            <i>close</i></button>
+        </nav>
+        <p class="mono small-text">${m.gramps_id}</p>
+        ${this.error ? html`<p>${statusLine('error', this.error)}</p>` : nothing}
+        ${this.saved ? this.renderSaved()
+          : this.step === 'review' ? this.renderReview()
+          : this.renderDescribe()}
+      </dialog>`;
   }
 
   renderDescribe() {
-    return html`<div>
-      <h6 class="small">Describe the record</h6>
-      ${this.citingLine()}
-      ${field('Dump everything you know: what the record is, who\'s in it, dates, page/entry numbers, archive references, the URL you found it at…',
+    return html`
+      ${field('Enter info about record',
         this.dump, (e) => (this.dump = e.target.value), { rows: 7 })}
-      <p class="small-text">Matches an existing source when one fits; drafts a new one when none does.</p>
       <nav>
         ${this.ctx.llm ? btn(this.busy ? 'Composing…' : 'Compose citation',
           this.busy || !this.dump.trim(), () => this.composeDump()) : nothing}
         ${btn('Write manually', this.busy, () => this.manualDraft())}
-        ${btn('Back', this.busy, () => (this.step = 'media'))}
         ${this.busy ? spinner : nothing}
-      </nav>
-    </div>`;
+      </nav>`;
+  }
+
+  renderSaved() {
+    return html`
+      <p>${statusLine('ok', 'Saved to Gramps.')}</p>
+      <table>
+        <tbody>${Object.entries(this.saved).map(([k, v]) => html`<tr><td>${k}</td><td>${v}</td></tr>`)}</tbody>
+      </table>
+      <nav>
+        ${btn('Close', false, () => this.closeModal())}
+      </nav>`;
   }
 
   renderReview() {
-    if (this.saved) {
-      return html`<div>
-        <p>${statusLine('ok', 'Saved to Gramps.')}</p>
-        <table>
-          <tbody>${Object.entries(this.saved).map(([k, v]) => html`<tr><td>${k}</td><td>${v}</td></tr>`)}</tbody>
-        </table>
-        <nav>
-          ${btn('New citation', false, () => this.reset())}
-        </nav>
-      </div>`;
-    }
     const d = this.draft;
     const m = this.matched;
     const matchedBanner = m && (m.source || m.repository)

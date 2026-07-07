@@ -1,8 +1,4 @@
-"""Transcribe — Gemini OCR for one media object's document, end to end.
-
-POST /transcribe/api/run takes a Gramps media id, resolves it to the Paperless
-doc via the 'Paperless ID' attribute, OCRs it in place (force), then rewrites
-the Transcription note back onto the Gramps media. One field, one button."""
+"""Transcribe"""
 
 from __future__ import annotations
 
@@ -19,7 +15,6 @@ router = APIRouter(prefix="/transcribe", tags=["transcribe"])
 
 @router.get("")
 async def transcribe_page(request: Request):
-    # Bifrost is a single page now — deep-link to the section.
     return RedirectResponse(url="/#transcribe")
 
 
@@ -42,8 +37,7 @@ async def run_for_media(request: Request, body: RunBody):
                   st.cfg.gemini, apply=True, force=True, single_doc_id=doc_id)
     _, ocr_events = await record_run(st.conn, "ocr.gemini", gen)
 
-    # Unless the doc was really transcribed, stop here and say why — falling
-    # through would rewrite the note from the OLD text and report success.
+    # unless the doc was really transcribed stop here and say why
     summary = next((e.data for e in ocr_events if e.kind == "summary"), None) or {}
     if not summary.get("transcribed"):
         err = next((e for e in ocr_events if e.kind == "error"), None)

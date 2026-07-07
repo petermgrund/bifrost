@@ -1,5 +1,5 @@
 /* Transcribe section — three flat stanzas, no cards:
-   • Run OCR: Gramps media id → its Paperless doc → Gemini OCR in place →
+   • Run OCR: Gramps media id its Paperless doc Gemini OCR in place 
      Transcription note rewritten on the media (POST /transcribe/api/run).
    • Resync one note: re-pull the doc's current text into one media's note,
      no OCR spend (POST /sync/api/paperless/resync-media, apply).
@@ -43,7 +43,7 @@ class TranscribePage extends BifrostElement {
 
   grampsLink(id) {
     return this.config?.gramps_public_url
-      ? html` · <a class="link" href="${this.config.gramps_public_url}/media/${id}"
+      ? html`<a class="link" href="${this.config.gramps_public_url}/media/${id}"
           target="_blank" rel="noopener">open in Gramps</a>` : nothing;
   }
 
@@ -57,8 +57,8 @@ class TranscribePage extends BifrostElement {
       const ocrC = r.ocr_events.find((e) => e.kind === 'summary')?.data;
       const txC = r.tx_events.find((e) => e.kind === 'summary')?.data;
       const errs = (ocrC?.errors || 0) + (txC?.errors || 0);
-      this.ocrResult = { kind: errs ? 'error' : 'ok', body: html`${r.media_id} → doc #${r.doc_id} ·
-        ${summarize(ocrC, true)} · ${summarize(txC, true)}${this.grampsLink(media_id)}` };
+      this.ocrResult = { kind: errs ? 'error' : 'ok', body: html`${r.media_id}
+        ${summarize(ocrC, true)}, ${summarize(txC, true)}${this.grampsLink(media_id)}` };
     } catch (e) {
       this.ocrResult = { kind: 'error', body: e.message };
     } finally {
@@ -75,7 +75,7 @@ class TranscribePage extends BifrostElement {
       const r = await post('/sync/api/paperless/resync-media', { media_id, apply: true });
       const c = r.events.find((e) => e.kind === 'summary')?.data;
       this.resyncResult = { kind: c?.errors ? 'error' : 'ok',
-        body: `${r.media_id} → #${r.doc_id} · ${summarize(c, true) || 'no change'}` };
+        body: `${r.media_id} is saved as #${r.doc_id}, ${summarize(c, true) || 'no change'}` };
     } catch (e) {
       this.resyncResult = { kind: 'error', body: e.message };
     } finally {
@@ -83,39 +83,35 @@ class TranscribePage extends BifrostElement {
     }
   }
 
-  async rewriteAll() {
-    if (this.rewriteBusy) return;
-    this.rewriteResult = null; this.rewriteBusy = true;
+  async resyncAll() {
+    if (this.resyncBusy) return;
+    this.resyncResult = null; this.resyncBusy = true;
     try {
       const r = await post('/sync/api/paperless/apply', { transcriptions_only: true, force_transcriptions: true });
       const c = r.events.find((e) => e.kind === 'summary')?.data;
-      this.rewriteResult = { kind: c?.errors ? 'error' : 'ok', body: summarize(c, true) || 'No changes' };
+      this.resyncResult = { kind: c?.errors ? 'error' : 'ok', body: summarize(c, true) || 'No changes' };
     } catch (e) {
-      this.rewriteResult = { kind: 'error', body: e.message };
+      this.resyncResult = { kind: 'error', body: e.message };
     } finally {
-      this.rewriteBusy = false;
+      this.resyncBusy = false;
     }
   }
 
   render() {
     return html`
       <h6 class="small">Run OCR on a media object</h6>
-      <p>Give it the Gramps ID of a Paperless-backed media object. Gemini reads the
-        document in place and the Transcription note is rewritten on the Gramps media.</p>
       <nav class="wrap">
         ${field('Gramps media ID', this.ocrId, (e) => (this.ocrId = e.target.value),
           { mono: true, upper: true, width: 'small', onEnter: () => this.runOcr() })}
-        ${btn(this.ocrBusy ? 'Transcribing…' : 'Run OCR', this.ocrBusy, () => this.runOcr())}
+        ${btn(this.ocrBusy ? 'Transcribing…' : 'Run', this.ocrBusy, () => this.runOcr())}
         ${this.ocrBusy ? spinner : nothing}
       </nav>
       ${this.ocrResult ? html`<p>${statusLine(this.ocrResult.kind, this.ocrResult.body)}</p>` : nothing}
 
       <div class="large-space"></div>
-      <h6 class="small">Resync one note</h6>
-      <p>Re-pull a media object's current document text into its Gramps note —
-        no OCR, no Gemini spend.</p>
+      <h6 class="small">Resync a single note</h6>
       <nav class="wrap">
-        ${field('Media ID', this.resyncId, (e) => (this.resyncId = e.target.value),
+        ${field('Gramps media ID', this.resyncId, (e) => (this.resyncId = e.target.value),
           { mono: true, upper: true, width: 'small', onEnter: () => this.resync() })}
         ${btn(this.resyncBusy ? 'Resyncing…' : 'Resync', this.resyncBusy, () => this.resync())}
         ${this.resyncBusy ? spinner : nothing}
@@ -123,12 +119,11 @@ class TranscribePage extends BifrostElement {
       </nav>
 
       <div class="large-space"></div>
-      <h6 class="small">Rewrite all notes</h6>
-      <p>Rebuild every Transcription note from the current document text.</p>
+      <h6 class="small">Resync all notes</h6>
       <nav class="wrap">
-        ${btn(this.rewriteBusy ? 'Rewriting…' : 'Rewrite all notes', this.rewriteBusy, () => this.rewriteAll())}
-        ${this.rewriteBusy ? spinner : nothing}
-        ${this.rewriteResult ? statusLine(this.rewriteResult.kind, this.rewriteResult.body) : nothing}
+        ${btn(this.resyncBusy ? 'Resyncing…' : 'Resync all notes', this.resyncBusy, () => this.resyncAll())}
+        ${this.resyncBusy ? spinner : nothing}
+        ${this.resyncResult ? statusLine(this.resyncResult.kind, this.resyncResult.body) : nothing}
       </nav>`;
   }
 }

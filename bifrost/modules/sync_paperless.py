@@ -1,21 +1,4 @@
-"""Paperless → Gramps sync (port of paperless_to_gramps.py — the archive
-backbone; the first sync ever built, ported with corresponding care).
-
-Four phases, in the legacy order, as one async generator:
-1. Media sync — tagged docs become Gramps Media; gramps_id + gramps_url are
-   written back to Paperless custom fields (the idempotency keys live in
-   Paperless, exactly as before).
-2. Version sync — original_checksum changes update path/mime and, for
-   img-tagged docs, clear face rects on every backlinked object.
-3. Date/title sync — Media.desc follows the Paperless title (unless the
-   media carries the skip-title-sync Gramps tag); Media.date follows the
-   per-doc Date-qualifier custom field (the qualifier IS the opt-in).
-4. Transcriptions — OCR content becomes a Transcription Note (plus a
-   Translation Note when the delimiter is present), tracked by content hash.
-
-State: doc_versions and transcription_state tables (imported from
-versions.json / transcriptions.json, which stay frozen). Preview is the same
-generator with apply=False.
+"""Paperless to Gramps sync
 """
 
 from __future__ import annotations
@@ -62,7 +45,7 @@ BACKLINK_OBJ_TYPES = {
 
 
 # ---------------------------------------------------------------------------
-# Pure helpers (ported verbatim from the legacy script)
+# Pure helpers 
 # ---------------------------------------------------------------------------
 
 def build_gramps_date_from_paperless(doc: dict, qualifier_label: str | None) -> dict | None:
@@ -218,7 +201,7 @@ def _set_tx(conn: sqlite3.Connection, doc_id: int, **fields) -> None:
 
 
 # ---------------------------------------------------------------------------
-# The sync generator — four phases in legacy order
+# The sync generator
 # ---------------------------------------------------------------------------
 
 def _doc_gramps_id(doc: dict, field_id: int) -> str | None:
@@ -257,8 +240,7 @@ async def sync(
     versions_only: bool = False,
 ) -> AsyncIterator[SyncEvent]:
     # versions_only: run ONLY phase 2 (repoint media to the selected Paperless
-    # version). No create / title / date / transcription work — safe for an
-    # unattended scheduled run.
+    # version). No create / title / date / transcription work
     counts = {"created": 0, "skipped": 0, "versions_updated": 0, "baselined": 0,
               "titles_updated": 0, "dates_updated": 0,
               "tx_created": 0, "tx_updated": 0, "tx_skipped": 0, "errors": 0}
@@ -266,7 +248,7 @@ async def sync(
     existing_ids = await gramps.list_media_gramps_ids()
 
     # Resolve the date-qualifier select options up front: phase 3 needs them,
-    # and phase 1 uses them to show prospective dates on create previews.
+    # and phase 1 uses them to show prospective dates on create previews
     q_options: dict[str, str] = {}
     m_options: dict[str, str] = {}
     q_field = cfg.date_qualifier_field_id
@@ -280,7 +262,7 @@ async def sync(
     if m_field and not transcriptions_only:
         try:
             m_options = await paperless.resolve_custom_field_options(m_field)
-        except Exception:  # noqa: BLE001 — meaning is log-context only
+        except Exception:  # noqa: BLE001
             m_field = None
 
     def _prospective_cols(doc: dict) -> dict:

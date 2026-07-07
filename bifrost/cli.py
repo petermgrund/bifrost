@@ -1,6 +1,6 @@
-"""Bifrost CLI — thin entry points for setup and cron.
+"""Bifrost CLI for setup and cron.
 
-    python -m bifrost.cli doctor          # connectivity + auth check, all services
+    python -m bifrost.cli doctor
 """
 
 from __future__ import annotations

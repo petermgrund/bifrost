@@ -1,4 +1,4 @@
-"""Bifrost web app."""
+"""Bifrost"""
 
 from __future__ import annotations
 
@@ -40,10 +40,6 @@ async def lifespan(app: FastAPI):
 
 
 class _NoCacheStatic(StaticFiles):
-    """Serve static with Cache-Control: no-cache so the browser always
-    revalidates (via ETag). With the dev bind-mount, edited CSS/JS then show on
-    a plain refresh — no stale-cache confusion, no per-file version query."""
-
     def file_response(self, *args, **kwargs):
         resp = super().file_response(*args, **kwargs)
         resp.headers["Cache-Control"] = "no-cache"
@@ -55,9 +51,6 @@ app = FastAPI(title="Bifrost", version=__version__, lifespan=lifespan)
 
 @app.middleware("http")
 async def _no_cache(request: Request, call_next):
-    """Single-user app: never let the browser serve a stale page or asset.
-    Mark every response no-cache so it always revalidates (ETag) — kills the
-    stale-HTML/stale-CSS caching that made UI edits appear not to take."""
     resp = await call_next(request)
     resp.headers["Cache-Control"] = "no-cache"
     return resp

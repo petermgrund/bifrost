@@ -27,7 +27,8 @@ details::details-content {
   transform: none;
 }
 
-/* Brand palette applied to BeerCSS's theme vars. Light mode only. */
+/* Brand palette applied to BeerCSS's theme vars, one set per theme.
+   BeerCSS's own body.light/body.dark supply the surfaces; we tint the roles. */
 :root,
 body.light {
   --primary: #4a5bae;
@@ -39,6 +40,19 @@ body.light {
   --tertiary-container: #ffdbcd;
   --on-tertiary-container: #380d00;
   --error: #ba1a1a;
+  --warning: #b07a00;
+}
+body.dark {
+  --primary: #b6c4ff;
+  --on-primary: #182b8e;
+  --primary-container: #3242a0;
+  --on-primary-container: #dee0ff;
+  --tertiary: #ffb59a;
+  --on-tertiary: #5a1c00;
+  --tertiary-container: #7b2f0e;
+  --on-tertiary-container: #ffdbcd;
+  --error: #ffb4ab;
+  --warning: #ddb15f;
 }
 
 /* Monospace only for codes/ids. */
@@ -51,6 +65,9 @@ code, .mono { font-family: "Space Mono", ui-monospace, monospace; }
 .list li.wave { cursor: pointer; }
 .scroll.capped { max-block-size: 60vh; }
 summary.none { cursor: pointer; }
+/* BeerCSS only reveals ::backdrop for popovers — show the scrim for
+   showModal() dialogs too. */
+dialog[open]::backdrop { display: block !important; opacity: 1; visibility: visible; }
 summary.none i.chev { transition: transform 0.15s; }
 summary.none :is(h5, h6) { margin: 0; }
 details[open] > summary.none i.chev { transform: rotate(90deg); }

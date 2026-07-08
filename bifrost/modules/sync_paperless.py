@@ -238,9 +238,16 @@ async def sync(
     transcriptions_only: bool = False,
     single_doc_id: int | None = None,
     versions_only: bool = False,
+    selected: set[str] | None = None,
 ) -> AsyncIterator[SyncEvent]:
     # versions_only: run ONLY phase 2 (repoint media to the selected Paperless
     # version). No create / title / date / transcription work
+    # selected: only process these preview rows — keys are "entity:source_id"
+    # exactly as emitted in item events ("doc:44", "media:44", "note:44").
+    # None means everything. (entity, source_id) is unique per row: a doc gets
+    # a phase-1 "doc" row OR a phase-2 one (keyed on having a gramps_id), never
+    # both. Deselected phase-2 docs also skip baselining — the next unfiltered
+    # run picks that up.
     counts = {"created": 0, "skipped": 0, "versions_updated": 0, "baselined": 0,
               "titles_updated": 0, "dates_updated": 0,
               "tx_created": 0, "tx_updated": 0, "tx_skipped": 0, "errors": 0}
@@ -303,12 +310,32 @@ async def sync(
         yield SyncEvent(kind="started",
                         detail=f"{len(documents)} tagged document(s) in Paperless")
 
+    # One 0→100% bar across the whole run: each phase that will actually run
+    # owns an equal band of the bar, and advances through it by its own
+    # done/total. The caption still shows the current phase's counts.
+    if versions_only:
+        bands = ["versions"]
+    elif transcriptions_only:
+        bands = ["tx"]
+    else:
+        bands = ["media", "versions", "details"] + (["tx"] if cfg.transcription_tag_id else [])
+
+    def _progress(band: str, label: str, done: int, total: int) -> SyncEvent:
+        frac = (bands.index(band) + (done / total if total else 0)) / len(bands)
+        return SyncEvent(kind="progress", detail=label,
+                         data={"done": done, "total": total,
+                               "percent": round(100 * frac)})
+
     # ============ Phase 1: media sync ============
-    for doc in (documents if not versions_only else []):
+    n_docs = len(documents)
+    for i, doc in enumerate(documents if not versions_only else []):
+        yield _progress("media", "Checking new documents", i, n_docs)
         doc_id = doc["id"]
         title = doc.get("title", f"Untitled (Paperless #{doc_id})")
         if _doc_gramps_id(doc, cfg.gramps_id_field_id):
             counts["skipped"] += 1
+            continue
+        if selected is not None and f"doc:{doc_id}" not in selected:
             continue
 
         try:
@@ -399,11 +426,14 @@ async def sync(
 
     # ============ Phase 2: version sync ============
     img_tag_id = tag_map.get("img")
-    for doc in documents:
+    for i, doc in enumerate(documents):
+        yield _progress("versions", "Checking versions", i, n_docs)
         doc_id = doc["id"]
         title = doc.get("title", f"Untitled (Paperless #{doc_id})")
         gramps_id = _doc_gramps_id(doc, cfg.gramps_id_field_id)
         if not gramps_id:
+            continue
+        if selected is not None and f"doc:{doc_id}" not in selected:
             continue
         try:
             metadata = await paperless.get_document_metadata(doc_id)
@@ -483,11 +513,14 @@ async def sync(
         except Exception:  # noqa: BLE001
             skip_tag_handle = None
 
-    for doc in (documents if not versions_only else []):
+    for i, doc in enumerate(documents if not versions_only else []):
+        yield _progress("details", "Checking titles and dates", i, n_docs)
         doc_id = doc["id"]
         title = doc.get("title", f"Untitled (Paperless #{doc_id})")
         gramps_id = _doc_gramps_id(doc, cfg.gramps_id_field_id)
         if not gramps_id:
+            continue
+        if selected is not None and f"media:{doc_id}" not in selected:
             continue
         try:
             media = await gramps.get_media_by_gramps_id(gramps_id)
@@ -561,8 +594,11 @@ async def sync(
             yield SyncEvent(kind="started",
                             detail=f"{len(tx_docs)} document(s) with transcription tag")
         note_ids: set[str] | None = None  # fetched on first mint
-        for doc in tx_docs:
+        for i, doc in enumerate(tx_docs):
+            yield _progress("tx", "Checking transcriptions", i, len(tx_docs))
             doc_id = doc["id"]
+            if selected is not None and f"note:{doc_id}" not in selected:
+                continue
             title = doc.get("title", f"Untitled (Paperless #{doc_id})")
             gramps_id = _doc_gramps_id(doc, cfg.gramps_id_field_id)
             if not gramps_id:

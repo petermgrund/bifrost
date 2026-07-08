@@ -19,25 +19,33 @@
             via opts {mono, upper}.
    BUSY     a running job disables its button, swaps the label to a gerund
             ('Applying…'), and appends `spinner` in the same row; a
-            standalone wait renders statusLine('busy', …). Every submit has
-            a busy guard — no double fires.
+            standalone wait renders statusLine('busy', …), upgrading to
+            progressLine() once the run reports done/total (polled from
+            /api/runs/active). Every submit has a busy guard — no double
+            fires.
    RESULTS  every outcome renders through statusLine(): green check for
             done, red cross for failure, plain secondary text for notices —
             never bare text, never an icon-font glyph. Run counters become
             prose via summarize().
    TABLES   plain <table>, sentence-case headers, emptyRow() when nothing
             matches. Ids in .mono. Row actions are button.small with a
-            gerund label while busy.
+            gerund label while busy. When rows are individually applied,
+            they lead with a checkbox() column — everything ticked by
+            default, a header checkbox toggling the shown rows
+            (indeterminate on a mixed selection), and the action button
+            carrying the ticked count.
    FILTERS  chips carry their counts ('Create 12'); add an 'N shown' count
             only when a search field narrows further.
    LINKS    inline mentions are a.link (target=_blank rel=noopener); the one
             primary action after a run may be an <a class="button">.
    SPACING  BeerCSS helpers only (space, large-space, scroll [+ .capped],
             left-padding) — no inline styles beyond the bifrost.css glue.
-   BUTTONS  all through btn() — one uniform filled style, no color/variant
-            mixing; order conveys emphasis. Colors via text helpers
-            (green-text, error-text, secondary-text). The text font is
-            BeerCSS's --font (never override); mono only for ids/codes. */
+   BUTTONS  all through btn() — the default filled style leads; order conveys
+            emphasis. Two sanctioned variants: btn(…, 'border') outlines a
+            secondary action, btn(…, 'error') reds a destructive/cancel one.
+            Colors via text helpers (green-text, error-text, secondary-text).
+            The text font is BeerCSS's --font (never override); mono only for
+            ids/codes. */
 import { LitElement, html, nothing } from 'lit';
 
 export { html, nothing };
@@ -56,14 +64,23 @@ export const post = (path, body) =>
 
 /* ---- BeerCSS control helpers ----
    btn: the ONE button style app-wide — the default filled BeerCSS button.
-   Emphasis comes from position (primary action first), never from color. */
-export function btn(label, disabled, onClick) {
-  return html`<button ?disabled=${disabled} @click=${onClick}>${label}</button>`;
+   Emphasis comes from position (primary action first), never from color;
+   cls 'error' is reserved for destructive/cancel actions. */
+export function btn(label, disabled, onClick, cls = '') {
+  return html`<button class=${cls} ?disabled=${disabled} @click=${onClick}>${label}</button>`;
 }
 export const spinner = html`<progress class="circle small"></progress>`;
 
 export const chip = (label, on, onClick) =>
   html`<button class="chip ${on ? 'fill' : ''}" @click=${onClick}>${label}</button>`;
+
+/* Row-selection checkbox (BeerCSS label.checkbox). opts: {indeterminate,
+   disabled}. See the TABLES stanza for the selection pattern. */
+export const checkbox = (checked, onChange, opts = {}) => html`
+  <label class="checkbox">
+    <input type="checkbox" .checked=${checked} .indeterminate=${opts.indeterminate || false}
+      ?disabled=${opts.disabled || false} @change=${onChange}><span></span>
+  </label>`;
 
 const WIDTH = { small: 'small-width', medium: 'medium-width', large: 'large-width' };
 
@@ -115,6 +132,8 @@ const ACTION_WORDS = {
   tx_created: ['add', 'added', 'transcription'],
   tx_updated: ['rewrite', 'rewrote', 'transcription'],
   transcribed: ['transcribe', 'transcribed', 'doc'],
+  pages_scaled: ['scale', 'scaled', 'page'],
+  uploaded: ['upload', 'uploaded', 'new version', 'new versions'],
 };
 const QUIET = new Set(['skipped', 'tx_skipped', 'baselined', 'errors']);
 
@@ -152,6 +171,18 @@ export function statusLine(kind, msg) {
   if (kind === 'ok') return html`<span>${iconYes} ${msg}</span>`;
   if (kind === 'error') return html`<span class="error-text">${iconNo} ${msg}</span>`;
   return html`<span class="secondary-text">${msg}</span>`;
+}
+
+/* Determinate progress for a long job: caption line + BeerCSS linear bar.
+   The bar tracks the WHOLE run 0→100 (percent), while the caption shows the
+   current stage's counts — one fill, no per-stage restarts. Width-capped in
+   bifrost.css to match capped tables; give it a stanza line of its own, not
+   a control nav (use the compact busy statusLine there instead). Falls back
+   to statusLine('busy') until the run reports a total. */
+export function progressLine(msg, done, total, percent) {
+  if (!total) return statusLine('busy', msg);
+  return html`<span class="secondary-text">${msg} · ${done} of ${total}</span>
+    <progress value=${percent ?? Math.round((100 * done) / total)} max="100"></progress>`;
 }
 
 /* Empty-state row for a table body: emptyRow(colspan, 'No items…'). */

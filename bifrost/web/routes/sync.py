@@ -45,6 +45,9 @@ class PaperlessBody(BaseModel):
     force_transcriptions: bool = False
     transcriptions_only: bool = False
     versions_only: bool = False
+    # Preview row keys ("entity:source_id") to apply; omitted = everything.
+    # Only apply honors it — preview always shows the full picture.
+    selected: list[str] | None = None
 
 
 def _paperless_job(body: PaperlessBody, preview: bool) -> str:
@@ -78,6 +81,7 @@ async def paperless_apply(request: Request, body: PaperlessBody):
         apply=True, force_transcriptions=body.force_transcriptions,
         transcriptions_only=body.transcriptions_only,
         versions_only=body.versions_only,
+        selected=set(body.selected) if body.selected is not None else None,
     )
     run_id, events = await record_run(st.conn, _paperless_job(body, False), gen)
     st.caches.clear()

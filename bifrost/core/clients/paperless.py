@@ -124,6 +124,33 @@ class PaperlessClient:
         await self._request(
             "PATCH", f"/api/documents/{doc_id}/", json={"tags": tag_ids})
 
+    async def update_version(
+        self, doc_id: int, data: bytes, filename: str,
+        version_label: str | None = None, mime: str = "application/pdf",
+    ) -> str:
+        """Upload bytes as a NEW VERSION of an existing document. Returns the
+        consume-task id — the file only becomes the selected version once
+        Paperless finishes consuming it (poll task_status). Long timeout: this
+        uploads the whole file and big scans exceed the client default."""
+        resp = await self._request(
+            "POST", f"/api/documents/{doc_id}/update_version/",
+            files={"document": (filename, data, mime)},
+            data={"version_label": version_label} if version_label else None,
+            timeout=300.0,
+        )
+        try:
+            return str(resp.json()).strip()
+        except ValueError:
+            return resp.text.strip().strip('"')
+
+    async def task_status(self, task_uuid: str) -> dict | None:
+        """The task's row from /api/tasks/ ('status' is PENDING/STARTED/
+        SUCCESS/FAILURE), or None while the task isn't visible yet."""
+        resp = await self._request("GET", "/api/tasks/", params={"task_id": task_uuid})
+        payload = resp.json()
+        results = payload.get("results", []) if isinstance(payload, dict) else payload
+        return results[0] if results else None
+
     async def list_all_documents(self, fields: str | None = None) -> list[dict]:
         """Every document (paginated). `fields` trims the payload via the
         Paperless `fields=` selector when given."""

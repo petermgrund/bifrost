@@ -75,7 +75,7 @@ class CitationsPage extends BifrostElement {
   async lookupMedia() {
     if (this.busy) return;
     const id = this.mediaId.trim();
-    if (!id) { this.error = 'Enter a Gramps media ID.'; return; }
+    if (!id) { this.error = 'Enter a Gramps media ID'; return; }
     this.busy = true;
     this.error = '';
     try {

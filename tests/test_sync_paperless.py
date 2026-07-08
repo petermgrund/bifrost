@@ -83,6 +83,50 @@ def test_split_transcription_empty_translation():
     assert tl is None
 
 
+class _FakePaperless:
+    """Just enough for a phase-1 preview: two tagged docs, no custom fields."""
+    def __init__(self, docs):
+        self._docs = docs
+
+    async def resolve_tag_id(self, name):
+        return {"doc": 1, "img": 2}.get(name)
+
+    async def list_documents_by_tags(self, tag_ids):
+        return list(self._docs)
+
+    async def get_document_metadata(self, doc_id):
+        return {"media_filename": f"{doc_id:07d}.pdf", "original_checksum": "abc"}
+
+
+class _FakeGramps:
+    async def list_media_gramps_ids(self):
+        return set()
+
+
+def test_selected_keys_filter_rows(tmp_path):
+    """selected={'doc:2'} → only doc 2 produces a row; doc 1 is left alone."""
+    import asyncio
+
+    from bifrost.core import db
+    from bifrost.core.config import SyncPaperlessConfig
+    from bifrost.modules.sync_paperless import sync
+
+    docs = [{"id": 1, "title": "One", "custom_fields": [], "tags": [1]},
+            {"id": 2, "title": "Two", "custom_fields": [], "tags": [1]}]
+    cfg = SyncPaperlessConfig(gramps_id_field_id=10, gramps_url_field_id=11)
+    conn = db.connect(tmp_path / "t.db")
+
+    async def collect():
+        return [e async for e in sync(_FakePaperless(docs), _FakeGramps(), conn,
+                                      cfg, apply=False, selected={"doc:2"})]
+
+    events = asyncio.run(collect())
+    items = [(e.action, e.source_id) for e in events if e.kind == "item"]
+    assert items == [("would_create", "2")]
+    summary = next(e for e in events if e.kind == "summary")
+    assert summary.data["created"] == 1
+
+
 def test_clients_follow_redirects():
     """Regression: Gramps 308-redirects POST /objects -> /objects/. httpx must
     follow (requests did by default); otherwise create_media gets the redirect

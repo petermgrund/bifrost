@@ -6,6 +6,7 @@
 import { BifrostElement, html, nothing } from './core.js';
 import './paperless-sync-page.js';
 import './transcribe-page.js';
+import './reprocess-page.js';
 import './citations-page.js';
 import './places-page.js';
 
@@ -14,6 +15,8 @@ const SECTIONS = [
     body: html`<paperless-sync-page></paperless-sync-page>` },
   { id: 'transcribe', title: 'Transcribe', desc: 'Gemini OCR for a Paperless document',
     body: html`<transcribe-page></transcribe-page>` },
+  { id: 'reprocess', title: 'Reprocess', desc: 'Rebuild a Paperless PDF so every page shares one width',
+    body: html`<reprocess-page></reprocess-page>` },
   { id: 'citations', title: 'Citations', desc: 'Generate Gramps citations from Paperless document',
     body: html`<citations-page></citations-page>` },
   { id: 'places', title: 'Places', desc: 'Generate a boundary polygon for a place on a Gramps map',

@@ -14,6 +14,13 @@ def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
+# Live progress of in-flight runs, keyed by run id. "progress" events land
+# here for pollers (/api/runs/active) and nowhere else — they are never
+# written to run_events nor returned with the finished run. Single-process
+# app, so a module dict is the whole registry.
+ACTIVE: dict[int, dict] = {}
+
+
 async def record_run(
     conn: sqlite3.Connection, job: str, events: AsyncIterator[SyncEvent]
 ) -> tuple[int, list[SyncEvent]]:
@@ -24,12 +31,16 @@ async def record_run(
         )
         run_id = cur.lastrowid
 
+    ACTIVE[run_id] = {"run_id": run_id, "job": job, "started_at": _now()}
     collected: list[SyncEvent] = []
     status = "ok"
     summary = None
     try:
         seq = 0
         async for ev in events:
+            if ev.kind == "progress":
+                ACTIVE[run_id].update({"detail": ev.detail, **(ev.data or {})})
+                continue
             collected.append(ev)
             with conn:
                 conn.execute(
@@ -48,6 +59,8 @@ async def record_run(
                 (_now(), run_id),
             )
         raise
+    finally:
+        ACTIVE.pop(run_id, None)
 
     with conn:
         conn.execute(

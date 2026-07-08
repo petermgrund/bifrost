@@ -142,12 +142,12 @@ class PlacesPage extends BifrostElement {
         ${field('Gramps place ID', this.placeId, (e) => (this.placeId = e.target.value),
           { mono: true, upper: true, width: 'small', onEnter: () => this.lookup() })}
         ${btn('Look up', false, () => this.lookup())}
+        ${btn('Refresh', false, () => this.load(true), 'border')}
         <div class="max"></div>
         ${missing ? btn(
           this.busy === 'all' ? 'Generating…' : `Generate missing (${missing})`,
           !!this.busy, () => this.generateMissing()) : nothing}
         ${this.busy === 'all' ? spinner : nothing}
-        ${btn('Refresh', false, () => this.load(true))}
       </nav>
       ${!this.popup && this.result ? html`<p>${statusLine(this.result.kind, this.result.body)}</p>` : nothing}
       ${this.loadError ? html`<p>${statusLine('error', `Reload failed — shown data may be stale: ${this.loadError}`)}</p>` : nothing}

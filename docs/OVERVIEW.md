@@ -81,6 +81,12 @@ The UI is one page: a stack of expandable sections, one per operation.
   a media object and the document is transcribed in place, with the text flowing
   on into a Gramps note. Small tools re-run a single document's transcription or
   rebuild all transcription notes.
+- **Reprocess** — rebuilds a Paperless PDF so every page shares one width (the
+  widest or the narrowest page in the file, aspect ratio preserved) and uploads
+  the result as a new version of the same document. The original file stays in
+  the version history, and the Gramps media follows on the next version sync.
+  A scanner measures every multi-page PDF tagged `doc` and lists the
+  mixed-width ones for batch fixing.
 - **Citations** — an assistant for building genealogical source citations. Start
   from a media object; describe the record in free text; Claude drafts the
   citation in a consistent house style (or start from a blank manual draft); you

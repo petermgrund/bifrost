@@ -50,7 +50,7 @@ async def set_relation(
     place = await gramps.get_place(handle)
     existing = osm_ref_from_place(place)
     if existing and not replace:
-        raise ValueError("place already has an OSM URL")
+        raise ValueError("place already has OSM URL")
     path = f"https://www.openstreetmap.org/{osm_type}/{osm_id}"
     if existing:
         for url in place.get("urls", []):

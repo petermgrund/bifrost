@@ -1,6 +1,3 @@
-"""Record a module operation as a run with structured events
-"""
-
 from __future__ import annotations
 
 import sqlite3
@@ -14,10 +11,6 @@ def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
-# Live progress of in-flight runs, keyed by run id. "progress" events land
-# here for pollers (/api/runs/active) and nowhere else — they are never
-# written to run_events nor returned with the finished run. Single-process
-# app, so a module dict is the whole registry.
 ACTIVE: dict[int, dict] = {}
 
 

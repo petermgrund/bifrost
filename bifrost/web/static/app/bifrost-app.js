@@ -31,7 +31,7 @@ class BifrostApp extends BifrostElement {
 
   toggle(e, id) {
     if (e.target.open) {
-      this.opened = new Set([...this.opened, id]);
+      this.opened = new Set([id]);
       history.replaceState(null, '', '#' + id);
     }
   }

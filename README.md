@@ -25,7 +25,3 @@ Bifrost's memory lives in Gramps and the source systems, so nothing important de
 # Feature Requests
 
 Feature requests can be submitted by creating a new issue and tagging it as a new feature request.
-
-# Development
-
-Bifrost consolidates several independent scripts intended to sync Gramps Web to Paperless-ngx, Immich, and OSM; as well as to be a genealogical citation generator. 

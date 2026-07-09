@@ -341,7 +341,8 @@ async def compose(
 
 
 # ---------------------------------------------------------------------------
-# Dump mode — freeform text in, matched-or-new source + citation out
+# Dump mode — the user's description in labeled sections (subject, transcript,
+# URLs, catch-all) in, matched-or-new source + citation out
 # ---------------------------------------------------------------------------
 
 DUMP_SCHEMA = {
@@ -361,8 +362,9 @@ DUMP_SCHEMA = {
     },
 }
 
-DUMP_LEAD = """The user has pasted a freeform description of a record \
-("the dump"). Extract every citation element from it."""
+DUMP_LEAD = """The user has described a record in labeled sections below \
+(citation subject, transcript, URLs, additional details). Extract every \
+citation element from them."""
 
 EVENT_ONLY_LEAD = """No freeform description was provided — compose a citation \
 for the EVENT described above. Infer the standard source record that would \
@@ -403,6 +405,103 @@ def _type_guidance_digest() -> str:
     return "DOMAIN NOTES BY RECORD KIND:\n" + "\n".join(lines)
 
 
+async def media_citations(gramps: GrampsClient, media_handle: str) -> list[dict]:
+    """Citations already attached to a media object, with enough context to
+    compose a sibling citation in the same style: source identity, locator,
+    confidence, and the citation's note texts."""
+    out = []
+    for c in await gramps._paged("/citations/"):
+        if not any(mr.get("ref") == media_handle for mr in c.get("media_list", [])):
+            continue
+        src = None
+        if c.get("source_handle"):
+            try:
+                src = await gramps.get_object("sources", c["source_handle"])
+            except Exception:  # noqa: BLE001
+                src = None
+        notes = []
+        for nh in c.get("note_list") or []:
+            try:
+                n = await gramps.get_object("notes", nh)
+            except Exception:  # noqa: BLE001
+                continue
+            txt = ((n.get("text") or {}).get("string") or "").strip()
+            if txt:
+                notes.append({"type": str(n.get("type") or ""), "text": txt})
+        out.append({
+            "gramps_id": c.get("gramps_id", ""),
+            "page": c.get("page", ""),
+            "confidence": c.get("confidence"),
+            "source_gramps_id": (src or {}).get("gramps_id"),
+            "source_handle": (src or {}).get("handle"),
+            "source_title": (src or {}).get("title", ""),
+            "notes": notes,
+        })
+    return out
+
+
+def build_dump_context(
+    subject: str = "",
+    transcript: str = "",
+    urls: str = "",
+    dump: str = "",
+    media: dict | None = None,
+    event_context: str | None = None,
+    existing_citations: list[dict] | None = None,
+    today: str = "",
+) -> str:
+    """The record-description block shared by the compose call and the critique
+    pass: every user-provided section, labeled, empty ones omitted."""
+    parts = [f"Today's date (for access dates): {today}"]
+    if event_context:
+        parts.append(
+            "EVENT this citation documents (the citation will be attached to it):\n"
+            + event_context)
+    if media:
+        parts.append(f"MEDIA OBJECT this citation will be attached to:\n"
+                     f"  title: {media.get('desc')}\n  gramps id: {media.get('gramps_id')}")
+    if subject.strip():
+        parts.append(
+            "CITATION SUBJECT — the specific fact or claim this citation "
+            "supports (name this subject in the reference notes, and assess "
+            "evidence type and confidence for THIS claim: the same record gives "
+            "Direct evidence of one fact and Indirect of another — e.g. a birth "
+            "year computed from a stated age is Indirect):\n  " + subject.strip())
+    if existing_citations:
+        lines = []
+        for i, c in enumerate(existing_citations, 1):
+            head = f"  [{i}] citation {c.get('gramps_id') or '?'}"
+            if c.get("source_gramps_id"):
+                head += f" in source {c['source_gramps_id']} ({c.get('source_title') or ''})"
+            head += f" | locator: {c.get('page') or '(none)'} | confidence: {c.get('confidence')}"
+            lines.append(head)
+            for n in c.get("notes", []):
+                lines.append(f"      {n['type'] or 'note'}: {' '.join(n['text'].split())}")
+        parts.append(
+            "CITATIONS ALREADY ATTACHED TO THIS MEDIA OBJECT — the new citation "
+            "cites another aspect of the SAME record. Do NOT rebuild from "
+            "scratch: set matched_source_gramps_id to the existing source and "
+            "return null for repository/source; keep the locator and the "
+            "reference notes' wording consistent with the existing citation, "
+            "changing only what the new subject requires (the subject named, "
+            "the GPS quality and confidence assessed for this claim, and an "
+            "abstract focused on this aspect rather than repeating the whole "
+            "record):\n" + "\n".join(lines))
+    if transcript.strip():
+        parts.append(
+            "TRANSCRIPT of the record (from Paperless; may include an English "
+            "translation section):\n" + transcript.strip())
+    if urls.strip():
+        parts.append(
+            "URLS for the record, one per line, each optionally followed by its "
+            "role (permanent, archived, database entry…). Place them per the "
+            "house rules — deep/permanent URL in the First Reference Note, "
+            "platform homepage in pubinfo:\n" + urls.strip())
+    if dump.strip():
+        parts.append(f"ADDITIONAL DETAILS:\n{dump.strip()}")
+    return "\n\n".join(parts)
+
+
 async def compose_from_dump(
     anthropic: AnthropicClient,
     dump: str,
@@ -411,46 +510,80 @@ async def compose_from_dump(
     repos: list[dict],
     event_context: str | None = None,
     critique: bool = True,
+    subject: str = "",
+    transcript: str = "",
+    urls: str = "",
+    existing_citations: list[dict] | None = None,
 ) -> dict:
     today = datetime.now().strftime("%-d %B %Y")
-    has_dump = bool(dump.strip())
-    lead = DUMP_LEAD if has_dump else EVENT_ONLY_LEAD
-    parts = [lead + "\n\n" + DUMP_MATCHING, f"Today's date (for access dates): {today}"]
-    if event_context:
-        parts.append(
-            "EVENT this citation documents (the citation will be attached to it):\n"
-            + event_context)
-    if media:
-        parts.append(f"MEDIA OBJECT this citation will be attached to:\n"
-                     f"  title: {media.get('desc')}\n  gramps id: {media.get('gramps_id')}")
-    parts.append(_catalog(sources, repos))
-    parts.append(_type_guidance_digest())
-    if has_dump:
-        parts.append(f"THE DUMP:\n{dump.strip()}")
-    parts.append("Compose the EE citation now.")
+    has_content = any(s.strip() for s in (subject, transcript, urls, dump))
+    lead = DUMP_LEAD if has_content else EVENT_ONLY_LEAD
+    record_ctx = build_dump_context(
+        subject=subject, transcript=transcript, urls=urls, dump=dump,
+        media=media, event_context=event_context,
+        existing_citations=existing_citations, today=today)
+    parts = [lead + "\n\n" + DUMP_MATCHING, record_ctx,
+             _catalog(sources, repos), _type_guidance_digest(),
+             "Compose the EE citation now."]
     draft = await anthropic.complete_structured(
         system_prompt(), "\n\n".join(parts), DUMP_SCHEMA, max_tokens=8000)
 
     if critique:
-        ctx = []
-        if event_context:
-            ctx.append("EVENT this citation documents:\n" + event_context)
-        if media:
-            ctx.append(f"MEDIA: {media.get('desc')} ({media.get('gramps_id')})")
-        ctx.append(f"Today's date (for access dates): {today}")
-        ctx.append(f"THE DUMP:\n{dump.strip()}" if has_dump else EVENT_ONLY_LEAD)
-        revised = await _critique(anthropic, "\n\n".join(ctx), draft)
+        ctx = record_ctx if has_content else record_ctx + "\n\n" + EVENT_ONLY_LEAD
+        matched_now = next(
+            (s for s in sources
+             if s["gramps_id"] == draft.get("matched_source_gramps_id")), None)
+        if matched_now:
+            # The reviewer's style checks need the matched source's identity —
+            # the reviewed draft carries source=null in the matched case.
+            ctx += ("\n\nMATCHED EXISTING SOURCE (the draft composes a citation "
+                    "within it; keep its established style):\n"
+                    f"  title: {matched_now.get('title')}\n"
+                    f"  author: {matched_now.get('author')}\n"
+                    f"  pubinfo: {matched_now.get('pubinfo')}\n"
+                    f"  abbrev: {matched_now.get('abbrev')}")
+        revised = await _critique(anthropic, ctx, draft)
         # The critique reviews citation text, not matching — keep the first
         # pass's match decision so server-side resolution below is unaffected.
         revised["matched_source_gramps_id"] = draft.get("matched_source_gramps_id")
         revised["matched_repository_gramps_id"] = draft.get("matched_repository_gramps_id")
+        # Matching is frozen, so new-vs-existing must be frozen too: a critique
+        # that nulls or drops the drafted source/repository (its schema cannot
+        # express a match, so it may obey the reuse instruction this way) would
+        # leave an unsaveable draft — restore the first pass's objects.
+        for k in ("source", "repository", "call_number"):
+            if draft.get(k) is not None and revised.get(k) is None:
+                revised[k] = draft[k]
         draft = revised
 
+    def _from_existing(gid: str | None) -> dict | None:
+        # The catalog is cached and can lag a source created outside Bifrost;
+        # the live existing-citation scan knows its handle, so a sibling
+        # citation can still reuse it.
+        for c in existing_citations or []:
+            if gid and c.get("source_gramps_id") == gid and c.get("source_handle"):
+                return {"handle": c["source_handle"], "gramps_id": gid,
+                        "title": c.get("source_title", "")}
+        return None
+
     # Resolve matches server-side; a hallucinated id degrades to "new".
-    matched_source = next(
-        (s for s in sources if s["gramps_id"] == draft.get("matched_source_gramps_id")), None)
+    mid = draft.get("matched_source_gramps_id")
+    matched_source = (next((s for s in sources if s["gramps_id"] == mid), None)
+                      or _from_existing(mid))
     matched_repo = next(
         (r for r in repos if r["gramps_id"] == draft.get("matched_repository_gramps_id")), None)
+    # Same media object = same record: when its citations all point at ONE
+    # source and the model neither matched nor deliberately drafted a new
+    # source, reuse that source.
+    if existing_citations and not matched_source and not draft.get("source"):
+        sids = {c.get("source_gramps_id") for c in existing_citations
+                if c.get("source_gramps_id")}
+        if len(sids) == 1:
+            sid = next(iter(sids))
+            matched_source = (next((s for s in sources if s["gramps_id"] == sid), None)
+                              or _from_existing(sid))
+            if matched_source:
+                draft["matched_source_gramps_id"] = matched_source["gramps_id"]
     if matched_source:
         draft["source"] = None
         draft["repository"] = None

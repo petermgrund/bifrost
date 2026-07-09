@@ -81,11 +81,23 @@ code, .mono { font-family: "Space Mono", ui-monospace, monospace; }
 /* Width CAP for tables with few short columns — BeerCSS tables stretch to
    100% (its *-width helpers are fixed sizes, not caps). */
 .scroll.capped-width { max-inline-size: 40rem; }
-/* Linear progress bars match the table cap — never page-wide. */
-progress:not(.circle) { max-inline-size: 40rem; }
+/* Linear progress bar (progressLine): width animates smoothly between polls. */
+.bar {
+  inline-size: 20rem;
+  block-size: 0.5rem;
+  border-radius: 0.25rem;
+  background: var(--secondary-container);
+  overflow: hidden;
+}
+.bar > div {
+  block-size: 100%;
+  background: var(--primary);
+  transition: width 0.8s linear;
+}
 /* Table headers read as labels, not emphasis (browsers bold th by default). */
 th { font-weight: normal; }
 summary.none { cursor: pointer; }
+.field-helper { margin: 0.25rem 0 1rem 0.25rem; }
 /* BeerCSS only reveals ::backdrop for popovers — show the scrim for
    showModal() dialogs too. */
 dialog[open]::backdrop { display: block !important; opacity: 1; visibility: visible; }

@@ -8,10 +8,14 @@ class CitationsPage extends BifrostElement {
     pick: { state: true },          // { media, source, repository }; modal open when media set
     draft: { state: true },         // composed/edited draft
     busy: { state: true },
+    pulling: { state: true },       // transcript fetch in flight
     error: { state: true },
     loadError: { state: true },
     saved: { state: true },
-    dump: { state: true },
+    subject: { state: true },       // what the citation represents (required)
+    transcript: { state: true },
+    urls: { state: true },
+    extra: { state: true },         // catch-all
     matched: { state: true },
   };
 
@@ -23,10 +27,15 @@ class CitationsPage extends BifrostElement {
     this.pick = { media: null, source: null, repository: null };
     this.draft = null;
     this.busy = false;
+    this.pulling = false;
     this.error = '';
     this.loadError = '';
     this.saved = null;
-    this.dump = '';
+    this.subject = '';
+    this.transcript = '';
+    this.urls = '';
+    this.extra = '';
+    this.pl = null;
     this.matched = null;
   }
 
@@ -50,7 +59,11 @@ class CitationsPage extends BifrostElement {
     this.draft = null;
     this.error = '';
     this.saved = null;
-    this.dump = '';
+    this.subject = '';
+    this.transcript = '';
+    this.urls = '';
+    this.extra = '';
+    this.pl = null;
     this.matched = null;
   }
 
@@ -87,7 +100,10 @@ class CitationsPage extends BifrostElement {
     this.error = '';
     try {
       const r = await post('/citations/api/compose-dump', {
-        dump: this.dump,
+        subject: this.subject,
+        transcript: this.transcript,
+        urls: this.urls,
+        dump: this.extra,
         media_handle: this.pick.media?.handle || null,
       });
       this.draft = r.draft;
@@ -100,6 +116,21 @@ class CitationsPage extends BifrostElement {
       this.error = e.message;
     } finally {
       this.busy = false;
+    }
+  }
+
+  async pull(prop, plKey, what) {
+    if (this.pulling || this.busy) return;
+    this.pulling = true;
+    this.error = '';
+    try {
+      this.pl ??= await api(`/citations/api/paperless/${encodeURIComponent(this.pick.media.gramps_id)}`);
+      if (this.pl[plKey]) this[prop] = this.pl[plKey];
+      else this.error = `No ${what} on Paperless doc #${this.pl.doc_id}`;
+    } catch (e) {
+      this.error = e.message;
+    } finally {
+      this.pulling = false;
     }
   }
 
@@ -156,11 +187,10 @@ class CitationsPage extends BifrostElement {
     return html`
       <dialog class="large" @close=${() => this.reset()}>
         <nav>
-          <h5 class="max small">${m.title}</h5>
+          <h5 class="max small">${m.title} (${m.gramps_id})</h5>
           <button class="circle transparent" @click=${() => this.closeModal()} aria-label="Close">
             <i>close</i></button>
         </nav>
-        <p class="mono small-text">${m.gramps_id}</p>
         ${this.error ? html`<p>${statusLine('error', this.error)}</p>` : nothing}
         ${this.saved ? this.renderSaved()
           : this.step === 'review' ? this.renderReview()
@@ -169,12 +199,32 @@ class CitationsPage extends BifrostElement {
   }
 
   renderDescribe() {
+    const m = this.pick.media;
+    const cits = m.citations || [];
+    const srcTitles = [...new Set(cits.map((c) => c.source_title).filter(Boolean))];
+    const pull = (prop, plKey, what) => (m.paperless_id ? html`<nav class="wrap">
+        ${btn(this.pulling ? 'Pulling...' : 'Pull from Paperless',
+          this.pulling || this.busy, () => this.pull(prop, plKey, what))}
+        ${this.pulling ? spinner : nothing}
+      </nav><div class="space"></div>` : nothing);
     return html`
-      ${field('Enter as much info about record',
-        this.dump, (e) => (this.dump = e.target.value), { rows: 7 })}
+      ${cits.length ? html`<p>Already cited
+        ${cits.length === 1 ? 'once' : `${cits.length} times`}${srcTitles.length === 1
+          ? html` (${srcTitles[0]})` : nothing}</p>` : nothing}
+      ${field('What this citation represents', this.subject,
+        (e) => (this.subject = e.target.value), { rows: 2, helper: true })}
+      ${field('Transcript', this.transcript,
+        (e) => (this.transcript = e.target.value), { rows: 5, helper: true })}
+      ${pull('transcript', 'transcript', 'transcript')}
+      ${field('URLs', this.urls,
+        (e) => (this.urls = e.target.value), { rows: 3, helper: true })}
+      ${pull('urls', 'source_url', 'source URL')}
+      ${field('Anything else to include', this.extra,
+        (e) => (this.extra = e.target.value), { rows: 4, helper: true })}
+      ${pull('extra', 'notes', 'notes')}
       <nav>
         ${this.ctx.llm ? btn(this.busy ? 'Composing...' : 'Compose citation',
-          this.busy || !this.dump.trim(), () => this.composeDump()) : nothing}
+          this.busy || !this.subject.trim(), () => this.composeDump()) : nothing}
         ${btn('Write manually', this.busy, () => this.manualDraft())}
         ${this.busy ? spinner : nothing}
       </nav>`;
@@ -182,7 +232,7 @@ class CitationsPage extends BifrostElement {
 
   renderSaved() {
     return html`
-      <p>${statusLine('ok', 'Saved to Gramps.')}</p>
+      <p>${statusLine('ok', 'Saved to Gramps')}</p>
       <table>
         <tbody>${Object.entries(this.saved).map(([k, v]) => html`<tr><td>${k}</td><td>${v}</td></tr>`)}</tbody>
       </table>

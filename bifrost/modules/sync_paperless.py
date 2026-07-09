@@ -77,7 +77,7 @@ def build_gramps_date_from_paperless(doc: dict, qualifier_label: str | None) -> 
         year = (year // 10) * 10
         quality = QUAL_ESTIMATED_Q
     else:
-        log.warning("Paperless #%d unknown date qualifier",
+        log.warning("Paperless #%d unknown date qualifier %r",
                     doc.get("id", 0), qualifier_label)
         return None
 
@@ -227,20 +227,13 @@ async def sync(
     existing_ids = await gramps.list_media_gramps_ids()
 
     q_options: dict[str, str] = {}
-    m_options: dict[str, str] = {}
     q_field = cfg.date_qualifier_field_id
-    m_field = cfg.date_meaning_field_id
     if q_field and not transcriptions_only:
         try:
             q_options = await paperless.resolve_custom_field_options(q_field)
         except Exception as exc:  # noqa BLE001
             yield SyncEvent(kind="error", detail=f"date qualifier field options: {exc}")
             q_field = None
-    if m_field and not transcriptions_only:
-        try:
-            m_options = await paperless.resolve_custom_field_options(m_field)
-        except Exception:  # noqa: BLE001
-            m_field = None
 
     def _prospective_cols(doc: dict) -> dict:
         cols: dict = {}
@@ -249,16 +242,16 @@ async def sync(
             date_obj = build_gramps_date_from_paperless(
                 doc, q_options.get(q_val) if q_val else None)
             if date_obj:
-                cols["date"] = format_gramps_date(date_obj)
+                cols["date"] = "new"
         if cfg.transcription_tag_id and cfg.transcription_tag_id in doc.get("tags", []):
             content = (doc.get("content") or "").strip()
             if content:
                 _tx, tl = split_transcription(content)
                 tracked = _get_tx(conn, doc["id"])
-                cols["transcription"] = ("update" if tracked and tracked["note_handle"]
+                cols["transcription"] = ("modified" if tracked and tracked["note_handle"]
                                          else "new")
                 if tl:
-                    cols["translation"] = ("update" if tracked and tracked["translation_handle"]
+                    cols["translation"] = ("modified" if tracked and tracked["translation_handle"]
                                            else "new")
             else:
                 cols["transcription"] = "tagged, no text yet"
@@ -288,7 +281,7 @@ async def sync(
     else:
         bands = ["media", "versions", "details"] + (["tx"] if cfg.transcription_tag_id else [])
 
-    def _progress(band: str, label: str, done: int, total: int) -> SyncEvent:
+    def _progress(band: str, label: str = "", done: int = 0, total: int = 0) -> SyncEvent:
         frac = (bands.index(band) + (done / total if total else 0)) / len(bands)
         return SyncEvent(kind="progress", detail=label,
                          data={"done": done, "total": total,
@@ -481,7 +474,8 @@ async def sync(
         gramps_id = _doc_gramps_id(doc, cfg.gramps_id_field_id)
         if not gramps_id:
             continue
-        if selected is not None and f"media:{doc_id}" not in selected:
+        # doc:{id} selected = the doc was just created; apply its date/title now
+        if selected is not None and not ({f"media:{doc_id}", f"doc:{doc_id}"} & selected):
             continue
         try:
             media = await gramps.get_media_by_gramps_id(gramps_id)
@@ -509,17 +503,11 @@ async def sync(
         if q_field:
             q_val = paperless.get_custom_field_value(doc, q_field)
             q_label = q_options.get(q_val) if q_val else None
-        m_label = None
-        if m_field:
-            m_val = paperless.get_custom_field_value(doc, m_field)
-            m_label = m_options.get(m_val) if m_val else None
 
         date_obj = build_gramps_date_from_paperless(doc, q_label)
         if date_obj is not None and not dates_equal(media.get("date") or {}, date_obj):
-            meaning = f" [{m_label}]" if m_label else ""
-            mcols["date" + meaning] = (
-                f"{format_gramps_date(media.get('date') or {})}"
-                f" → {format_gramps_date(date_obj)}")
+            mcols["date"] = ("changed" if format_gramps_date(media.get("date")) != "(none)"
+                             else "new")
             if apply:
                 media["date"] = date_obj
                 media_dirty = True
@@ -557,7 +545,7 @@ async def sync(
         for i, doc in enumerate(tx_docs):
             yield _progress("tx", "Checking transcriptions", i, len(tx_docs))
             doc_id = doc["id"]
-            if selected is not None and f"note:{doc_id}" not in selected:
+            if selected is not None and not ({f"note:{doc_id}", f"doc:{doc_id}"} & selected):
                 continue
             title = doc.get("title", f"Untitled (Paperless #{doc_id})")
             gramps_id = _doc_gramps_id(doc, cfg.gramps_id_field_id)
@@ -579,11 +567,11 @@ async def sync(
             has_translation = tl_text is not None
             had_translation = bool(tracked["translation_handle"]) if tracked else False
 
-            ncols: dict = {"transcription": "update" if is_update else "new"}
+            ncols: dict = {"transcription": "modified" if is_update else "new"}
             if has_translation:
-                ncols["translation"] = "update" if had_translation else "new"
+                ncols["translation"] = "modified" if had_translation else "new"
             elif had_translation:
-                ncols["translation"] = "removed in Paperless; old note kept"
+                ncols["translation"] = "removed"
 
             if not apply:
                 counts["tx_updated" if is_update else "tx_created"] += 1

@@ -1,5 +1,4 @@
-"""Bifrost CLI for setup and cron.
-
+"""
     python -m bifrost.cli doctor
 """
 

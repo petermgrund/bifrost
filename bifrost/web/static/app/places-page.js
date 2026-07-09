@@ -1,7 +1,3 @@
-/* Places section — look up one place by Gramps ID; a dialog shows its OSM
-   link and boundary status with the set-relation / generate actions. The
-   place list still loads once behind the scenes (lookups + missing count),
-   plus a bulk 'Generate missing' run. */
 import { BifrostElement, html, nothing, api, post, iconYes, iconNo, iconNa, btn, spinner, field, summarize, statusLine } from './core.js';
 
 class PlacesPage extends BifrostElement {
@@ -68,8 +64,6 @@ class PlacesPage extends BifrostElement {
     else { this.popup = null; this.result = null; }
   }
 
-  /* The dialog must sit in the browser's top layer (showModal) — rendered
-     inline it would be clipped to the section expander's content box. */
   updated() {
     const dlg = this.renderRoot.querySelector('dialog');
     if (dlg && !dlg.open) dlg.showModal();
@@ -77,8 +71,6 @@ class PlacesPage extends BifrostElement {
 
   async addRelation(row, value, replace = false) {
     if (!value.trim()) return;
-    // Enter fires keydown AND change on a modified input — the guard makes
-    // the second, concurrent call for the same row a no-op.
     this.relBusy ??= new Set();
     if (this.relBusy.has(row.handle)) return;
     this.relBusy.add(row.handle);
@@ -150,14 +142,14 @@ class PlacesPage extends BifrostElement {
         ${this.busy === 'all' ? spinner : nothing}
       </nav>
       ${!this.popup && this.result ? html`<p>${statusLine(this.result.kind, this.result.body)}</p>` : nothing}
-      ${this.loadError ? html`<p>${statusLine('error', `Reload failed — shown data may be stale: ${this.loadError}`)}</p>` : nothing}
+      ${this.loadError ? html`<p>${statusLine('error', `Reload failed shown data may be stale ${this.loadError}`)}</p>` : nothing}
       ${this.failures.length ? html`
         <div class="large-space"></div>
         <h6 class="small">Failed (${this.failures.length})</h6>
         <table>
           <tbody>${this.failures.map((f) => html`<tr>
-            <td class="mono small-text">${f.gramps_id}</td><td>${f.title}</td>
-            <td class="small-text error-text">${f.detail}</td></tr>`)}</tbody>
+            <td>${f.gramps_id}</td><td>${f.title}</td>
+            <td>${f.detail}</td></tr>`)}</tbody>
         </table>` : nothing}
       ${this.popup ? this.renderPopup(this.popup) : nothing}`;
   }
@@ -175,11 +167,11 @@ class PlacesPage extends BifrostElement {
         <table>
           <tbody>
             <tr>
-              <td class="secondary-text">ID</td>
-              <td class="mono">${r.gramps_id}</td>
+              <td>ID</td>
+              <td>${r.gramps_id}</td>
             </tr>
             <tr>
-              <td class="secondary-text">OSM</td>
+              <td>OSM</td>
               <td>${!r.osm_id || this.editingOsm
                 ? html`<nav class="wrap">
                     ${field('OSM relation or URL', this.editingOsm ? `${r.osm_type}/${r.osm_id}` : '', () => {}, {
@@ -196,10 +188,10 @@ class PlacesPage extends BifrostElement {
                   </nav>`}</td>
             </tr>
             <tr>
-              <td class="secondary-text">Boundary</td>
+              <td>Boundary</td>
               <td>${!r.osm_id ? html`${iconNa}`
-                : r.has_boundary ? html`${iconYes} present`
-                : html`${iconNo} <span class="error-text">missing</span>`}</td>
+                : r.has_boundary ? html`present`
+                : html`<span class="error-text">missing</span>`}</td>
             </tr>
           </tbody>
         </table>
@@ -207,7 +199,7 @@ class PlacesPage extends BifrostElement {
         <div class="space"></div>
         <nav>
           ${r.osm_id ? btn(
-            this.busy === r.handle ? 'Generating…' : r.has_boundary ? 'Regenerate' : 'Generate',
+            this.busy === r.handle ? 'Generating...' : r.has_boundary ? 'Regenerate' : 'Generate',
             !!this.busy, () => this.generate(r, r.has_boundary)) : nothing}
           ${this.busy === r.handle ? spinner : nothing}
           ${btn('Close', false, () => this.closePopup())}

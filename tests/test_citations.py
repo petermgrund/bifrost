@@ -61,6 +61,118 @@ def test_system_prompt_carries_style_guides():
     assert "always left blank" in p             # citation date rule
 
 
+def test_dump_context_sections():
+    from bifrost.modules.citations import build_dump_context
+    ctx = build_dump_context(
+        subject="Indiana Siggerud's birth year",
+        transcript="line one\nline two",
+        urls="https://x — permanent",
+        dump="misc details",
+        media={"desc": "Census 1930", "gramps_id": "M9"},
+        existing_citations=[{
+            "gramps_id": "C0001", "page": "p. 3B", "confidence": 3,
+            "source_gramps_id": "S0042", "source_title": "1930 census",
+            "notes": [{"type": "Citation", "text": "FRN\ntext"}],
+        }],
+        today="9 July 2026",
+    )
+    assert "CITATION SUBJECT" in ctx and "Indiana Siggerud's birth year" in ctx
+    # the subject drives per-claim certainty
+    assert "Indirect" in ctx
+    assert "TRANSCRIPT" in ctx and "line two" in ctx
+    assert "URLS" in ctx and "permanent" in ctx
+    assert "ADDITIONAL DETAILS:\nmisc details" in ctx
+    # reuse block: existing source id + note text (whitespace collapsed)
+    assert "S0042" in ctx and "matched_source_gramps_id" in ctx
+    assert "FRN text" in ctx
+    assert "9 July 2026" in ctx and "Census 1930" in ctx
+
+
+def test_dump_context_omits_empty_sections():
+    from bifrost.modules.citations import build_dump_context
+    ctx = build_dump_context(subject="Thomas Siggerud's baptism", today="9 July 2026")
+    assert "Thomas Siggerud's baptism" in ctx
+    assert "TRANSCRIPT" not in ctx
+    assert "URLS" not in ctx
+    assert "ADDITIONAL DETAILS" not in ctx
+    assert "ALREADY ATTACHED" not in ctx
+    assert "MEDIA OBJECT" not in ctx
+
+
+def _draft(**over):
+    d = {"analysis": "", "matched_source_gramps_id": None,
+         "matched_repository_gramps_id": None,
+         "repository": {"name": "Arkiv", "type": "Archive", "url": None},
+         "call_number": "NAD/X",
+         "source": {"title": "T", "author": "A", "pubinfo": "P", "abbrev": "Ab"},
+         "citation": {"page": "p. 1", "confidence": 3},
+         "notes": {"first_reference": "f", "short_reference": "s", "abstract": None},
+         "quality": {"source_type": "Original", "information_type": "Primary",
+                     "evidence_type": "Direct", "note": "n"}}
+    d.update(over)
+    return d
+
+
+class _StubAnthropic:
+    """Returns the queued drafts in order (first compose, then critique)."""
+    def __init__(self, *drafts):
+        self._drafts = list(drafts)
+
+    async def complete_structured(self, system, user, schema, max_tokens=0):
+        return dict(self._drafts.pop(0))
+
+
+_EXISTING = [{"gramps_id": "C0001", "page": "p. 3B", "confidence": 3,
+              "source_gramps_id": "S0042", "source_handle": "H42",
+              "source_title": "1930 census", "notes": []}]
+
+
+def test_critique_cannot_drop_drafted_source():
+    # First pass deliberately drafts a NEW source (no match); the critique —
+    # whose schema can't express matching — nulls source/repository. The merge
+    # guard must restore them, and the forced reuse must NOT override the
+    # deliberate new-source draft.
+    import asyncio
+    from bifrost.modules.citations import compose_from_dump
+    first = _draft()
+    critiqued = _draft(source=None, repository=None, call_number=None)
+    r = asyncio.run(compose_from_dump(
+        _StubAnthropic(first, critiqued), "", None, sources=[], repos=[],
+        subject="X's baptism", existing_citations=_EXISTING))
+    assert r["draft"]["source"] == first["source"]
+    assert r["draft"]["repository"] == first["repository"]
+    assert r["draft"]["call_number"] == "NAD/X"
+    assert r["matched_source"] is None
+
+
+def test_match_resolves_via_existing_citations_when_catalog_stale():
+    # The model matched the existing source, but the cached catalog doesn't
+    # know it (created outside Bifrost) — resolution falls back to the live
+    # existing-citation data instead of leaving an unsaveable draft.
+    import asyncio
+    from bifrost.modules.citations import compose_from_dump
+    matched = _draft(matched_source_gramps_id="S0042", source=None, repository=None)
+    r = asyncio.run(compose_from_dump(
+        _StubAnthropic(matched, dict(matched)), "", None, sources=[], repos=[],
+        subject="X's baptism", existing_citations=_EXISTING))
+    assert r["matched_source"] == {"handle": "H42", "gramps_id": "S0042",
+                                   "title": "1930 census"}
+    assert r["draft"]["source"] is None
+
+
+def test_forced_reuse_when_model_neither_matched_nor_drafted():
+    # Model returns null match AND null source (confused) — single existing
+    # source forces the reuse so the draft stays saveable.
+    import asyncio
+    from bifrost.modules.citations import compose_from_dump
+    empty = _draft(source=None, repository=None)
+    r = asyncio.run(compose_from_dump(
+        _StubAnthropic(empty, dict(empty)), "", None, sources=[], repos=[],
+        subject="X's baptism", existing_citations=_EXISTING))
+    assert r["matched_source"]["gramps_id"] == "S0042"
+    assert r["draft"]["matched_source_gramps_id"] == "S0042"
+
+
 def test_next_sequential_id():
     from bifrost.modules.citations import next_sequential_id
     # continues from the max, never refills gaps

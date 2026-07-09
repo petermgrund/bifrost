@@ -7,13 +7,24 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 from ...core.clients.anthropic import AnthropicError
-from ...modules import citations
+from ...core.clients.paperless import PaperlessError
+from ...modules import citations, sync_paperless
 
 router = APIRouter(prefix="/citations", tags=["citations"])
 
 
 def _state(request: Request):
     return request.app.state
+
+
+async def _media_citations_cached(st, media_handle: str) -> list[dict]:
+    """media_citations scans every citation in the tree — cache per handle so
+    the lookup and the compose that follows don't each pay for a full scan.
+    The citations_ prefix ties invalidation to the save route's cache clear."""
+    key = f"citations_mediacits_{media_handle}"
+    if st.caches.get(key) is None:
+        st.caches[key] = await citations.media_citations(st.gramps, media_handle)
+    return st.caches[key]
 
 
 @router.get("")
@@ -47,8 +58,37 @@ async def get_media_by_id(request: Request, gramps_id: str):
     media = await st.gramps.get_media_by_gramps_id(gramps_id.strip().upper())
     if not media:
         raise HTTPException(404, f"no Gramps media '{gramps_id}'")
+    paperless_id = next((a.get("value") for a in media.get("attribute_list", [])
+                         if a.get("type") == "Paperless ID"), None)
+    cits = await _media_citations_cached(st, media["handle"])
     return {"handle": media["handle"], "gramps_id": media["gramps_id"],
-            "title": media.get("desc") or media["gramps_id"]}
+            "title": media.get("desc") or media["gramps_id"],
+            "paperless_id": paperless_id,
+            "citations": [{"gramps_id": c["gramps_id"], "page": c["page"],
+                           "source_title": c["source_title"]} for c in cits]}
+
+
+@router.get("/api/paperless/{media_gramps_id}")
+async def get_paperless_details(request: Request, media_gramps_id: str):
+    """Pullable bits of the media's Paperless doc: transcript, source URL, notes."""
+    st = _state(request)
+    doc_id = await sync_paperless.paperless_id_for_media(
+        st.gramps, media_gramps_id.strip().upper())
+    if doc_id is None:
+        raise HTTPException(
+            404, f"no Gramps media '{media_gramps_id}', or it has no Paperless ID attribute")
+    try:
+        doc = await st.paperless.get_document(doc_id)
+    except PaperlessError as exc:
+        raise HTTPException(502, f"Paperless document #{doc_id} unavailable: {exc}") from exc
+    fid = st.cfg.sync_paperless.source_url_field_id
+    return {
+        "doc_id": doc_id,
+        "transcript": (doc.get("content") or "").strip(),
+        "source_url": (st.paperless.get_custom_field_value(doc, fid) or "") if fid else "",
+        "notes": "\n\n".join(t for n in doc.get("notes") or []
+                             if (t := (n.get("note") or "").strip())),
+    }
 
 
 @router.get("/api/uncited-events")
@@ -97,7 +137,10 @@ async def compose(request: Request, body: ComposeBody):
 
 
 class DumpBody(BaseModel):
-    dump: str
+    subject: str = ""     # what the citation represents — required unless event-driven
+    transcript: str = ""  # record transcript (pulled from Paperless or pasted)
+    urls: str = ""        # one per line, optional role after each
+    dump: str = ""        # catch-all for anything else
     media_handle: str | None = None
     event_context: str | None = None
 
@@ -107,18 +150,22 @@ async def compose_dump(request: Request, body: DumpBody):
     st = _state(request)
     if not st.anthropic.configured:
         raise HTTPException(400, "no Anthropic API key configured")
-    if not body.dump.strip() and not (body.event_context or "").strip():
-        raise HTTPException(400, "nothing to compose from")
+    if not body.subject.strip() and not (body.event_context or "").strip():
+        raise HTTPException(400, "describe what this citation represents")
     if st.caches.get("citations_context") is None:
         st.caches["citations_context"] = await citations.context(st.gramps)
     ctx = st.caches["citations_context"]
     media = None
+    existing = None
     if body.media_handle:
         media = await st.gramps.get_object("media", body.media_handle)
+        existing = await _media_citations_cached(st, body.media_handle)
     try:
         result = await citations.compose_from_dump(
             st.anthropic, body.dump, media, ctx["sources"], ctx["repositories"],
-            body.event_context)
+            body.event_context, subject=body.subject,
+            transcript=body.transcript, urls=body.urls,
+            existing_citations=existing)
     except AnthropicError as exc:
         raise HTTPException(502, f"composition failed: {exc}") from exc
     return result

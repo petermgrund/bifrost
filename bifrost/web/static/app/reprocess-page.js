@@ -1,10 +1,3 @@
-/* Reprocess section — one flat stanza, no cards:
-   • Find mixed-width documents: measure every multi-page PDF tagged 'doc'
-     (POST /reprocess/api/scan, read-only), tick the ones to fix, and batch
-     them to the widest/narrowest width (POST /reprocess/api/batch). Each
-     rebuilt PDF is posted as a NEW VERSION of the same document — the
-     current file stays in the version history; Gramps follows on the next
-     version sync. */
 import { BifrostElement, html, nothing, post, summarize, spinner, btn, chip, checkbox, statusLine } from './core.js';
 
 class ReprocessPage extends BifrostElement {
@@ -33,10 +26,10 @@ class ReprocessPage extends BifrostElement {
     try {
       const r = await post('/reprocess/api/scan', {});
       this.scan = r;
-      this.sel = new Set(r.rows.map((x) => x.doc_id)); // everything ticked by default
+      this.sel = new Set(r.rows.map((x) => x.doc_id));
       if (r.errors?.length) {
         this.findResult = { kind: 'error',
-          body: `${r.errors.length} document(s) could not be measured: ${r.errors.map((e) => `#${e.doc_id} (${e.error})`).join('; ')}` };
+          body: `${r.errors.length} document${r.errors.length === 1 ? '' : 's'} could not be measured: ${r.errors.map((e) => `#${e.doc_id} (${e.error})`).join('; ')}` };
       }
     } catch (e) {
       this.findResult = { kind: 'error', body: e.message };
@@ -80,7 +73,7 @@ class ReprocessPage extends BifrostElement {
       this.batchOutcome = out;
       this.sel = new Set();
       this.findResult = { kind: c?.errors ? 'error' : 'ok',
-        body: `${summarize(c, true)}; consumption begun; wait 60s to resync to Gramps.` };
+        body: `${summarize(c, true)}; wait at least 60s before resyncing to Gramps.` };
     } catch (e) {
       this.findResult = { kind: 'error', body: e.message };
     } finally {
@@ -94,12 +87,12 @@ class ReprocessPage extends BifrostElement {
     return html`
       <h6 class="small">Find mixed-width documents</h6>
       <nav class="wrap">
-        ${btn(this.busy === 'scan' ? 'Scanning…' : 'Scan', !!this.busy, () => this.runScan())}
+        ${btn(this.busy === 'scan' ? 'Scanning...' : 'Scan', !!this.busy, () => this.runScan())}
         ${this.busy === 'scan'
           ? statusLine('busy', `Scanning...`)
           : nothing}
         ${this.scan ? statusLine('info',
-          `${rows.length} have mixed page widths.`) : nothing}
+          `${rows.length} found`) : nothing}
       </nav>
       ${this.scan && rows.length ? html`
         <div class="scroll capped capped-width">

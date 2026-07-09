@@ -1,48 +1,44 @@
-# Bifrost configuration — copy to config.yaml, fill in, chmod 600.
-# config.yaml is gitignored; this example is the committed reference.
+# Bifrost configuration example
 
 gramps:
-  base_url: "http://100.89.34.77:81/api"
+  base_url: "http://{device}:{port}/api"
   username: "REPLACE_ME"
   password: "REPLACE_ME"
 
 paperless:
-  base_url: "http://100.89.34.77:8010"
+  base_url: "http://{device}:{port}"
   api_token: "REPLACE_ME"
 
-# Resolved relative to this file's directory if not absolute.
+# Bifrost resolved relative to this file's directory if not absolute
 database: data/bifrost.db
 
 sync:
   paperless:
-    sync_tags: ["doc", "img"]
+    # Choose which Paperless tags are used to select documents for sync
+    sync_tags: ["tag-1", "tag-2"]
     public_url: "https://your-paperless-public-url"
     gramps_public_url: "https://your-gramps-public-url"
-    # Custom field ids in Paperless (idempotency key + backlink + date opt-in)
-    gramps_id_field_id: 0
-    gramps_url_field_id: 0
+    # Custom field ids in Paperless
+    gramps_id_field_id: "REPLACE_ME"
+    gramps_url_field_id: "REPLACE_ME"
     date_qualifier_field_id: null
-    date_meaning_field_id: null
+    source_url_field_id: null
     # Paperless tag id marking documents with a transcription to sync
     transcription_tag_id: null
     # Paperless tag NAME marking docs to transcribe in place with Gemini OCR
     ocr_tag: "Gemini OCR"
 
 anthropic:
-  # Used by the citation generator to compose EE citation text (editable
-  # before save; manual entry works without it).
   api_key: "REPLACE_ME"
   model: "claude-opus-4-8"
 
 gemini:
-  # Google AI Studio API key — used for in-place document OCR. Optional unless
-  # you use the Gemini OCR panel.
   api_key: "REPLACE_ME"
   model: "gemini-3-flash-preview"
-  # thinking_budget: 8192   # optional, for thinking-capable models
+  # thinking_budget: 8192   # optional for thinking-capable models
 
 places:
   # osm-to-gramps boundary rendering service + the GeoJSON sidecar dir
   # (mounted read-only; used only to show boundary status).
-  osm_service_url: "http://100.89.34.77:82"
+  osm_service_url: "http://{device}:{port}"
   boundaries_dir: "/boundaries"

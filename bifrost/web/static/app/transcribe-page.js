@@ -93,7 +93,7 @@ class TranscribePage extends BifrostElement {
 
   render() {
     return html`
-      <h6 class="small">Run OCR on a Paperless doc or re-sync a doc's transcription</h6>
+      <h6 class="small">Run OCR on a Paperless doc</h6>
       <nav class="wrap">
         ${field('Gramps media ID', this.ocrId, (e) => (this.ocrId = e.target.value),
           { mono: true, upper: true, width: 'small', onEnter: () => this.runOcr() })}

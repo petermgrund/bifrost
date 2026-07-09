@@ -1,7 +1,3 @@
-/* Shared base for the source-sync sections (today: Paperless → Gramps; an
-   ArchivesSpace source will slot in here later). Flat BeerCSS content inside
-   the section expander: empty → results (real /sync/api/<source>/preview
-   events) → applied. Configuration lives in config.yaml, not in the UI. */
 import { BifrostElement, html, nothing, api, post, summarize, btn, chip, checkbox, spinner, emptyRow, statusLine, progressLine } from './core.js';
 
 export class SyncPage extends BifrostElement {
@@ -30,7 +26,6 @@ export class SyncPage extends BifrostElement {
     this.error = '';
   }
 
-  /* ---- subclass surface (overridden) ---- */
   get source() { return 'paperless'; }
   get itemColLabel() { return 'Item'; }
 
@@ -44,13 +39,12 @@ export class SyncPage extends BifrostElement {
     this.stopProgress();
   }
 
-  /* ---- live progress: poll the run registry while a POST is in flight ---- */
   startProgress(job) {
     this._progressTimer = setInterval(async () => {
       try {
         const { runs } = await api('/api/runs/active');
         this.progress = runs.find((r) => r.job === job) || null;
-      } catch { /* a missed poll just leaves the plain spinner */ }
+      } catch { /*  just leaves the spinner */ }
     }, 750);
   }
 
@@ -65,13 +59,11 @@ export class SyncPage extends BifrostElement {
     catch { this.config = null; }
   }
 
-  /* ---- preview / apply ---- */
   async runPreview() {
     this.running = true; this.error = ''; this.applied = null;
     this.startProgress(`sync.${this.source}.preview`);
     try {
       this.result = await post(`/sync/api/${this.source}/preview`, {});
-      // everything ticked by default; failed rows aren't applicable
       this.selected = new Set(this.items.filter((e) => this.isActionable(e)).map((e) => this.keyOf(e)));
       this.phase = 'results';
     } catch (e) {
@@ -88,6 +80,7 @@ export class SyncPage extends BifrostElement {
     try {
       this.applied = await post(`/sync/api/${this.source}/apply`, { selected: [...this.selected] });
       this.phase = 'applied';
+      setTimeout(() => window.location.reload(), 2000);
     } catch (e) {
       this.error = e.message;
     } finally {
@@ -96,12 +89,9 @@ export class SyncPage extends BifrostElement {
     }
   }
 
-  /* Cancel discards the preview and returns to the empty state — the run
-     itself already finished server-side (preview is one blocking POST). */
   cancel() { this.phase = 'empty'; this.result = null; this.filter = 'all'; this.selected = new Set(); }
   runAnother() { this.applied = null; this.cancel(); }
 
-  /* ---- derive rows from preview events ---- */
   get items() { return (this.result?.events || []).filter((e) => e.kind === 'item'); }
 
   groupOf(action) {
@@ -111,21 +101,48 @@ export class SyncPage extends BifrostElement {
     return 'skip';
   }
 
-  /* ---- row selection (applied rows are chosen individually) ---- */
   keyOf(e) { return `${e.entity}:${e.source_id}`; }
   isActionable(e) { const g = this.groupOf(e.action); return g === 'create' || g === 'update'; }
 
-  toggleRow(key) {
+  get rows() {
+    const out = [];
+    const byDoc = new Map();
+    for (const e of this.items) {
+      if (!this.isActionable(e)) {
+        out.push({ group: this.groupOf(e.action), keys: [], title: e.title || e.source_id,
+                   gramps_id: e.gramps_id, cols: e.data?.cols || {}, detail: e.detail || '' });
+        continue;
+      }
+      let r = byDoc.get(e.source_id);
+      if (!r) {
+        r = { group: 'update', keys: [], title: e.title || e.source_id,
+              gramps_id: e.gramps_id, cols: {}, detail: '' };
+        byDoc.set(e.source_id, r);
+        out.push(r);
+      }
+      if (e.entity === 'doc' && this.groupOf(e.action) === 'create') r.group = 'create';
+      r.keys.push(this.keyOf(e));
+      Object.assign(r.cols, e.data?.cols);
+      if (e.gramps_id) r.gramps_id = e.gramps_id;
+      if (e.detail) r.detail = r.detail ? `${r.detail}; ${e.detail}` : e.detail;
+    }
+    return out;
+  }
+
+  rowOn(r) { return r.keys.length > 0 && r.keys.every((k) => this.selected.has(k)); }
+
+  toggleRow(r) {
     if (this.running) return;
     const s = new Set(this.selected);
-    s.has(key) ? s.delete(key) : s.add(key);
+    const on = this.rowOn(r);
+    for (const k of r.keys) on ? s.delete(k) : s.add(k);
     this.selected = s;
   }
 
   toggleShown(rows, on) {
     if (this.running) return;
     const s = new Set(this.selected);
-    for (const r of rows) on ? s.add(this.keyOf(r)) : s.delete(this.keyOf(r));
+    for (const r of rows) for (const k of r.keys) on ? s.add(k) : s.delete(k);
     this.selected = s;
   }
 
@@ -140,29 +157,30 @@ export class SyncPage extends BifrostElement {
 
   renderRunning() {
     const p = this.progress;
-    return html`<p>${progressLine(p?.detail || 'Scanning...', p?.done || 0, p?.total, p?.percent)}</p>`;
+    return html`<p>${progressLine(p?.done || 0, p?.total, p?.percent)}</p>`;
   }
 
   renderEmpty() {
     return html`
+      <h6 class="small">Scan Paperless for new or changed objects</h6>
       <nav>
-        ${btn('Run', this.running, () => this.runPreview())}
+        ${btn('Scan', this.running, () => this.runPreview())}
       </nav>`;
   }
 
   renderResults() {
-    const items = this.items;
+    const rows = this.rows;
     const c = { create: 0, update: 0, skip: 0, error: 0 };
-    for (const e of items) c[this.groupOf(e.action)]++;
-    const shown = this.filter === 'all' ? items : items.filter((e) => this.groupOf(e.action) === this.filter);
-    const selectable = shown.filter((e) => this.isActionable(e));
-    const onCount = selectable.filter((e) => this.selected.has(this.keyOf(e))).length;
+    for (const r of rows) c[r.group]++;
+    const shown = this.filter === 'all' ? rows : rows.filter((r) => r.group === this.filter);
+    const selectable = shown.filter((r) => r.keys.length);
+    const onCount = selectable.filter((r) => this.rowOn(r)).length;
     const allOn = selectable.length > 0 && onCount === selectable.length;
-    const nSel = this.selected.size;
+    const nSel = rows.filter((r) => this.rowOn(r)).length;
 
     return html`
       <nav class="wrap">
-        ${chip(`All ${items.length}`, this.filter === 'all', () => { this.filter = 'all'; })}
+        ${chip(`All ${rows.length}`, this.filter === 'all', () => { this.filter = 'all'; })}
         ${chip(`Create ${c.create}`, this.filter === 'create', () => { this.filter = 'create'; })}
         ${chip(`Update ${c.update}`, this.filter === 'update', () => { this.filter = 'update'; })}
         ${c.error ? chip(`Failed ${c.error}`, this.filter === 'error', () => { this.filter = 'error'; }) : nothing}
@@ -178,26 +196,20 @@ export class SyncPage extends BifrostElement {
             <th>Media object</th>
           </tr></thead>
           <tbody>
-            ${shown.length ? shown.map((e) => this.row(e)) : emptyRow(4, 'No items')}
+            ${shown.length ? shown.map((r) => this.row(r)) : emptyRow(4, 'No items')}
           </tbody>
         </table>
       </div>
 
       <div class="large-space"></div>
       <nav>
-        ${btn(this.running ? 'Applying…' : `Apply ${nSel} change${nSel === 1 ? '' : 's'}`,
+        ${btn(this.running ? 'Applying...' : `Apply ${nSel} change${nSel === 1 ? '' : 's'}`,
           this.running || !nSel, () => this.apply())}
         ${btn('Cancel', this.running, () => this.cancel(), 'error')}
-        ${this.running ? (this.progress?.total
-          ? statusLine('busy', `${this.progress.detail} · ${this.progress.done} of ${this.progress.total}`)
-          : spinner) : nothing}
+        ${this.running ? progressLine(this.progress?.done || 0, this.progress?.total, this.progress?.percent) : nothing}
       </nav>`;
   }
 
-  /* BeerCSS positions a tooltip absolutely inside its chip, so the capped
-     scroll container clips whatever spills past its edges. bifrost.css makes
-     these tooltips fixed instead; hovering computes the viewport coordinates
-     here — right of the chip, vertically centered, clamped on screen. */
   placeTip(ev) {
     const tip = ev.currentTarget.querySelector('.tooltip');
     if (!tip) return;
@@ -208,25 +220,21 @@ export class SyncPage extends BifrostElement {
     tip.style.left = `${Math.min(chip.right + 8, window.innerWidth - tip.offsetWidth - 8)}px`;
   }
 
-  row(e) {
-    const g = this.groupOf(e.action);
+  row(r) {
     const CHIP = { create: ['green', 'Create'], update: ['primary-container', 'Update'],
-      skip: ['', 'Skip'], error: ['error', 'Failed'] }[g];
-    // What the change IS lives in the event's cols (+ detail for failures);
-    // surfaced as a hover tooltip on the chip, placed by placeTip().
-    const tip = Object.entries(e.data?.cols || {}).map(([k, v]) => `${k}: ${v}`);
-    if (e.detail) tip.push(e.detail);
-    const key = this.keyOf(e);
+      skip: ['', 'Skip'], error: ['error', 'Failed'] }[r.group];
+    const tip = Object.entries(r.cols).map(([k, v]) => `${k}: ${v}`);
+    if (r.detail) tip.push(r.detail);
     return html`<tr>
-      <td>${this.isActionable(e)
-        ? checkbox(this.selected.has(key), () => this.toggleRow(key), { disabled: this.running })
+      <td>${r.keys.length
+        ? checkbox(this.rowOn(r), () => this.toggleRow(r), { disabled: this.running })
         : nothing}</td>
       <td><span class="chip small ${CHIP[0]}" @pointerenter=${this.placeTip}>${CHIP[1]}
         ${tip.length ? html`<div class="tooltip no-space max">
           ${tip.map((t) => html`<div>${t}</div>`)}</div>` : nothing}
       </span></td>
-      <td>${e.title || e.source_id || '—'}</td>
-      <td>${e.gramps_id || '—'}</td>
+      <td>${r.title || '—'}</td>
+      <td>${r.gramps_id || '—'}</td>
     </tr>`;
   }
 
@@ -236,7 +244,7 @@ export class SyncPage extends BifrostElement {
       <p>${statusLine('ok', `${summary || 'done.'}`)}</p>
       <nav>
         ${this.config?.gramps_public_url ? html`<a class="button"
-          href=${this.config.gramps_public_url} target="_blank" rel="noopener">Open in Gramps</a>` : nothing}
+          href=${this.config.gramps_public_url} target="_blank" rel="noopener">Open</a>` : nothing}
         ${btn('Run another preview', false, () => this.runAnother())}
       </nav>`;
   }

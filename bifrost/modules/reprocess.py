@@ -1,17 +1,3 @@
-"""Reprocess — rebuild a Paperless document's PDF so every page shares one width.
-
-Scanned multi-page documents often mix page sizes (folded letters, odd
-enclosures, a verso scanned at another resolution), so viewers zoom-jump
-between pages. This downloads the document's current original file, scales
-every PDF page to a common width — the widest or the narrowest page in the
-file, aspect ratio preserved — and uploads the result as a NEW VERSION of the
-SAME Paperless document. Nothing is destroyed: the previous file stays in the
-document's version history, and the Gramps media repoints to the new file on
-the next versions-only sync (the 10-minute cron).
-
-Preview downloads and measures only; the upload happens on apply.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -26,35 +12,22 @@ from ..core.events import SyncEvent
 MODE_WIDEST = "widest"
 MODE_NARROWEST = "narrowest"
 
-# Pages already within this of the target width stay byte-identical instead of
-# being scaled by ~1.0000 (scan widths jitter by fractions of a point).
 TOLERANCE_PT = 1.0
 
-# Parallel downloads during a library scan — friendly to Paperless, still ~4×
-# faster than serial over the LAN.
 SCAN_CONCURRENCY = 4
 
-# How long apply waits for Paperless to consume the uploaded version before
-# reporting it as merely queued (consume re-runs OCR, so big scans are slow).
 CONSUME_TIMEOUT_S = 90.0
 CONSUME_POLL_S = 2.0
 
 
-# ---------------------------------------------------------------------------
-# Pure helpers
-# ---------------------------------------------------------------------------
+# helpers
 
 def effective_size(page) -> tuple[float, float]:
-    """Displayed (width, height) in points — a /Rotate 90/270 page shows its
-    mediabox sideways."""
     w, h = float(page.mediabox.width), float(page.mediabox.height)
     return (h, w) if page.rotation % 180 == 90 else (w, h)
 
 
 def plan_pages(data: bytes, mode: str) -> list[dict]:
-    """Measure every page and compute its scale factor toward the target width:
-    [{page, width, height, factor}], factor 1.0 for pages already there.
-    Raises ValueError when the bytes aren't a readable, unencrypted PDF."""
     try:
         reader = PdfReader(io.BytesIO(data))
         if reader.is_encrypted:
@@ -62,7 +35,7 @@ def plan_pages(data: bytes, mode: str) -> list[dict]:
         sizes = [effective_size(p) for p in reader.pages]
     except ValueError:
         raise
-    except Exception as exc:  # noqa: BLE001 — pypdf raises many parse errors
+    except Exception as exc:  # noqa: BLE001
         raise ValueError(f"not a readable PDF: {exc}") from exc
     if not sizes:
         raise ValueError("PDF has no pages")
@@ -94,18 +67,15 @@ def _fmt_size(w: float, h: float) -> str:
     return f"{w:.0f} × {h:.0f} pt"
 
 
-# ---------------------------------------------------------------------------
-# The run generator (preview and apply, per the house apply flag)
-# ---------------------------------------------------------------------------
+# preview and apply
 
 async def _consume_status(paperless: PaperlessClient, task_id: str) -> dict | None:
-    """Poll the consume task until it settles or the timeout passes (None)."""
     loop = asyncio.get_event_loop()
     deadline = loop.time() + CONSUME_TIMEOUT_S
     while loop.time() < deadline:
         try:
             task = await paperless.task_status(task_id)
-        except Exception:  # noqa: BLE001 — polling is best-effort
+        except Exception:  # noqa BLE001
             task = None
         if task and task.get("status") in ("SUCCESS", "FAILURE"):
             return task
@@ -131,7 +101,7 @@ async def run(
     try:
         doc = await paperless.get_document(doc_id)
         data, mime = await paperless.download_original(doc_id)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa BLE001
         counts["errors"] += 1
         yield SyncEvent(kind="error", source_id=str(doc_id),
                         detail=f"fetch failed: {exc}")
@@ -185,20 +155,18 @@ async def run(
         return
 
     if not apply:
-        counts["uploaded"] = 1  # what apply would do
+        counts["uploaded"] = 1
         yield SyncEvent(kind="summary", data=counts)
         return
 
     label = f"width-normalized ({mode})"
     filename = doc.get("original_file_name") or f"paperless-{doc_id}.pdf"
     if not filename.lower().endswith(".pdf"):
-        # the SELECTED version is a PDF (mime-checked above) even when the
-        # root document — whose name this is — was uploaded as something else
         filename = f"{filename.rsplit('.', 1)[0]}.pdf"
     try:
         new_data = rebuild(data, plan)
         task_id = await paperless.update_version(doc_id, new_data, filename, label)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa BLE001
         counts["errors"] += 1
         yield SyncEvent(kind="item", entity="doc", action="failed",
                         source_id=str(doc_id), title=title,
@@ -230,14 +198,9 @@ async def run(
     yield SyncEvent(kind="summary", data=counts)
 
 
-# ---------------------------------------------------------------------------
-# Library scan + batch
-# ---------------------------------------------------------------------------
+# Library scan
 
 async def scan_mixed_widths(paperless: PaperlessClient, tag_name: str) -> dict:
-    """Find every multi-page PDF under the tag whose pages have differing
-    widths. A pure query — each candidate's file is downloaded and measured,
-    nothing is written. Raises ValueError when the tag doesn't exist."""
     tag_id = await paperless.resolve_tag_id(tag_name)
     if tag_id is None:
         raise ValueError(f"tag '{tag_name}' not found in Paperless")
@@ -245,7 +208,6 @@ async def scan_mixed_widths(paperless: PaperlessClient, tag_name: str) -> dict:
     candidates = [
         d for d in docs
         if d.get("mime_type") == "application/pdf"
-        # page_count is often null — unknown still needs measuring
         and (d.get("page_count") or 2) > 1
     ]
 
@@ -256,11 +218,11 @@ async def scan_mixed_widths(paperless: PaperlessClient, tag_name: str) -> dict:
         async with sem:
             try:
                 data, mime = await paperless.download_original(doc["id"])
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:  # noqa BLE001
                 return {"doc_id": doc["id"], "title": title,
                         "error": f"download failed: {exc}"}
         if mime != "application/pdf":
-            return None  # the selected version isn't a PDF after all
+            return None
         try:
             plan = plan_pages(data, MODE_WIDEST)
         except ValueError as exc:
@@ -283,10 +245,6 @@ async def scan_mixed_widths(paperless: PaperlessClient, tag_name: str) -> dict:
 async def run_batch(
     paperless: PaperlessClient, doc_ids: list[int], mode: str,
 ) -> AsyncIterator[SyncEvent]:
-    """Normalize a batch of documents as ONE run. Uploads don't wait for
-    Paperless to consume each version (the queue drains in the background),
-    and per-page/started events are suppressed — at batch scale only the
-    per-document outcome matters."""
     totals = {"pages_scaled": 0, "skipped": 0, "uploaded": 0, "errors": 0}
     for doc_id in doc_ids:
         async for ev in run(paperless, doc_id, mode, apply=True, wait_consume=False):

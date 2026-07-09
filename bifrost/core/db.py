@@ -1,9 +1,3 @@
-"""SQLite access and schema migrations.
-
-Single-user app: plain sqlite3 in WAL mode is plenty. MIGRATIONS is append-only;
-each entry runs once, tracked by schema_version.
-"""
-
 from __future__ import annotations
 
 import sqlite3
@@ -63,7 +57,7 @@ MIGRATIONS: list[str] = [
         PRIMARY KEY (run_id, seq)
     );
     """,
-    # 2 per-(person, photo) face padding
+    # 2 (can remove at some point)
     """
     CREATE TABLE face_pads (
         gramps_handle TEXT NOT NULL,
@@ -73,7 +67,7 @@ MIGRATIONS: list[str] = [
         PRIMARY KEY (gramps_handle, asset_id)
     );
     """,
-    # 3 — UI-generated media-id reservation
+    # 3 UI-generated media-id res
     """
     CREATE TABLE reserved_ids (
         gramps_id  TEXT PRIMARY KEY,
@@ -131,7 +125,6 @@ MIGRATIONS: list[str] = [
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
-    """Open (creating if needed), migrate to latest, return the connection."""
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row

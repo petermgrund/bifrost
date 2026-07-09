@@ -20,8 +20,12 @@
    scrollbar) doesn't change the page width. */
 html { scrollbar-gutter: stable; }
 
-/* Open sections plainly — no BeerCSS fade/float-down on the content. */
-details::details-content {
+/* Open sections plainly — no BeerCSS fade/float-down on the content. The
+   [open] variant must repeat transform: none — BeerCSS's translateY(0) there
+   would win on specificity, and any non-none transform hijacks the fixed
+   positioning that row-chip tooltips rely on (see .scroll .chip > .tooltip). */
+details::details-content,
+details[open]::details-content {
   transition: none;
   opacity: 1;
   transform: none;
@@ -64,6 +68,16 @@ code, .mono { font-family: "Space Mono", ui-monospace, monospace; }
    a scroll CAP (BeerCSS's *-height helpers are fixed sizes, not caps). */
 .list li.wave { cursor: pointer; }
 .scroll.capped { max-block-size: 60vh; }
+/* Row-chip tooltips sit inside a .scroll container whose overflow clips
+   anything past its edges — fixed positioning escapes the clip (sync-page.js
+   placeTip() sets the viewport coordinates on hover). Transition trimmed to
+   opacity so the tooltip fades in place instead of sliding between rows. */
+.scroll .chip > .tooltip {
+  position: fixed;
+  inset: auto;
+  transform: none;
+  transition: opacity var(--speed2), visibility var(--speed2);
+}
 /* Width CAP for tables with few short columns — BeerCSS tables stretch to
    100% (its *-width helpers are fixed sizes, not caps). */
 .scroll.capped-width { max-inline-size: 40rem; }

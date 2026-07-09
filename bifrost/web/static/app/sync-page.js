@@ -194,13 +194,26 @@ export class SyncPage extends BifrostElement {
       </nav>`;
   }
 
+  /* BeerCSS positions a tooltip absolutely inside its chip, so the capped
+     scroll container clips whatever spills past its edges. bifrost.css makes
+     these tooltips fixed instead; hovering computes the viewport coordinates
+     here — right of the chip, vertically centered, clamped on screen. */
+  placeTip(ev) {
+    const tip = ev.currentTarget.querySelector('.tooltip');
+    if (!tip) return;
+    const chip = ev.currentTarget.getBoundingClientRect();
+    const top = Math.min(Math.max(chip.top + chip.height / 2 - tip.offsetHeight / 2, 8),
+      window.innerHeight - tip.offsetHeight - 8);
+    tip.style.top = `${top}px`;
+    tip.style.left = `${Math.min(chip.right + 8, window.innerWidth - tip.offsetWidth - 8)}px`;
+  }
+
   row(e) {
     const g = this.groupOf(e.action);
     const CHIP = { create: ['green', 'Create'], update: ['primary-container', 'Update'],
       skip: ['', 'Skip'], error: ['error', 'Failed'] }[g];
     // What the change IS lives in the event's cols (+ detail for failures);
-    // surfaced as a hover tooltip on the chip. .right keeps it inside the
-    // capped scroll container, which clips a top-positioned tooltip.
+    // surfaced as a hover tooltip on the chip, placed by placeTip().
     const tip = Object.entries(e.data?.cols || {}).map(([k, v]) => `${k}: ${v}`);
     if (e.detail) tip.push(e.detail);
     const key = this.keyOf(e);
@@ -208,8 +221,8 @@ export class SyncPage extends BifrostElement {
       <td>${this.isActionable(e)
         ? checkbox(this.selected.has(key), () => this.toggleRow(key), { disabled: this.running })
         : nothing}</td>
-      <td><span class="chip small ${CHIP[0]}">${CHIP[1]}
-        ${tip.length ? html`<div class="tooltip right max">
+      <td><span class="chip small ${CHIP[0]}" @pointerenter=${this.placeTip}>${CHIP[1]}
+        ${tip.length ? html`<div class="tooltip no-space max">
           ${tip.map((t) => html`<div>${t}</div>`)}</div>` : nothing}
       </span></td>
       <td>${e.title || e.source_id || '—'}</td>

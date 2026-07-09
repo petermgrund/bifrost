@@ -1,6 +1,3 @@
-"""random-6 media-id and handle
-"""
-
 from __future__ import annotations
 
 import secrets

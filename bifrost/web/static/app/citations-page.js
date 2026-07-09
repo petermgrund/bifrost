@@ -1,12 +1,8 @@
-/* Citation generator — look up one media by Gramps ID; the generator flow
-   (describe → review → save) runs in a modal, like the Places dialog. The
-   free-text dump is the one composing path (LLM); 'Write manually' is the
-   no-LLM fallback. */
 import { BifrostElement, html, nothing, api, post, btn, spinner, field, statusLine } from './core.js';
 
 class CitationsPage extends BifrostElement {
   static properties = {
-    step: { state: true },          // describe | review (inside the modal)
+    step: { state: true },          // describe | review
     ctx: { state: true },           // types, sources, repositories, llm
     mediaId: { state: true },
     pick: { state: true },          // { media, source, repository }; modal open when media set
@@ -60,18 +56,15 @@ class CitationsPage extends BifrostElement {
 
   closeModal() {
     const dlg = this.renderRoot.querySelector('dialog');
-    if (dlg?.open) dlg.close();          // fires @close, which resets the flow
+    if (dlg?.open) dlg.close();
     else this.reset();
   }
 
-  /* The dialog must sit in the browser's top layer (showModal) — rendered
-     inline it would be clipped to the section expander's content box. */
   updated() {
     const dlg = this.renderRoot.querySelector('dialog');
     if (dlg && !dlg.open) dlg.showModal();
   }
 
-  /* ---- lookup / compose / save ---- */
   async lookupMedia() {
     if (this.busy) return;
     const id = this.mediaId.trim();
@@ -139,7 +132,6 @@ class CitationsPage extends BifrostElement {
     }
   }
 
-  /* ---- render ---- */
   render() {
     if (this.loadError && !this.ctx) {
       return html`
@@ -152,7 +144,7 @@ class CitationsPage extends BifrostElement {
       <nav class="wrap">
         ${field('Gramps media ID', this.mediaId, (e) => (this.mediaId = e.target.value),
           { mono: true, upper: true, width: 'small', onEnter: () => this.lookupMedia() })}
-        ${btn(lookingUp ? 'Looking up…' : 'Look up', lookingUp, () => this.lookupMedia())}
+        ${btn(lookingUp ? 'Looking up...' : 'Look up', lookingUp, () => this.lookupMedia())}
         ${lookingUp ? spinner : nothing}
       </nav>
       ${!this.pick.media && this.error ? html`<p>${statusLine('error', this.error)}</p>` : nothing}
@@ -178,10 +170,10 @@ class CitationsPage extends BifrostElement {
 
   renderDescribe() {
     return html`
-      ${field('Enter info about record',
+      ${field('Enter as much info about record',
         this.dump, (e) => (this.dump = e.target.value), { rows: 7 })}
       <nav>
-        ${this.ctx.llm ? btn(this.busy ? 'Composing…' : 'Compose citation',
+        ${this.ctx.llm ? btn(this.busy ? 'Composing...' : 'Compose citation',
           this.busy || !this.dump.trim(), () => this.composeDump()) : nothing}
         ${btn('Write manually', this.busy, () => this.manualDraft())}
         ${this.busy ? spinner : nothing}

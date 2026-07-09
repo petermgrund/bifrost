@@ -1,13 +1,11 @@
-/* Reprocess section — two flat stanzas, no cards:
+/* Reprocess section — one flat stanza, no cards:
    • Find mixed-width documents: measure every multi-page PDF tagged 'doc'
      (POST /reprocess/api/scan, read-only), tick the ones to fix, and batch
-     them to the widest/narrowest width (POST /reprocess/api/batch).
-   • Normalize page widths: one document — preview measures the pages
-     (POST /reprocess/api/widths, apply:false) and lists each with its scale
-     factor; Upload rebuilds the PDF and posts it as a NEW VERSION of the
-     same document (apply:true). The current file stays in the version
-     history; Gramps follows on the next version sync. */
-import { BifrostElement, html, nothing, api, post, summarize, spinner, btn, chip, field, checkbox, statusLine, emptyRow } from './core.js';
+     them to the widest/narrowest width (POST /reprocess/api/batch). Each
+     rebuilt PDF is posted as a NEW VERSION of the same document — the
+     current file stays in the version history; Gramps follows on the next
+     version sync. */
+import { BifrostElement, html, nothing, post, summarize, spinner, btn, chip, checkbox, statusLine } from './core.js';
 
 class ReprocessPage extends BifrostElement {
   static properties = {
@@ -16,12 +14,7 @@ class ReprocessPage extends BifrostElement {
     batchMode: { state: true },     // 'widest' | 'narrowest'
     batchOutcome: { state: true },  // {doc_id: {kind, text}} | null
     findResult: { state: true },    // {kind, body} | null
-    docRef: { state: true },
-    mode: { state: true },          // 'widest' | 'narrowest'
-    busy: { state: true },          // '' | 'scan' | 'batch' | 'preview' | 'apply'
-    preview: { state: true },       // widths payload (apply:false) | null
-    result: { state: true },        // {kind, body} | null
-    config: { state: true },
+    busy: { state: true },          // '' | 'scan' | 'batch'
   };
 
   constructor() {
@@ -31,30 +24,8 @@ class ReprocessPage extends BifrostElement {
     this.batchMode = 'widest';
     this.batchOutcome = null;
     this.findResult = null;
-    this.docRef = '';
-    this.mode = 'widest';
     this.busy = '';
-    this.preview = null;
-    this.result = null;
-    this.config = null;
   }
-
-  connectedCallback() {
-    super.connectedCallback();
-    this.loadConfig();
-  }
-
-  async loadConfig() {
-    try { this.config = await api('/reprocess/api/config'); } catch { this.config = null; }
-  }
-
-  paperlessLink(docId) {
-    return this.config?.public_url
-      ? html`<a class="link" href="${this.config.public_url}/documents/${docId}/details"
-          target="_blank" rel="noopener">open in Paperless</a>` : nothing;
-  }
-
-  /* ---- find + batch stanza ---- */
 
   async runScan() {
     if (this.busy) return;
@@ -117,13 +88,7 @@ class ReprocessPage extends BifrostElement {
     }
   }
 
-  widthsLabel(r) {
-    return r.widths.length <= 3
-      ? `${r.widths.join(' · ')} pt`
-      : `${r.widths.length} widths · ${r.min_width}–${r.max_width} pt`;
-  }
-
-  renderFind() {
+  render() {
     const rows = this.scan?.rows || [];
     const n = this.sel.size;
     return html`
@@ -169,106 +134,6 @@ class ReprocessPage extends BifrostElement {
           ${this.busy === 'batch' ? spinner : nothing}
         </nav>` : nothing}
       ${this.findResult ? html`<p>${statusLine(this.findResult.kind, this.findResult.body)}</p>` : nothing}`;
-  }
-
-  /* ---- single-document stanza ---- */
-
-  setMode(mode) {
-    if (this.busy || this.mode === mode) return;
-    this.mode = mode;
-    if (this.preview) this.runPreview(); // re-measure against the new target
-  }
-
-  async runPreview() {
-    if (this.busy) return;
-    const doc_ref = this.docRef.trim();
-    if (!doc_ref) {
-      this.result = { kind: 'error', body: 'Enter Paperless document ID.' };
-      return;
-    }
-    this.busy = 'preview'; this.result = null; this.preview = null;
-    try {
-      const r = await post('/reprocess/api/widths', { doc_ref, mode: this.mode, apply: false });
-      const err = r.events.find((e) => e.kind === 'error' || e.action === 'failed');
-      if (err) this.result = { kind: 'error', body: err.detail };
-      else this.preview = r;
-    } catch (e) {
-      this.result = { kind: 'error', body: e.message };
-    } finally {
-      this.busy = '';
-    }
-  }
-
-  async upload() {
-    if (this.busy || !this.preview) return;
-    this.busy = 'apply'; this.result = null;
-    try {
-      const r = await post('/reprocess/api/widths',
-        { doc_ref: this.docRef.trim(), mode: this.mode, apply: true });
-      const err = r.events.find((e) => e.kind === 'error' || e.action === 'failed');
-      if (err) {
-        this.result = { kind: 'error', body: err.detail };
-      } else {
-        const c = r.events.find((e) => e.kind === 'summary')?.data;
-        const done = r.events.find((e) => e.entity === 'doc' && e.action === 'updated');
-        this.result = { kind: 'ok',
-          body: html`${summarize(c, true)} — ${done?.detail || 'done'}. ${this.paperlessLink(r.doc_id)}` };
-        this.preview = null;
-      }
-    } catch (e) {
-      this.result = { kind: 'error', body: e.message };
-    } finally {
-      this.busy = '';
-    }
-  }
-
-  get pageRows() {
-    return (this.preview?.events || []).filter((e) => e.kind === 'item' && e.entity === 'page');
-  }
-
-  renderSingle() {
-    const started = this.preview?.events?.find((e) => e.kind === 'started');
-    const toScale = this.preview?.events?.find((e) => e.kind === 'summary')?.data?.pages_scaled || 0;
-    const rows = this.pageRows;
-    return html`
-      <h6 class="small">Normalize page widths</h6>
-      <nav class="wrap">
-        ${field('Paperless ID', this.docRef, (e) => (this.docRef = e.target.value),
-          { mono: true, upper: true, width: 'small', onEnter: () => this.runPreview() })}
-        ${chip('Widest page', this.mode === 'widest', () => this.setMode('widest'))}
-        ${chip('Narrowest page', this.mode === 'narrowest', () => this.setMode('narrowest'))}
-        ${btn(this.busy === 'preview' ? 'Measuring…' : 'Preview', !!this.busy, () => this.runPreview())}
-        ${this.busy === 'preview' ? spinner : nothing}
-      </nav>
-      ${this.preview ? html`
-        <p class="secondary-text">${started?.title}
-        <div class="scroll capped capped-width">
-          <table>
-            <thead><tr><th>Page</th><th>Size</th><th>After</th></tr></thead>
-            <tbody>${rows.length ? rows.map((e) => html`<tr>
-                <td>${e.title}</td>
-                <td class="mono small-text">${e.data?.cols?.size}</td>
-                <td class="small-text">${e.data?.cols?.result}</td>
-              </tr>`) : emptyRow(3, 'No pages')}</tbody>
-          </table>
-        </div>
-        <div class="space"></div>
-        <nav class="wrap">
-          ${btn(this.busy === 'apply' ? 'Uploading…' : 'Upload new version',
-            !!this.busy || !toScale, () => this.upload())}
-          ${this.busy === 'apply' ? spinner : nothing}
-          ${toScale
-            ? statusLine('info', `${toScale} page${toScale === 1 ? '' : 's'} will be scaled.`)
-            : statusLine('info', 'All pages already share same width')}
-        </nav>` : nothing}
-      ${this.result ? html`<p>${statusLine(this.result.kind, this.result.body)}</p>` : nothing}`;
-  }
-
-  render() {
-    return html`
-      ${this.renderFind()}
-      <div class="large-space"></div>
-      ${this.renderSingle()}`;
   }
 }
 customElements.define('reprocess-page', ReprocessPage);

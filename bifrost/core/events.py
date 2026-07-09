@@ -1,14 +1,9 @@
-"""Typed events 
-"""
-
 from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass
 from typing import Literal
 
-# "progress" is UI-transient: record_run feeds it to live pollers
-# (/api/runs/active) and drops it — never persisted, never returned.
 Kind = Literal["started", "item", "summary", "error", "progress"]
 Entity = Literal["media", "face", "note", "place", "doc", "page"]
 Action = Literal[

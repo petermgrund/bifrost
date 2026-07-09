@@ -1,16 +1,3 @@
-"""Citation generator — EE citations composed by Claude, saved to Gramps.
-
-Flow: pick a media object (any synced doc/photo, new or old) → pick an
-existing Source or describe a new one via record-type field checklists →
-Claude composes the EE layers + Gramps field mapping (editable draft) →
-save creates Repository/Source/Citation/Note as needed and links the media.
-
-The EE rules and output conventions are ported from Peter's ee-us-citations
-skill and matched to the tree's real data: one Citation-type note with
-FIRST/SHORT REFERENCE NOTE blocks; confidence as Gramps 0-4; dual-layer
-"citing" for platform-accessed records; [NEEDED: …] placeholders.
-"""
-
 from __future__ import annotations
 
 import json
@@ -43,22 +30,13 @@ def load_citation_types() -> dict:
 
 
 def next_sequential_id(prefix: str, existing: set[str]) -> str:
-    """Next id in the tree's native sequential convention (C0001, S0042…).
-
-    Bare random 6-char ids are reserved for MEDIA objects only (deletion-
-    collision safety + physical photo labels); everything else follows the
-    Gramps-style sequence. Ids not matching ^PREFIX\\d+$ (e.g. legacy
-    N_XXXXXX transcription notes) are ignored when finding the max.
-    """
     pat = re.compile(rf"^{prefix}(\d+)$")
     nums = [int(m.group(1)) for i in existing if (m := pat.match(i))]
     n = (max(nums) + 1) if nums else 1
     return f"{prefix}{n:04d}"
 
 
-# ---------------------------------------------------------------------------
 # Composition
-# ---------------------------------------------------------------------------
 
 COMPOSE_SCHEMA = {
     "type": "object",
@@ -727,7 +705,7 @@ async def event_detail(
     for ph in person_handles:
         try:
             per = await gramps.get_object("people", ph)
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa BLE001
             continue
         refs += [mr["ref"] for mr in (per.get("media_list") or []) if mr.get("ref")]
 
@@ -738,7 +716,7 @@ async def event_detail(
         seen.add(ref)
         try:
             m = await gramps.get_object("media", ref)
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa BLE001
             continue
         media.append({
             "handle": ref, "gramps_id": m.get("gramps_id", ""),

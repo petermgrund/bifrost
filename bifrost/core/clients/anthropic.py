@@ -1,10 +1,4 @@
-"""Minimal Claude API client — structured completion via forced tool use.
-
-Plain httpx, no SDK: bifrost needs exactly one capability (give me JSON
-matching this schema) and one endpoint.
-"""
-
-from __future__ import annotations
+import annotations
 
 import httpx
 

@@ -1,15 +1,4 @@
-"""Gemini OCR — transcribe a Paperless document in place.
-
-Tag a document with the configured OCR tag; this downloads its original file,
-sends it to Gemini for a faithful transcription, and writes the text straight
-into the SAME Paperless document's `content` field. Same document id, so it
-shows in Paperless search and flows to Gramps via the existing transcription
-sync — no new documents, no broken links.
-
-Preview is free (it only lists what would run); the Gemini call — and the
-spend — happens only on apply. The ocr_state table stops a run from
-re-transcribing (and re-paying) docs already done, unless force.
-"""
+"""Gemini OCR — transcribe a Paperless document in place."""
 
 from __future__ import annotations
 
@@ -25,32 +14,27 @@ from ..core.config import GeminiConfig, SyncPaperlessConfig
 from ..core.events import SyncEvent
 
 OCR_PROMPT = """You are transcribing a historical or genealogical document \
-image (it may be handwritten, old printed type, or a photograph of a record).
+image. It may be handwritten, old printed type, or a photograph of a record.
 
-Transcribe ALL text exactly as it appears. Preserve the original spelling, \
-capitalization, punctuation, diacritics, line breaks, and LANGUAGE — do not \
-translate or modernize. Include both handwritten and printed text. For a \
+Transcribe all text exactly as it appears. Preserve the original spelling, \
+capitalization, punctuation, diacritics, line breaks, and language. Do not \
+translate or modernize. Transcribe both handwritten and printed text. For a \
 genuinely illegible word write [illegible]; for an uncertain reading write the \
 best guess followed by a question mark in brackets, e.g. Andersson[?].
 
-Output ONLY the transcription — no preamble, no commentary, no markdown."""
+Output only the transcription. Do not include any preamble, commentary, or markdown."""
 
-# Gemini accepts these inline; anything else we send as-is and let it try.
 _OK_MIME = {"image/jpeg", "image/png", "image/webp", "image/heic", "image/heif",
             "application/pdf"}
 
-# Every Gemini model caps a single response at 65,536 output tokens, so a long
-# document's transcription can't fit in one call. Transcribe a multi-page PDF in
-# page ranges and stitch the results. CHUNK_PAGES is the starting range; a range
-# that still overflows (dense pages) is halved adaptively, down to one page.
+# a single response can only be 65,536 output tokens
 CHUNK_PAGES = 30
 
 
 def _pdf_pages(data: bytes) -> int | None:
-    """Page count, or None if the bytes aren't a parseable PDF."""
     try:
         return len(PdfReader(io.BytesIO(data)).pages)
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa BLE001
         return None
 
 
@@ -67,7 +51,6 @@ async def _transcribe_range(
     gemini: GeminiClient, reader: PdfReader, lo: int, hi: int,
     prompt: str, thinking_budget: int | None,
 ) -> str:
-    """Transcribe pages [lo, hi); on a MAX_TOKENS overflow, halve and recurse."""
     chunk = _pdf_subset(reader, lo, hi)
     try:
         return await gemini.transcribe(chunk, "application/pdf", prompt, thinking_budget)
@@ -84,9 +67,6 @@ async def transcribe_document(
     gemini: GeminiClient, data: bytes, mime: str, prompt: str,
     thinking_budget: int | None,
 ) -> str:
-    """Transcribe a document, chunking a multi-page PDF so no single response
-    exceeds the model's output-token ceiling. Images and single-page/unparseable
-    PDFs go through in one call."""
     if mime != "application/pdf":
         return await gemini.transcribe(data, mime, prompt, thinking_budget)
     pages = _pdf_pages(data)
@@ -213,9 +193,6 @@ async def run(
         _set_ocr(conn, doc_id, gem_cfg.model, len(text))
         cols = {"current text": f"{cur_chars} chars", "transcribed": f"{len(text)} chars"}
 
-        # Stamp the transcription tag so the Gramps transcription sync turns the
-        # new text into a note — no manual step. Best-effort: OCR already
-        # succeeded, so a tagging hiccup is a note, not a failure.
         tt = cfg.transcription_tag_id
         if tt:
             cur_tags = doc.get("tags") or []

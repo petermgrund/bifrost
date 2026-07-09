@@ -1,9 +1,3 @@
-/* Transcribe section — three flat stanzas, no cards:
-   • Run OCR: Gramps media id its Paperless doc Gemini OCR in place 
-     Transcription note rewritten on the media (POST /transcribe/api/run).
-   • Resync one note: re-pull the doc's current text into one media's note,
-     no OCR spend (POST /sync/api/paperless/resync-media, apply).
-   • Rewrite all notes: rebuild every Transcription note. */
 import { BifrostElement, html, nothing, api, post, summarize, spinner, btn, field, statusLine } from './core.js';
 
 class TranscribePage extends BifrostElement {
@@ -99,7 +93,7 @@ class TranscribePage extends BifrostElement {
 
   render() {
     return html`
-      <h6 class="small">Run OCR on a media object</h6>
+      <h6 class="small">Run OCR on a Paperless doc or re-sync a doc's transcription</h6>
       <nav class="wrap">
         ${field('Gramps media ID', this.ocrId, (e) => (this.ocrId = e.target.value),
           { mono: true, upper: true, width: 'small', onEnter: () => this.runOcr() })}
@@ -109,7 +103,7 @@ class TranscribePage extends BifrostElement {
       ${this.ocrResult ? html`<p>${statusLine(this.ocrResult.kind, this.ocrResult.body)}</p>` : nothing}
 
       <div class="large-space"></div>
-      <h6 class="small">Resync a single note</h6>
+      <h6 class="small">Resync one note</h6>
       <nav class="wrap">
         ${field('Gramps media ID', this.resyncId, (e) => (this.resyncId = e.target.value),
           { mono: true, upper: true, width: 'small', onEnter: () => this.resync() })}
@@ -121,9 +115,7 @@ class TranscribePage extends BifrostElement {
       <div class="large-space"></div>
       <h6 class="small">Resync all notes</h6>
       <nav class="wrap">
-        ${btn(this.resyncBusy ? 'Resyncing…' : 'Resync all notes', this.resyncBusy, () => this.resyncAll())}
-        ${this.resyncBusy ? spinner : nothing}
-        ${this.resyncResult ? statusLine(this.resyncResult.kind, this.resyncResult.body) : nothing}
+        ${btn('Resync all notes', true, () => this.resyncAll())}
       </nav>`;
   }
 }

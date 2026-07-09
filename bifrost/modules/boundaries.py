@@ -1,7 +1,4 @@
-"""Places / boundaries — bifrost as the interface, osm-to-gramps as the
-rendering engine (it keeps running at its own port; full absorption of the
-tile renderer can come later — this retires the control-center job).
-"""
+"""Places / boundaries """
 
 from __future__ import annotations
 
@@ -17,9 +14,6 @@ from ..core.clients import GrampsClient
 from ..core.events import SyncEvent
 
 log = logging.getLogger("bifrost.boundaries")
-
-# Matches both relations (admin boundaries) and ways (building footprints —
-# a closed way is a polygon too, fetched straight from the OSM API).
 OSM_REF_RE = re.compile(r"openstreetmap\.org/(relation|way)/(\d+)")
 
 
@@ -53,9 +47,6 @@ async def listing(gramps: GrampsClient, boundaries_dir: Path | None) -> list[dic
 async def set_relation(
     gramps: GrampsClient, handle: str, osm_type: str, osm_id: int, replace: bool = False,
 ) -> dict:
-    """Add an OSM relation/way URL to a place, matching the tree's convention
-    (type 'OSM URL'). Refuses if the place already carries one, unless
-    replace=True — then the existing OSM URL is rewritten in place."""
     place = await gramps.get_place(handle)
     existing = osm_ref_from_place(place)
     if existing and not replace:
@@ -93,8 +84,6 @@ async def generate_missing(
     boundaries_dir: Path | None,
     force: bool = False,
 ) -> AsyncIterator[SyncEvent]:
-    """Generate boundaries for every place with an OSM relation/way (missing
-    ones only, unless force). Throttled — the service hits OSM upstream."""
     places = [r for r in await listing(gramps, boundaries_dir) if r["osm_id"]]
     todo = places if force else [r for r in places if not r["has_boundary"]]
     yield SyncEvent(kind="started",
@@ -103,7 +92,7 @@ async def generate_missing(
     for row in todo:
         try:
             await generate_one(service_url, row["handle"], force)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             counts["errors"] += 1
             yield SyncEvent(kind="item", entity="place", action="failed",
                             gramps_id=row["gramps_id"], title=row["name"],
@@ -114,5 +103,5 @@ async def generate_missing(
                         action="updated" if row["has_boundary"] else "created",
                         gramps_id=row["gramps_id"], title=row["name"],
                         data={"cols": {"osm": f'{row["osm_type"]} {row["osm_id"]}'}})
-        await asyncio.sleep(1)  # be kind to OSM
+        await asyncio.sleep(1)
     yield SyncEvent(kind="summary", data=counts)

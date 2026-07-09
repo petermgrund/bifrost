@@ -1,8 +1,3 @@
-/* Bifrost is ONE page (styled after Gramps Web's settings page): a stack of
-   <details> expanders, each with a bold title + one-line description in the
-   summary and a section component inside. Deep-link with #section — /sync etc.
-   redirect here. Sections mount lazily on first open so a page load doesn't
-   fan out API calls. */
 import { BifrostElement, html, nothing } from './core.js';
 import './paperless-sync-page.js';
 import './transcribe-page.js';
@@ -11,15 +6,15 @@ import './citations-page.js';
 import './places-page.js';
 
 const SECTIONS = [
-  { id: 'sync', title: 'Sync', desc: 'Create a Gramps media object from a Paperless document',
+  { id: 'sync', title: 'Sync', desc: 'Sync Paperless docs to Gramps media objects',
     body: html`<paperless-sync-page></paperless-sync-page>` },
-  { id: 'transcribe', title: 'Transcribe', desc: 'Gemini OCR for a Paperless document',
+  { id: 'transcribe', title: 'Transcribe', desc: 'Manage OCR for Paperless docs',
     body: html`<transcribe-page></transcribe-page>` },
-  { id: 'reprocess', title: 'Reprocess', desc: 'Rebuild a Paperless PDF so every page shares one width',
+  { id: 'reprocess', title: 'Reprocess', desc: 'Rebuild a Paperless doc so all pages are the same width',
     body: html`<reprocess-page></reprocess-page>` },
-  { id: 'citations', title: 'Citations', desc: 'Generate Gramps citations from Paperless document',
+  { id: 'citations', title: 'Citations', desc: 'Generate Gramps citations from Paperless doc',
     body: html`<citations-page></citations-page>` },
-  { id: 'places', title: 'Places', desc: 'Generate a boundary polygon for a place on a Gramps map',
+  { id: 'places', title: 'Places', desc: 'Generate a boundary polygon on a Gramps map',
     body: html`<places-page></places-page>` },
 ];
 

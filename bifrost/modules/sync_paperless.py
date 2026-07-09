@@ -1,6 +1,3 @@
-"""Paperless to Gramps sync
-"""
-
 from __future__ import annotations
 
 import hashlib
@@ -18,14 +15,13 @@ from .citations import next_sequential_id
 
 log = logging.getLogger("bifrost.sync.paperless")
 
-# Paperless Date-qualifier labels (select custom field)
 QUAL_EXACT = "Exact"
 QUAL_CIRCA = "Circa"
 QUAL_BEFORE = "Before"
 QUAL_AFTER = "After"
 QUAL_YEAR = "Year only"
 QUAL_DECADE = "Decade only"
-QUAL_TO_FROM = "To/from"
+# QUAL_TO_FROM = "To/from"
 
 MOD_REGULAR, MOD_BEFORE, MOD_AFTER, MOD_ABOUT = 0, 1, 2, 3
 QUAL_REGULAR_Q, QUAL_ESTIMATED_Q = 0, 1
@@ -33,7 +29,6 @@ QUAL_REGULAR_Q, QUAL_ESTIMATED_Q = 0, 1
 SKIP_TITLE_SYNC_TAG = "skip-title-sync"
 TRANSLATION_DELIMITER = "======== ENGLISH TRANSLATION ========"
 
-# Gramps object types that can carry media_list rect annotations
 BACKLINK_OBJ_TYPES = {
     "person": "people",
     "family": "families",
@@ -49,12 +44,6 @@ BACKLINK_OBJ_TYPES = {
 # ---------------------------------------------------------------------------
 
 def build_gramps_date_from_paperless(doc: dict, qualifier_label: str | None) -> dict | None:
-    """Gramps Date from doc['created'] + the Paperless qualifier label.
-
-    Returns None when the qualifier is unset (it is the per-doc opt-in),
-    'created' is missing/unparseable, the qualifier is To/from (no Gramps
-    equivalent without an end date), or the label is unknown.
-    """
     if not qualifier_label:
         return None
     created = doc.get("created") or doc.get("created_date")
@@ -65,10 +54,10 @@ def build_gramps_date_from_paperless(doc: dict, qualifier_label: str | None) -> 
     except (ValueError, TypeError):
         return None
 
-    if qualifier_label == QUAL_TO_FROM:
-        log.warning("Paperless #%d: 'To/from' has no Gramps equivalent — skipping date",
-                    doc.get("id", 0))
-        return None
+    # if qualifier_label == QUAL_TO_FROM:
+    #     log.warning("Paperless #%d date qualifier has no Gramps equivalent",
+    #                 doc.get("id", 0))
+    #     return None
 
     day, month, year = dt.day, dt.month, dt.year
     modifier, quality = MOD_REGULAR, QUAL_REGULAR_Q
@@ -88,7 +77,7 @@ def build_gramps_date_from_paperless(doc: dict, qualifier_label: str | None) -> 
         year = (year // 10) * 10
         quality = QUAL_ESTIMATED_Q
     else:
-        log.warning("Paperless #%d: unknown Date qualifier %r — skipping",
+        log.warning("Paperless #%d unknown date qualifier",
                     doc.get("id", 0), qualifier_label)
         return None
 
@@ -136,7 +125,6 @@ def content_hash(content: str) -> str:
 
 
 def split_transcription(content: str) -> tuple[str, str | None]:
-    """Split OCR content at the translation delimiter."""
     if TRANSLATION_DELIMITER in content:
         parts = content.split(TRANSLATION_DELIMITER, 1)
         return parts[0].strip(), (parts[1].strip() or None)
@@ -156,10 +144,7 @@ def build_note_obj(handle: str, gramps_id: str, text: str, note_type: str) -> di
         "private": False,
     }
 
-
-# ---------------------------------------------------------------------------
-# DB state (replaces versions.json / transcriptions.json)
-# ---------------------------------------------------------------------------
+# DB 
 
 def _get_version(conn: sqlite3.Connection, doc_id: int) -> sqlite3.Row | None:
     return conn.execute(
@@ -199,10 +184,7 @@ def _set_tx(conn: sqlite3.Connection, doc_id: int, **fields) -> None:
              "translation_note_id": None, **current},
         )
 
-
-# ---------------------------------------------------------------------------
-# The sync generator
-# ---------------------------------------------------------------------------
+# sync generator
 
 def _doc_gramps_id(doc: dict, field_id: int) -> str | None:
     for cf in doc.get("custom_fields", []):
@@ -214,8 +196,6 @@ def _doc_gramps_id(doc: dict, field_id: int) -> str | None:
 
 
 async def paperless_id_for_media(gramps: GrampsClient, media_gramps_id: str) -> int | None:
-    """Resolve a Gramps media id (e.g. 'TP5TCM') to its source Paperless doc id
-    via the 'Paperless ID' attribute the sync writes on every media object."""
     media = await gramps.get_media_by_gramps_id(media_gramps_id.strip())
     if not media:
         return None
@@ -240,22 +220,12 @@ async def sync(
     versions_only: bool = False,
     selected: set[str] | None = None,
 ) -> AsyncIterator[SyncEvent]:
-    # versions_only: run ONLY phase 2 (repoint media to the selected Paperless
-    # version). No create / title / date / transcription work
-    # selected: only process these preview rows — keys are "entity:source_id"
-    # exactly as emitted in item events ("doc:44", "media:44", "note:44").
-    # None means everything. (entity, source_id) is unique per row: a doc gets
-    # a phase-1 "doc" row OR a phase-2 one (keyed on having a gramps_id), never
-    # both. Deselected phase-2 docs also skip baselining — the next unfiltered
-    # run picks that up.
     counts = {"created": 0, "skipped": 0, "versions_updated": 0, "baselined": 0,
               "titles_updated": 0, "dates_updated": 0,
               "tx_created": 0, "tx_updated": 0, "tx_skipped": 0, "errors": 0}
 
     existing_ids = await gramps.list_media_gramps_ids()
 
-    # Resolve the date-qualifier select options up front: phase 3 needs them,
-    # and phase 1 uses them to show prospective dates on create previews
     q_options: dict[str, str] = {}
     m_options: dict[str, str] = {}
     q_field = cfg.date_qualifier_field_id
@@ -263,7 +233,7 @@ async def sync(
     if q_field and not transcriptions_only:
         try:
             q_options = await paperless.resolve_custom_field_options(q_field)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa BLE001
             yield SyncEvent(kind="error", detail=f"date qualifier field options: {exc}")
             q_field = None
     if m_field and not transcriptions_only:
@@ -273,8 +243,6 @@ async def sync(
             m_field = None
 
     def _prospective_cols(doc: dict) -> dict:
-        """What a created doc will get: date + attached notes — the facts the
-        reviewer cares about (paths and mime live in event data, not here)."""
         cols: dict = {}
         if q_field:
             q_val = paperless.get_custom_field_value(doc, q_field)
@@ -286,7 +254,12 @@ async def sync(
             content = (doc.get("content") or "").strip()
             if content:
                 _tx, tl = split_transcription(content)
-                cols["transcription"] = "with translation" if tl else "yes"
+                tracked = _get_tx(conn, doc["id"])
+                cols["transcription"] = ("update" if tracked and tracked["note_handle"]
+                                         else "new")
+                if tl:
+                    cols["translation"] = ("update" if tracked and tracked["translation_handle"]
+                                           else "new")
             else:
                 cols["transcription"] = "tagged, no text yet"
         return cols
@@ -303,16 +276,11 @@ async def sync(
             yield SyncEvent(kind="summary", data=counts)
             return
         documents = await paperless.list_documents_by_tags(list(tag_map.values()))
-        # single_doc_id scopes phase 1 (media create) too, not just the
-        # transcription phase below — callers may sync one document at a time.
         if single_doc_id is not None:
             documents = [d for d in documents if d["id"] == single_doc_id]
         yield SyncEvent(kind="started",
                         detail=f"{len(documents)} tagged document(s) in Paperless")
 
-    # One 0→100% bar across the whole run: each phase that will actually run
-    # owns an equal band of the bar, and advances through it by its own
-    # done/total. The caption still shows the current phase's counts.
     if versions_only:
         bands = ["versions"]
     elif transcriptions_only:
@@ -326,7 +294,7 @@ async def sync(
                          data={"done": done, "total": total,
                                "percent": round(100 * frac)})
 
-    # ============ Phase 1: media sync ============
+    # Phase 1 media sync
     n_docs = len(documents)
     for i, doc in enumerate(documents if not versions_only else []):
         yield _progress("media", "Checking new documents", i, n_docs)
@@ -340,7 +308,7 @@ async def sync(
 
         try:
             metadata = await paperless.get_document_metadata(doc_id)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa BLE001
             counts["errors"] += 1
             yield SyncEvent(kind="item", entity="doc", action="failed",
                             source_id=str(doc_id), title=title,
@@ -349,8 +317,6 @@ async def sync(
         gramps_path = f"paperless/{metadata['media_filename']}"
 
         if not apply:
-            # Nothing is minted in preview — ids exist only once the media
-            # is really created.
             counts["created"] += 1
             yield SyncEvent(kind="item", entity="doc", action="would_create",
                             source_id=str(doc_id), title=title,
@@ -379,14 +345,12 @@ async def sync(
 
         try:
             await gramps.create_media(media_obj)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa BLE001
             counts["errors"] += 1
             yield SyncEvent(kind="item", entity="doc", action="failed",
                             source_id=str(doc_id), title=title, detail=str(exc))
             continue
 
-        # Write-back is THE idempotency key — its failure is the known
-        # duplicate window, so shout (run goes red) but keep going.
         try:
             cfs = list(doc.get("custom_fields", []))
             updates = {
@@ -403,12 +367,12 @@ async def sync(
                     cfs.append({"field": fid, "value": value})
             await paperless.patch_custom_fields(doc_id, cfs)
             doc["custom_fields"] = cfs  # later phases must see it as synced
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa BLE001
             yield SyncEvent(
                 kind="error", source_id=str(doc_id),
                 detail=(f"media {gramps_id} created in Gramps but gramps_id "
-                        f"write-back to Paperless FAILED — next run would "
-                        f"duplicate this doc. Fix the custom field manually. ({exc})"),
+                        f"write-back to Paperless FAILED. Next run would "
+                        f"duplicate this doc. You must fix the custom field manually. ({exc})"),
             )
 
         with conn:
@@ -424,7 +388,7 @@ async def sync(
                         source_id=str(doc_id), gramps_id=gramps_id, title=title,
                         data={"path": gramps_path, "cols": _prospective_cols(doc)})
 
-    # ============ Phase 2: version sync ============
+    # Phase 2 version sync
     img_tag_id = tag_map.get("img")
     for i, doc in enumerate(documents):
         yield _progress("versions", "Checking versions", i, n_docs)
@@ -437,7 +401,7 @@ async def sync(
             continue
         try:
             metadata = await paperless.get_document_metadata(doc_id)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa BLE001
             counts["errors"] += 1
             yield SyncEvent(kind="item", entity="doc", action="failed",
                             source_id=str(doc_id), title=title,
@@ -454,10 +418,8 @@ async def sync(
         if current_checksum == tracked["checksum"]:
             continue
 
-        # Version changed
+        #version changed
         new_path = f"paperless/{metadata['media_filename']}"
-        # mime follows the actual (selected-version) file, not the root doc's
-        # original mime — versions can be a different format (e.g. png vs jpg).
         guessed, _ = mimetypes.guess_type(metadata["media_filename"])
         new_mime = guessed or doc.get("mime_type", "application/octet-stream")
         media = await gramps.get_media_by_gramps_id(gramps_id)
@@ -504,13 +466,12 @@ async def sync(
                         source_id=str(doc_id), gramps_id=gramps_id, title=title,
                         data={"cols": vcols})
 
-    # ============ Phase 3: date/title sync ============
-    # (q_options / m_options were resolved up front, before phase 1)
+    # Phase 3 date/title sync
     skip_tag_handle = None
     if documents and not versions_only:
         try:
             skip_tag_handle = await gramps.get_tag_handle(SKIP_TITLE_SYNC_TAG)
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa BLE001
             skip_tag_handle = None
 
     for i, doc in enumerate(documents if not versions_only else []):
@@ -524,7 +485,7 @@ async def sync(
             continue
         try:
             media = await gramps.get_media_by_gramps_id(gramps_id)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa BLE001
             counts["errors"] += 1
             yield SyncEvent(kind="item", entity="doc", action="failed",
                             source_id=str(doc_id), title=title, detail=str(exc))
@@ -535,7 +496,7 @@ async def sync(
         media_dirty = False
         mcols: dict = {}
 
-        # Title sync (skip-title-sync Gramps tag opts out)
+        # Title sync but ignore skip-title-sync Gramps tagged assets
         skip_title = bool(skip_tag_handle and skip_tag_handle in (media.get("tag_list") or []))
         if not skip_title and media.get("desc") != title:
             mcols["title"] = f"{media.get('desc')!r} → {title!r}"
@@ -544,7 +505,6 @@ async def sync(
                 media_dirty = True
             counts["titles_updated"] += 1
 
-        # Date sync (qualifier field is the per-doc opt-in)
         q_label = None
         if q_field:
             q_val = paperless.get_custom_field_value(doc, q_field)
@@ -569,7 +529,7 @@ async def sync(
             try:
                 media["change"] = int(datetime.utcnow().timestamp())
                 await gramps.update_media(media["handle"], media)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:  # noqa BLE001
                 counts["errors"] += 1
                 yield SyncEvent(kind="item", entity="doc", action="failed",
                                 source_id=str(doc_id), title=title, detail=str(exc))
@@ -580,7 +540,7 @@ async def sync(
                             source_id=str(doc_id), gramps_id=gramps_id, title=title,
                             data={"cols": mcols})
 
-    # ============ Phase 4: transcriptions ============
+    # phase 4 transcriptions
     if cfg.transcription_tag_id and not versions_only:
         tx_docs = await paperless.list_documents_by_tag(cfg.transcription_tag_id)
         if single_doc_id is not None:
@@ -593,7 +553,7 @@ async def sync(
         else:
             yield SyncEvent(kind="started",
                             detail=f"{len(tx_docs)} document(s) with transcription tag")
-        note_ids: set[str] | None = None  # fetched on first mint
+        note_ids: set[str] | None = None
         for i, doc in enumerate(tx_docs):
             yield _progress("tx", "Checking transcriptions", i, len(tx_docs))
             doc_id = doc["id"]
@@ -619,9 +579,9 @@ async def sync(
             has_translation = tl_text is not None
             had_translation = bool(tracked["translation_handle"]) if tracked else False
 
-            ncols: dict = {"transcription": "yes"}
+            ncols: dict = {"transcription": "update" if is_update else "new"}
             if has_translation:
-                ncols["translation"] = "yes"
+                ncols["translation"] = "update" if had_translation else "new"
             elif had_translation:
                 ncols["translation"] = "removed in Paperless; old note kept"
 
@@ -636,16 +596,12 @@ async def sync(
             try:
                 media = await gramps.get_media_by_gramps_id(gramps_id)
                 if not media:
-                    # The Gramps media was deleted (deliberately, per the
-                    # tree's conventions). Creating a note would orphan it;
-                    # updating would 404. Skip loudly.
+                    # creating a note would orphan it
                     counts["errors"] += 1
                     yield SyncEvent(
                         kind="item", entity="note", action="failed",
                         source_id=str(doc_id), title=title,
-                        detail=(f"Gramps media {gramps_id} no longer exists — "
-                                f"skipped; clear the doc's gramps_id field in "
-                                f"Paperless if the deletion was intentional"))
+                        detail=(f"Gramps media {gramps_id} no longer exists!"))
                     continue
 
                 async def mint_note_id() -> str:
@@ -715,7 +671,7 @@ async def sync(
                                 action="updated" if is_update else "created",
                                 source_id=str(doc_id), gramps_id=gramps_id,
                                 title=title, data={"cols": ncols})
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:  # noqa BLE001
                 counts["errors"] += 1
                 yield SyncEvent(kind="item", entity="note", action="failed",
                                 source_id=str(doc_id), title=title, detail=str(exc))

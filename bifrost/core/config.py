@@ -1,11 +1,3 @@
-"""Single config: every service credential lives in one file.
-
-Load order: $BIFROST_CONFIG if set, else config.yaml at the repo root.
-The database path is resolved relative to the config file's directory, so the
-same config works on the host (/opt/stacks/bifrost/) and in the container
-(/app/).
-"""
-
 from __future__ import annotations
 
 import os
@@ -36,25 +28,18 @@ class PaperlessConfig:
 class SyncPaperlessConfig:
     sync_tags: tuple[str, ...] = ("doc", "img")
     public_url: str = ""
-    # Public Gramps URL used for the link written back into Paperless.
     gramps_public_url: str = ""
-    # Paperless custom field ids (see paper-to-gramps ADMIN_GUIDE).
     gramps_id_field_id: int = 0
     gramps_url_field_id: int = 0
     date_qualifier_field_id: int | None = None
     date_meaning_field_id: int | None = None
-    # Paperless tag id marking documents with a transcription to sync.
     transcription_tag_id: int | None = None
-    # Paperless tag NAME marking documents to (re-)OCR with Gemini in place.
     ocr_tag: str = ""
 
 
 @dataclass(frozen=True)
 class PlacesConfig:
-    # The osm-to-gramps rendering service (kept running; bifrost is the
-    # interface and orchestrator — full absorption can come later).
     osm_service_url: str = ""
-    # GeoJSON sidecar dir (read-only mount) for boundary status display.
     boundaries_dir: Path | None = None
 
 
@@ -68,7 +53,6 @@ class AnthropicConfig:
 class GeminiConfig:
     api_key: str = ""
     model: str = "gemini-3-flash-preview"
-    # Optional reasoning budget for thinking-capable models (None = default).
     thinking_budget: int | None = None
 
 

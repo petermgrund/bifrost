@@ -1,41 +1,31 @@
+<p align="center">
+  <picture>
+    <img src="bifrost/web/static/favicon.svg" width="20%">
+  </picture>
+</p>
+
 # Bifrost
 
-*The bridge between realms: one console for everything Gramps.*
+Bifrost is a curation console for connecting Gramps Web to other services. Think of it as a companion web app for a Gramps Web family tree. Gramps holds people, families, events, places, sources, and media, but what if your files live elsewhere? Bifrost connects other services, like Paperless-ngx and Immich, to Gramps and lets you bring their content in. Now, you don't need to have several copies of the same file scattered across several different services.
 
-One web console for curating the Grund Digital Archive's Gramps tree — a
-switchboard between Gramps Web and the services around it: Paperless → Gramps
-sync, Gemini OCR transcription, EE-style citations, and OSM place boundaries.
+Bifrost is also a citation-generating assistant. Crafting consistant citations can be one of the most tedious and time-consuming aspects of genealogy.
 
-**Stack:** FastAPI + SQLite backend; Lit light-DOM components on **BeerCSS**
-(vendored in `bifrost/web/static/vendor/`, no build step, offline).
+Bifrost's memory lives in Gramps and the source systems, so nothing important depends on Bifrost's own database. It can be deleted without any consequences on your data.
 
-**UI conventions** — the UI is ONE page: a stack of `<details>` section
-expanders in the Gramps-Web settings style, one per operation. Every section
-is built from the same shared kit in `static/app/core.js`, whose header
-comment is the normative spec: `h6` stanza headings, one `nav.wrap` control
-row (`field()` → `chip()` filters with counts → `btn()` → `statusLine()`),
-plain sentence-case tables with `emptyRow()` empty states, busy-guarded
-buttons with gerund labels, and every outcome through `statusLine()`. No
-cards, no tabs, no custom CSS beyond the small brand layer in `bifrost.css`;
-buttons are one uniform filled style via `btn()` — order conveys emphasis,
-never color.
+# Features
 
-**2026-07-06 — ID feature removed.** The IDs tab (reserved-id ledger, the
-"assign my own Gramps IDs" switch on the Sync preview, and the a-series scan
-register) is gone — media ids are simply auto-minted random-6 codes from the
-safe alphabet (`core/ids.py`, see `docs/MEDIA_ID_SCHEME.md`), and the scan
-register lives with `/opt/stacks/archive-scheme/SCHEME.md`. Dormant DB tables
-(`reserved_ids`, `scan_register`) are kept — no data was deleted.
+* Sync documents in Paperless-ngx to Gramps Web as media objects; their versions, titles, dates, and transcription text are kept up to date
+    * Paperless now lets a document have multiple versions and serve whichever you select. Bifrost notices when the selected version changes and repoints the Gramps media to it so Gramps always shows the version you picked.
+* Draft properly formatted genealogical source citations
+* Transcribe handwriting, old print, and photographed records that Paperless-ngx's OCR can't make sense of
+* Rebuild a Paperless PDF so every page shares the same width
+* Give places boundaries on the minimap
 
-**2026-07-01 — Immich integration removed.** The Immich sync, faces, and
-stack-versioning modules are gone; archival photos move to **ArchivesSpace**
-(see `/opt/stacks/archive-scheme/SCHEME.md`), and an ArchivesSpace source
-module will take the Immich slot. The standalone `face-linker.service` (:8767)
-remains the face-linking tool. Dormant DB tables (`person_links`, `face_pads`,
-`immich_versions*`, immich rows in `minted_media`) are kept — no data was
-deleted. `docs/IMMICH_VERSIONING.md` is retained as a design reference for the
-removed feature.
 
-See [docs/OVERVIEW.md](docs/OVERVIEW.md) for what each section does and
-[docs/DESIGN.md](docs/DESIGN.md) for the original architecture (partly
-historical — see its update banners).
+# Feature Requests
+
+Feature requests can be submitted by creating a new issue and tagging it as a new feature request.
+
+# Development
+
+Bifrost consolidates several independent scripts intended to sync Gramps Web to Paperless-ngx, Immich, and OSM; as well as to be a genealogical citation generator. 

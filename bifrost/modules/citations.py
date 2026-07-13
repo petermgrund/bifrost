@@ -197,9 +197,23 @@ and compose only the citation locator, confidence, notes and quality \
 consistent with that source's established style."""
 
 _STYLE_DIR = Path(__file__).parent / "data"
-# The single source of truth, edited live by Peter and bind-mounted into the
-# container at /app/house_style_master.md (same resolution as config.yaml).
-_MASTER = Path(__file__).resolve().parents[2] / "house_style_master.md"
+
+
+def _resolve_master() -> Path:
+    """The single source of truth, edited live by Peter (host: repo root) and
+    by the House style page. In docker it is reached through the repo-root
+    DIRECTORY bind mount /app/repo — a directory mount resolves the name on
+    every lookup, so host-side atomic saves (write-temp-and-rename: IDEs, sed
+    -i, git checkout) cannot detach it the way a single-file mount could.
+    Outside docker (venv dev) it resolves relative to this file."""
+    docker = Path("/app/repo/house_style_master.md")
+    if docker.exists():
+        return docker
+    return Path(__file__).resolve().parents[2] / "house_style_master.md"
+
+
+MASTER_PATH = _resolve_master()
+_MASTER = MASTER_PATH
 
 
 def _master_citation_style() -> str:

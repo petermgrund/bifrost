@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}House style — Bifrost{% endblock %}
+{% block main_class %}max{% endblock %}
+{% block nav_title %}House style{% endblock %}
+{% block nav_actions %}
+<a class="button circle transparent" href="/" aria-label="Back to Bifrost">
+  <i>arrow_back</i>
+</a>
+{% endblock %}
+{% block content %}<style-page></style-page>{% endblock %}
+{% block scripts %}<script type="module" src="/static/app/style-page.js"></script>{% endblock %}

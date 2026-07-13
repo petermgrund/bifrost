@@ -31,10 +31,15 @@
     }
     addEventListener('DOMContentLoaded', syncThemeIcon);
   </script>
-  <main class="responsive">
+  <main class="responsive {% block main_class %}{% endblock %}">
     <nav>
       <svg width="30" height="22" viewBox="0 0 30 22" aria-hidden="true"><path d="M3 20 A12 12 0 0 1 27 20" fill="none" stroke="var(--tertiary)" stroke-width="2.6" stroke-linecap="round"/><path d="M7 20 A8 8 0 0 1 23 20" fill="none" stroke="var(--warning, #b07a00)" stroke-width="2.6" stroke-linecap="round"/><path d="M11 20 A4 4 0 0 1 19 20" fill="none" stroke="var(--primary)" stroke-width="2.6" stroke-linecap="round"/></svg>
-      <h5 class="max">Bifrost</h5>
+      <h5 class="max">{% block nav_title %}Bifrost{% endblock %}</h5>
+      {% block nav_actions %}
+      <a class="button circle transparent" href="/style" aria-label="Edit the house style doc">
+        <i>edit</i>
+      </a>
+      {% endblock %}
       <button class="circle transparent" onclick="toggleTheme()" aria-label="Toggle dark mode">
         <i id="theme-icon">dark_mode</i>
       </button>

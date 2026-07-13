@@ -105,3 +105,71 @@ summary.none i.chev { transition: transform 0.15s; }
 summary.none :is(h5, h6) { margin: 0; }
 details[open] > summary.none i.chev { transform: rotate(90deg); }
 .section-body { padding: 1rem 0 2rem 2.5rem; }
+
+/* House style editor — split view: monospace source (left) and live
+   rendered preview (right), equal-height panes with their own scroll.
+   Grid/field/textarea/article structure is BeerCSS; these only size the
+   panes and space the rendered markdown. BeerCSS caps un-rowed textareas
+   (max-block-size: 12rem) — the rows attribute opts out of that rule, and
+   the explicit sizes here win the cascade (same specificity, later sheet). */
+.field.textarea.style-editor {
+  block-size: 75vh;
+  max-block-size: none;
+  margin: 0;
+}
+.field.textarea.style-editor > textarea {
+  block-size: 100%;
+  max-block-size: none;
+  field-sizing: fixed;
+  font-family: "Space Mono", monospace;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  white-space: pre;
+  overflow: auto;
+}
+.field.textarea.style-editor.wrap > textarea {
+  white-space: pre-wrap;
+}
+
+/* Table-editor dialog: wide, scrollable grid of borderless cell inputs
+   inside a BeerCSS bordered table. */
+dialog.style-table-dialog {
+  inline-size: min(70rem, 94vw);
+}
+dialog.style-table-dialog .scroll {
+  max-block-size: 55vh;
+  overflow: auto;
+}
+dialog.style-table-dialog table input {
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 0.85rem;
+  inline-size: 100%;
+  min-inline-size: 9rem;
+  padding: 0.15rem 0.1rem;
+}
+dialog.style-table-dialog table input:focus-visible {
+  outline: 0.125rem solid var(--primary);
+  outline-offset: 0.125rem;
+}
+.style-preview {
+  block-size: 75vh;
+  max-block-size: none;
+  overflow-y: auto;
+  margin: 0;
+}
+.style-preview table {
+  margin: 0.75rem 0;
+}
+.style-preview pre,
+.style-preview code {
+  font-family: "Space Mono", monospace;
+  font-size: 0.85em;
+}
+.style-preview blockquote {
+  border-inline-start: 0.25rem solid var(--outline-variant);
+  margin: 0.75rem 0;
+  padding: 0.25rem 1rem;
+}

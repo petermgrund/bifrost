@@ -18,6 +18,10 @@ services:
       - .:/app/repo
       # boundary GeoJSON sidecars (status display on the Places page)
       - /mnt/storage/gramps/static-boundaries:/boundaries:ro
+      # face-linker state (person_map.yaml) for the Immich sync. A DIRECTORY
+      # mount on purpose: the face-linker saves atomically (write-temp-rename),
+      # which would detach a single-file mount.
+      - /opt/stacks/immich-to-gramps:/legacy:ro
       # Dev: live-edit the frontend (CSS/JS/HTML) — changes apply on a browser
       # refresh, no rebuild. The image still bakes these; the mounts override
       # with the working tree. (Python changes still need `compose build`.)

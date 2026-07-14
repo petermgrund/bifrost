@@ -13,6 +13,14 @@ paperless:
 database: data/bifrost.db
 
 sync:
+  immich:
+    public_url: "https://your-immich-public-url"
+    # face-linker's person map (mount it into the container read-only)
+    person_map_path: "/legacy/person_map.yaml"
+    # first prefix match wins; an asset under no mapping is a sync error
+    path_mappings:
+      - immich_prefix: "/usr/src/app/upload/upload/"
+        gramps_prefix: "immich/"
   paperless:
     # Choose which Paperless tags are used to select documents for sync
     sync_tags: ["tag-1", "tag-2"]
@@ -42,3 +50,8 @@ places:
   # (mounted read-only; used only to show boundary status).
   osm_service_url: "http://{device}:{port}"
   boundaries_dir: "/boundaries"
+
+# Optional: enables the single-asset Immich->Gramps sync (called by urd)
+immich:
+  base_url: "http://{device}:2283"
+  api_key: "REPLACE_ME"

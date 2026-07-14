@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
-from ...modules import ocr, sync_paperless
+from ...modules import ocr, sync_immich, sync_paperless
 from ...modules.sync_paperless import _doc_gramps_id
 from ..runs import record_run
 
@@ -115,6 +115,33 @@ async def paperless_resync_media(request: Request, body: ResyncMediaBody):
         st.caches.clear()
     return {"run_id": run_id, "apply": body.apply, "media_id": media_id,
             "doc_id": doc_id, "events": [e.__dict__ for e in events]}
+
+
+class ImmichAssetBody(BaseModel):
+    asset_id: str
+    gramps_id: str | None = None  # optional manual/penciled id; else auto
+
+
+@router.post("/immich/asset")
+async def immich_sync_asset(request: Request, body: ImmichAssetBody):
+    """Initial sync of ONE Immich asset into Gramps (called by urd)."""
+    st = _state(request)
+    if getattr(st, "immich", None) is None:
+        raise HTTPException(503, "Immich is not configured in bifrost (immich.base_url/api_key)")
+    asset_id = body.asset_id.strip()
+    if not asset_id:
+        raise HTTPException(400, "asset_id required")
+    gen = sync_immich.sync_one_asset(
+        st.gramps, st.immich, st.conn, st.cfg.sync_immich,
+        asset_id, gramps_id=body.gramps_id,
+    )
+    try:
+        run_id, events = await record_run(st.conn, "sync.immich.asset", gen)
+    except sync_immich.SyncError as exc:
+        raise HTTPException(exc.status, exc.detail)
+    st.caches.clear()
+    summary = next((e for e in reversed(events) if e.kind == "summary"), None)
+    return {"run_id": run_id, **((summary.data or {}) if summary else {})}
 
 
 class OcrBody(BaseModel):

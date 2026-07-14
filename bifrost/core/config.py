@@ -25,6 +25,25 @@ class PaperlessConfig:
 
 
 @dataclass(frozen=True)
+class ImmichConfig:
+    # Optional section — when empty, the Immich sync endpoint answers 503.
+    base_url: str = ""
+    api_key: str = ""
+
+
+@dataclass(frozen=True)
+class SyncImmichConfig:
+    public_url: str = ""
+    # ((immich_prefix, gramps_prefix), ...) — first prefix match wins;
+    # an originalPath matching none is a hard sync error, never a guess.
+    path_mappings: tuple[tuple[str, str], ...] = ()
+    # The face-linker's person_map.yaml (it owns person links since 2026-07-01).
+    person_map_path: Path | None = None
+    date_key: str = "gda.date"
+    gramps_key: str = "gda.gramps"
+
+
+@dataclass(frozen=True)
 class SyncPaperlessConfig:
     sync_tags: tuple[str, ...] = ("doc", "img")
     public_url: str = ""
@@ -62,6 +81,8 @@ class Config:
     paperless: PaperlessConfig
     db_path: Path
     config_path: Path
+    immich: ImmichConfig = ImmichConfig()
+    sync_immich: SyncImmichConfig = SyncImmichConfig()
     sync_paperless: SyncPaperlessConfig = SyncPaperlessConfig()
     anthropic: AnthropicConfig = AnthropicConfig()
     gemini: GeminiConfig = GeminiConfig()
@@ -101,12 +122,29 @@ def load_config(path: str | Path | None = None) -> Config:
         transcription_tag_id=sp_raw.get("transcription_tag_id"),
         ocr_tag=sp_raw.get("ocr_tag") or "",
     )
+    im_raw = raw.get("immich") or {}
+    si_raw = (raw.get("sync") or {}).get("immich") or {}
+    sync_immich = SyncImmichConfig(
+        public_url=(si_raw.get("public_url") or "").rstrip("/"),
+        path_mappings=tuple(
+            (m["immich_prefix"], m["gramps_prefix"])
+            for m in (si_raw.get("path_mappings") or [])
+        ),
+        person_map_path=Path(p) if (p := si_raw.get("person_map_path")) else None,
+        date_key=si_raw.get("date_key") or "gda.date",
+        gramps_key=si_raw.get("gramps_key") or "gda.gramps",
+    )
     gem_raw = raw.get("gemini") or {}
     return Config(
         gramps=GrampsConfig(**section("gramps", ["base_url", "username", "password"])),
         paperless=PaperlessConfig(**section("paperless", ["base_url", "api_token"])),
         db_path=db,
         config_path=cfg_path,
+        immich=ImmichConfig(
+            base_url=(im_raw.get("base_url") or "").rstrip("/"),
+            api_key=im_raw.get("api_key") or "",
+        ),
+        sync_immich=sync_immich,
         sync_paperless=sync_paperless,
         anthropic=AnthropicConfig(
             api_key=(raw.get("anthropic") or {}).get("api_key") or "",

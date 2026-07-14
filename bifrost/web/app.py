@@ -12,7 +12,7 @@ from fastapi.templating import Jinja2Templates
 
 from .. import __version__
 from ..core import db
-from ..core.clients import GeminiClient, GrampsClient, PaperlessClient
+from ..core.clients import GeminiClient, GrampsClient, ImmichClient, PaperlessClient
 from ..core.clients.anthropic import AnthropicClient
 from ..core.config import load_config
 
@@ -30,12 +30,20 @@ async def lifespan(app: FastAPI):
     app.state.paperless = PaperlessClient(cfg.paperless.base_url, cfg.paperless.api_token)
     app.state.anthropic = AnthropicClient(cfg.anthropic.api_key, cfg.anthropic.model)
     app.state.gemini = GeminiClient(cfg.gemini.api_key, cfg.gemini.model)
+    # Optional — sync/immich/asset answers 503 when unconfigured.
+    app.state.immich = (
+        ImmichClient(cfg.immich.base_url, cfg.immich.api_key)
+        if cfg.immich.base_url and cfg.immich.api_key
+        else None
+    )
     app.state.caches = {}
     yield
     await app.state.gramps.close()
     await app.state.paperless.close()
     await app.state.anthropic.close()
     await app.state.gemini.close()
+    if app.state.immich is not None:
+        await app.state.immich.close()
     app.state.conn.close()
 
 

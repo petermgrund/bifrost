@@ -8,6 +8,7 @@ class PlacesPage extends BifrostElement {
     placeId: { state: true },
     popup: { state: true },      // the looked-up place row, or null
     editingOsm: { state: true }, // the popup's OSM cell is in edit mode
+    osmDraft: { state: true },   // OSM input value while editing
     busy: { state: true },       // handle currently generating, or 'all'
     result: { state: true },     // {kind, body} | null
     failures: { state: true },   // [{gramps_id, title, detail}] from last bulk run
@@ -21,6 +22,7 @@ class PlacesPage extends BifrostElement {
     this.placeId = '';
     this.popup = null;
     this.editingOsm = false;
+    this.osmDraft = '';
     this.busy = null;
     this.result = null;
     this.failures = [];
@@ -55,6 +57,7 @@ class PlacesPage extends BifrostElement {
     }
     this.result = null;
     this.editingOsm = false;
+    this.osmDraft = '';
     this.popup = row;
   }
 
@@ -79,8 +82,9 @@ class PlacesPage extends BifrostElement {
       await post('/places/api/set-relation', { handle: row.handle, relation: value, replace });
       await this.load(true);
       this.editingOsm = false;
+      this.osmDraft = '';
       if (replace) {
-        this.result = { kind: 'ok', body: 'OSM link updated — regenerate the boundary to match.' };
+        this.result = { kind: 'ok', body: 'OSM link updated' };
       }
     } catch (e) {
       this.result = { kind: 'error', body: `${row.gramps_id}: ${e.message}` };
@@ -95,6 +99,7 @@ class PlacesPage extends BifrostElement {
     try {
       await post('/places/api/generate', { handle: row.handle, force });
       await this.load(true);
+      setTimeout(() => window.location.reload(), 2000);
     } catch (e) {
       this.result = { kind: 'error', body: `${row.gramps_id}: ${e.message}` };
     } finally {
@@ -114,6 +119,7 @@ class PlacesPage extends BifrostElement {
         .map((e) => ({ gramps_id: e.gramps_id, title: e.title, detail: e.detail }));
       this.result = { kind: c.errors ? 'error' : 'ok', body: summarize(c, true) };
       await this.load(true);
+      if (!c.errors) setTimeout(() => window.location.reload(), 2000);
     } catch (e) {
       this.result = { kind: 'error', body: e.message };
     } finally {
@@ -135,12 +141,13 @@ class PlacesPage extends BifrostElement {
           { mono: true, upper: true, width: 'small', onEnter: () => this.lookup() })}
         ${btn('Look up', false, () => this.lookup())}
         ${btn('Refresh', false, () => this.load(true), 'border')}
-        <div class="max"></div>
-        ${missing ? btn(
-          this.busy === 'all' ? 'Generating…' : `Generate missing (${missing})`,
-          !!this.busy, () => this.generateMissing()) : nothing}
-        ${this.busy === 'all' ? spinner : nothing}
       </nav>
+      ${missing ? html`<nav>
+        ${btn(
+          this.busy === 'all' ? 'Generating…' : `Generate missing (${missing})`,
+          !!this.busy, () => this.generateMissing())}
+        ${this.busy === 'all' ? spinner : nothing}
+      </nav>` : nothing}
       ${!this.popup && this.result ? html`<p>${statusLine(this.result.kind, this.result.body)}</p>` : nothing}
       ${this.loadError ? html`<p>${statusLine('error', `Reload failed shown data may be stale ${this.loadError}`)}</p>` : nothing}
       ${this.failures.length ? html`
@@ -156,7 +163,7 @@ class PlacesPage extends BifrostElement {
 
   renderPopup(r) {
     return html`
-      <dialog @close=${() => { this.popup = null; this.result = null; this.editingOsm = false; }}>
+      <dialog class="large-width" @close=${() => { this.popup = null; this.result = null; this.editingOsm = false; this.osmDraft = ''; }}>
         <nav>
           <h5 class="max small">${this.grampsUrl
             ? html`<a class="link" href="${this.grampsUrl}/place/${r.gramps_id}" target="_blank" rel="noopener">${r.name}</a>`
@@ -174,24 +181,25 @@ class PlacesPage extends BifrostElement {
               <td>OSM</td>
               <td>${!r.osm_id || this.editingOsm
                 ? html`<nav class="wrap">
-                    ${field('OSM relation or URL', this.editingOsm ? `${r.osm_type}/${r.osm_id}` : '', () => {}, {
-                      small: true, width: 'small',
-                      onEnter: (e) => this.addRelation(r, e.target.value, this.editingOsm),
-                      onChange: (e) => this.addRelation(r, e.target.value, this.editingOsm),
+                    ${field('OSM relation or URL', this.osmDraft, (e) => (this.osmDraft = e.target.value), {
+                      small: true,
+                      onEnter: () => this.addRelation(r, this.osmDraft, this.editingOsm),
                     })}
-                    ${this.editingOsm ? html`<button class="small"
+                    <button class="small" ?disabled=${!this.osmDraft.trim()}
+                      @click=${() => this.addRelation(r, this.osmDraft, this.editingOsm)}>Save</button>
+                    ${this.editingOsm ? html`<button class="small border"
                       @click=${() => (this.editingOsm = false)}>Cancel</button>` : nothing}
                   </nav>`
                 : html`<nav class="wrap">
                     <a class="link" href="https://www.openstreetmap.org/${r.osm_type}/${r.osm_id}" target="_blank" rel="noopener">${r.osm_type} ${r.osm_id}</a>
-                    <button class="small" @click=${() => (this.editingOsm = true)}>Edit</button>
+                    <button class="small" @click=${() => { this.osmDraft = `${r.osm_type}/${r.osm_id}`; this.editingOsm = true; }}>Edit</button>
                   </nav>`}</td>
             </tr>
             <tr>
               <td>Boundary</td>
               <td>${!r.osm_id ? html`${iconNa}`
                 : r.has_boundary ? html`present`
-                : html`<span class="error-text">missing</span>`}</td>
+                : html`<span class="secondary-text">not generated</span>`}</td>
             </tr>
           </tbody>
         </table>

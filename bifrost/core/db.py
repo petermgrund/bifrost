@@ -121,6 +121,13 @@ MIGRATIONS: list[str] = [
         note       TEXT
     );
     """,
+    # 8 UI-editable settings (photos album whitelist; was urd's settings.json)
+    """
+    CREATE TABLE app_settings (
+        key   TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    );
+    """,
 ]
 
 

@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -14,6 +14,7 @@ from .. import __version__
 from ..core import db
 from ..core.clients import GeminiClient, GrampsClient, ImmichClient, PaperlessClient
 from ..core.clients.anthropic import AnthropicClient
+from ..core.clients.immich import ImmichError
 from ..core.config import load_config
 
 WEB_DIR = Path(__file__).parent
@@ -30,7 +31,7 @@ async def lifespan(app: FastAPI):
     app.state.paperless = PaperlessClient(cfg.paperless.base_url, cfg.paperless.api_token)
     app.state.anthropic = AnthropicClient(cfg.anthropic.api_key, cfg.anthropic.model)
     app.state.gemini = GeminiClient(cfg.gemini.api_key, cfg.gemini.model)
-    # Optional — sync/immich/asset answers 503 when unconfigured.
+    # Optional — the Photos page and sync/immich/asset answer 503 when unconfigured.
     app.state.immich = (
         ImmichClient(cfg.immich.base_url, cfg.immich.api_key)
         if cfg.immich.base_url and cfg.immich.api_key
@@ -60,14 +61,31 @@ app = FastAPI(title="Bifrost", version=__version__, lifespan=lifespan)
 @app.middleware("http")
 async def _no_cache(request: Request, call_next):
     resp = await call_next(request)
-    resp.headers["Cache-Control"] = "no-cache"
+    # Default only — a route that sets its own Cache-Control keeps it
+    # (the Photos thumbnail proxy caches; everything else stays no-cache).
+    resp.headers.setdefault("Cache-Control", "no-cache")
     return resp
+
+
+@app.exception_handler(ImmichError)
+async def _immich_error(_request: Request, exc: ImmichError):
+    # Client-caused upstream 4xx (bad/missing asset id, invalid payload) pass
+    # through; 401/403 mean bifrost's own API key is bad, and 0/5xx mean Immich
+    # is unreachable or broken — those are genuine gateway failures (502).
+    # Immich v3 reports a missing asset as 400 "Not found or no asset.read
+    # access", not 404, so mapping only 404 would miss the deleted-asset case.
+    if 400 <= exc.status < 500 and exc.status not in (401, 403):
+        status = exc.status
+    else:
+        status = 502
+    return JSONResponse(status_code=status, content={"detail": str(exc)})
 
 
 app.mount("/static", _NoCacheStatic(directory=WEB_DIR / "static"), name="static")
 
 from .routes.citations import router as citations_router  # noqa: E402
 from .runs import ACTIVE  # noqa: E402
+from .routes.photos import router as photos_router  # noqa: E402
 from .routes.places import router as places_router  # noqa: E402
 from .routes.reprocess import router as reprocess_router  # noqa: E402
 from .routes.style import router as style_router  # noqa: E402
@@ -75,6 +93,7 @@ from .routes.sync import router as sync_router  # noqa: E402
 from .routes.transcribe import router as transcribe_router  # noqa: E402
 
 app.include_router(citations_router)
+app.include_router(photos_router)
 app.include_router(places_router)
 app.include_router(reprocess_router)
 app.include_router(style_router)

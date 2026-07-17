@@ -14,6 +14,11 @@ database: data/bifrost.db
 
 sync:
   immich:
+    # Dev-safety knob: set false in a dev config to disable the Sync
+    # section's Immich block (scan preview stays; apply and the single-asset
+    # sync endpoint answer 503), so a dev instance pointed at production
+    # can't create objects in the real tree.
+    enabled: true
     public_url: "https://your-immich-public-url"
     # face-linker's person map (mount it into the container read-only)
     person_map_path: "/legacy/person_map.yaml"
@@ -51,7 +56,11 @@ places:
   osm_service_url: "http://{device}:{port}"
   boundaries_dir: "/boundaries"
 
-# Optional: enables the single-asset Immich->Gramps sync (called by urd)
+# Optional: enables the Photos page (/photos) and the single-asset
+# Immich->Gramps sync. The API key needs at least: asset.read, asset.update,
+# album.read, person.read, stack.read, face.read (Account Settings > API Keys
+# in Immich); without face.read the sync silently creates media with no
+# person links.
 immich:
   base_url: "http://{device}:2283"
   api_key: "REPLACE_ME"

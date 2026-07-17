@@ -14,6 +14,8 @@ Bifrost's memory lives in Gramps and the source systems, so nothing important de
 
 # Features
 
+* Browse Immich photos and give them fuzzy genealogical dates (like about 1920 or before June 1955). You can also add recto/verso links that pair the back of a print with its front.
+* Sync photos into Gramps as media objects.
 * Sync documents in Paperless-ngx to Gramps Web as media objects; their versions, titles, dates, and transcription text are kept up to date
     * Paperless now lets a document have multiple versions and serve whichever you select. Bifrost notices when the selected version changes and repoints the Gramps media to it so Gramps always shows the version you picked.
 * Draft properly formatted genealogical source citations

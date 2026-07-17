@@ -28,6 +28,10 @@ export class SyncPage extends BifrostElement {
 
   get source() { return 'paperless'; }
   get itemColLabel() { return 'Item'; }
+  get scanHeading() { return 'Scan Paperless for new or changed objects'; }
+  // The entity whose create event marks a row as a CREATE (other entities on
+  // the same source are attachments — notes, faces — and never promote it).
+  get primaryEntity() { return 'doc'; }
 
   connectedCallback() {
     super.connectedCallback();
@@ -79,8 +83,9 @@ export class SyncPage extends BifrostElement {
     this.startProgress(`sync.${this.source}`);
     try {
       this.applied = await post(`/sync/api/${this.source}/apply`, { selected: [...this.selected] });
+      // No auto-reload: it would cut off reading a summary that may carry
+      // error counts, and wipe the sibling sync block's un-applied preview.
       this.phase = 'applied';
-      setTimeout(() => window.location.reload(), 2000);
     } catch (e) {
       this.error = e.message;
     } finally {
@@ -120,7 +125,7 @@ export class SyncPage extends BifrostElement {
         byDoc.set(e.source_id, r);
         out.push(r);
       }
-      if (e.entity === 'doc' && this.groupOf(e.action) === 'create') r.group = 'create';
+      if (e.entity === this.primaryEntity && this.groupOf(e.action) === 'create') r.group = 'create';
       r.keys.push(this.keyOf(e));
       Object.assign(r.cols, e.data?.cols);
       if (e.gramps_id) r.gramps_id = e.gramps_id;
@@ -161,8 +166,15 @@ export class SyncPage extends BifrostElement {
   }
 
   renderEmpty() {
+    // config.enabled === false is the sync.immich.enabled dev-safety knob
+    // (Paperless's config has no such field, so it never hits this branch).
+    if (this.config && this.config.enabled === false) {
+      return html`
+        <h6 class="small">${this.scanHeading}</h6>
+        <p class="secondary-text">Sync is disabled in this instance.</p>`;
+    }
     return html`
-      <h6 class="small">Scan Paperless for new or changed objects</h6>
+      <h6 class="small">${this.scanHeading}</h6>
       <nav>
         ${btn('Scan', this.running, () => this.runPreview())}
       </nav>`;
@@ -241,11 +253,8 @@ export class SyncPage extends BifrostElement {
   renderApplied() {
     const summary = summarize(this.applied?.events?.find((e) => e.kind === 'summary')?.data, true);
     return html`
-      <p>${statusLine('ok', `${summary || 'done.'}`)}</p>
+      <p>${statusLine('ok')}</p>
       <nav>
-        ${this.config?.gramps_public_url ? html`<a class="button"
-          href=${this.config.gramps_public_url} target="_blank" rel="noopener">Open</a>` : nothing}
-        ${btn('Run another preview', false, () => this.runAnother())}
       </nav>`;
   }
 }

@@ -70,6 +70,7 @@ const ACTION_WORDS = {
   titles_updated: ['update', 'updated', 'title'],
   dates_updated: ['set', 'set', 'date'],
   descs_updated: ['update', 'updated', 'description'],
+  kv_healed: ['re-link', 're-linked', 'photo'],
   tx_created: ['add', 'added', 'transcription'],
   tx_updated: ['rewrite', 'rewrote', 'transcription'],
   transcribed: ['transcribe', 'transcribed', 'doc'],

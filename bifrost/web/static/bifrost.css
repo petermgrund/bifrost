@@ -173,3 +173,66 @@ dialog.style-table-dialog table input:focus-visible {
   margin: 0.75rem 0;
   padding: 0.25rem 1rem;
 }
+
+/* ---- Photos page (former urd) ------------------------------------------- */
+
+/* BeerCSS 4 ships no generic hide helper; !important because rows also match
+   BeerCSS's :is(nav,.row).wrap { display:flex } which outranks one class. */
+.hidden { display: none !important; }
+
+/* Index rows that navigate to a page instead of expanding a section — match
+   the summary rows' look, minus BeerCSS's inline-anchor styling. */
+a.section-link { display: block; color: inherit; }
+
+/* Compact year/day fields in the date + scan forms. */
+.part-year { max-inline-size: 7rem; }
+.part-day { max-inline-size: 6rem; }
+
+/* Thumbnail grid cells. */
+.thumb-cell { cursor: pointer; position: relative; }
+.thumb-cell img.thumb {
+  inline-size: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  display: block;
+}
+.thumb-chips .chip { max-inline-size: 100%; }
+
+/* Selection state. An ::after overlay (not an outline) so the border paints
+   ABOVE the image and chips, following the card's rounding. */
+.thumb-cell.selected::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 3px solid var(--primary);
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 2;
+}
+.thumb-cell .sel-mark {
+  position: absolute;
+  top: .35rem;
+  left: .35rem;
+  color: var(--primary);
+  display: none;
+  z-index: 3;
+}
+.thumb-cell.selected .sel-mark { display: block; }
+
+/* Editor bottom sheet: sized by its content — never a scrollbar. */
+dialog#editor {
+  block-size: auto;
+  max-block-size: none;
+  overflow: visible;
+}
+dialog#settings { inline-size: min(28rem, 100vw); }
+#ed-img { max-block-size: 30vh; object-fit: contain; }
+/* The album list scrolls; padding keeps the first/last checkboxes from
+   being clipped at the container edges. */
+dialog#settings #set-list { padding-block: 0.5rem; }
+#variant-label { max-inline-size: 16rem; }
+
+/* Recto/verso pair dialog: tap a photo to mark it as the front. */
+dialog#pair { inline-size: min(36rem, 100vw); }
+.pair-choice { cursor: pointer; max-block-size: 32vh; object-fit: contain; }
+.pair-choice.chosen { outline: 3px solid var(--primary); outline-offset: -3px; }

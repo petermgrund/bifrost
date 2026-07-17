@@ -1,13 +1,18 @@
 import { BifrostElement, html, nothing } from './core.js';
 import './paperless-sync-page.js';
+import './immich-sync-page.js';
 import './transcribe-page.js';
 import './reprocess-page.js';
 import './citations-page.js';
 import './places-page.js';
 
 const SECTIONS = [
-  { id: 'sync', title: 'Sync', desc: 'Sync Paperless docs to Gramps media objects',
-    body: html`<paperless-sync-page></paperless-sync-page>` },
+  { id: 'photos', title: 'Photos', desc: 'Manage Immich photos',
+    href: '/photos' },
+  { id: 'sync', title: 'Sync', desc: 'Sync Paperless docs and Immich photos to Gramps media objects',
+    body: html`<paperless-sync-page></paperless-sync-page>
+      <div class="large-space"></div>
+      <immich-sync-page></immich-sync-page>` },
   { id: 'transcribe', title: 'Transcribe', desc: 'Manage OCR for Paperless docs',
     body: html`<transcribe-page></transcribe-page>` },
   { id: 'reprocess', title: 'Reprocess', desc: 'Rebuild a Paperless doc so all pages are the same width',
@@ -38,6 +43,16 @@ class BifrostApp extends BifrostElement {
 
   render() {
     return html`${SECTIONS.map((s) => html`
+      ${s.href ? html`
+      <a class="section-link" href=${s.href}>
+        <nav>
+          <i class="chev">arrow_outward</i>
+          <div class="max">
+            <h5 class="small">${s.title}</h5>
+            <div class="small-text secondary-text">${s.desc}</div>
+          </div>
+        </nav>
+      </a>` : html`
       <details id="sec-${s.id}" ?open=${this.opened.has(s.id)}
         @toggle=${(e) => this.toggle(e, s.id)}>
         <summary class="none">
@@ -50,7 +65,7 @@ class BifrostApp extends BifrostElement {
           </nav>
         </summary>
         ${this.opened.has(s.id) ? html`<div class="section-body">${s.body}</div>` : nothing}
-      </details>
+      </details>`}
       <div class="large-space"></div>`)}`;
   }
 }

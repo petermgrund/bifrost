@@ -33,14 +33,23 @@ class ImmichConfig:
 
 @dataclass(frozen=True)
 class SyncImmichConfig:
+    # Dev-safety knob (was urd's empty bifrost.base_url): false disables the
+    # Sync section's Immich block and 503s the apply + single-asset sync
+    # endpoints (preview stays readable), so a dev instance pointed at
+    # production can't create objects in the real tree.
+    enabled: bool = True
     public_url: str = ""
     # ((immich_prefix, gramps_prefix), ...) — first prefix match wins;
     # an originalPath matching none is a hard sync error, never a guess.
     path_mappings: tuple[tuple[str, str], ...] = ()
     # The face-linker's person_map.yaml (it owns person links since 2026-07-01).
     person_map_path: Path | None = None
+    # The gda.* KV keys on Immich assets (core/gda) — shared by the Photos
+    # page and the Immich sync, configured in this one section only.
     date_key: str = "gda.date"
+    scan_key: str = "gda.scan"
     gramps_key: str = "gda.gramps"
+    verso_key: str = "gda.verso"
 
 
 @dataclass(frozen=True)
@@ -125,6 +134,7 @@ def load_config(path: str | Path | None = None) -> Config:
     im_raw = raw.get("immich") or {}
     si_raw = (raw.get("sync") or {}).get("immich") or {}
     sync_immich = SyncImmichConfig(
+        enabled=si_raw.get("enabled") is not False,
         public_url=(si_raw.get("public_url") or "").rstrip("/"),
         path_mappings=tuple(
             (m["immich_prefix"], m["gramps_prefix"])
@@ -132,7 +142,9 @@ def load_config(path: str | Path | None = None) -> Config:
         ),
         person_map_path=Path(p) if (p := si_raw.get("person_map_path")) else None,
         date_key=si_raw.get("date_key") or "gda.date",
+        scan_key=si_raw.get("scan_key") or "gda.scan",
         gramps_key=si_raw.get("gramps_key") or "gda.gramps",
+        verso_key=si_raw.get("verso_key") or "gda.verso",
     )
     gem_raw = raw.get("gemini") or {}
     return Config(

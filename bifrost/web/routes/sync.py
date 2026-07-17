@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from ...modules import ocr, sync_immich, sync_paperless
 from ...modules.sync_paperless import _doc_gramps_id
 from ..runs import record_run
+from .photos import load_album_ids
 
 router = APIRouter(prefix="/sync", tags=["sync"])
 
@@ -117,6 +118,65 @@ async def paperless_resync_media(request: Request, body: ResyncMediaBody):
             "doc_id": doc_id, "events": [e.__dict__ for e in events]}
 
 
+class ImmichSyncBody(BaseModel):
+    # Preview row keys ("media:asset_id") to apply; omitted = everything.
+    # Only apply honors it — preview always shows the full picture.
+    selected: list[str] | None = None
+
+
+def _immich_or_503(request: Request):
+    client = getattr(_state(request), "immich", None)
+    if client is None:
+        raise HTTPException(503, "Immich is not configured in bifrost (immich.base_url/api_key)")
+    return client
+
+
+@router.get("/api/immich/config")
+async def immich_config(request: Request):
+    """Read-only config for the Photos sync block on the Sync section."""
+    cfg = _state(request).cfg
+    return {
+        "enabled": cfg.sync_immich.enabled and getattr(_state(request), "immich", None) is not None,
+        "public_url": cfg.sync_immich.public_url,
+        # one Gramps instance — reuse the Paperless section's public link
+        "gramps_public_url": cfg.sync_paperless.gramps_public_url,
+    }
+
+
+@router.post("/api/immich/preview")
+async def immich_preview(request: Request, body: ImmichSyncBody = ImmichSyncBody()):
+    st = _state(request)
+    immich = _immich_or_503(request)
+    gen = sync_immich.sync_assets(
+        st.gramps, immich, st.conn, st.cfg.sync_immich,
+        load_album_ids(st.conn), apply=False,
+    )
+    try:
+        run_id, events = await record_run(st.conn, "sync.immich.preview", gen)
+    except sync_immich.SyncError as exc:
+        raise HTTPException(exc.status, exc.detail)
+    return {"run_id": run_id, "apply": False, "events": [e.__dict__ for e in events]}
+
+
+@router.post("/api/immich/apply")
+async def immich_apply(request: Request, body: ImmichSyncBody = ImmichSyncBody()):
+    st = _state(request)
+    if not st.cfg.sync_immich.enabled:
+        raise HTTPException(503, "the Immich sync is disabled in this instance (sync.immich.enabled)")
+    immich = _immich_or_503(request)
+    gen = sync_immich.sync_assets(
+        st.gramps, immich, st.conn, st.cfg.sync_immich,
+        load_album_ids(st.conn), apply=True,
+        selected=set(body.selected) if body.selected is not None else None,
+    )
+    try:
+        run_id, events = await record_run(st.conn, "sync.immich", gen)
+    except sync_immich.SyncError as exc:
+        raise HTTPException(exc.status, exc.detail)
+    st.caches.clear()
+    return {"run_id": run_id, "apply": True, "events": [e.__dict__ for e in events]}
+
+
 class ImmichAssetBody(BaseModel):
     asset_id: str
     gramps_id: str | None = None  # optional manual/penciled id; else auto
@@ -124,8 +184,15 @@ class ImmichAssetBody(BaseModel):
 
 @router.post("/immich/asset")
 async def immich_sync_asset(request: Request, body: ImmichAssetBody):
-    """Initial sync of ONE Immich asset into Gramps (called by urd)."""
+    """Initial sync of ONE Immich asset into Gramps.
+
+    The Sync section's bulk scan (sync_assets, above) is the normal path;
+    this endpoint stays for external callers (the standalone urd used it
+    until the 2026-07-15 fold-in) and for the manual/penciled-gramps_id
+    case, which the bulk scan does not cover."""
     st = _state(request)
+    if not st.cfg.sync_immich.enabled:
+        raise HTTPException(503, "the Immich sync is disabled in this instance (sync.immich.enabled)")
     if getattr(st, "immich", None) is None:
         raise HTTPException(503, "Immich is not configured in bifrost (immich.base_url/api_key)")
     asset_id = body.asset_id.strip()

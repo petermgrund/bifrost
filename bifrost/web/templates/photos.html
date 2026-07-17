@@ -1,0 +1,200 @@
+{% extends "base.html" %}
+{% block title %}Bifrost{% endblock %}
+{% block nav_title %}Bifrost Photos{% endblock %}
+
+{% block nav_actions %}
+<a class="button circle transparent" href="/" aria-label="Back to Bifrost">
+  <i>arrow_back</i>
+</a>
+<button class="circle transparent" id="btn-settings" aria-label="Choose albums">
+  <i>settings</i>
+</button>
+<a class="button circle transparent" href="{{ immich_url }}" target="_blank" rel="noopener" aria-label="Open Immich">
+  <i>open_in_new</i>
+</a>
+{% endblock %}
+
+{% block content %}
+<div class="row wrap" id="filters">
+  <div class="field label border small small-width">
+    <select id="f-album">
+      <option value="" selected>All</option>
+    </select>
+    <label>Album</label>
+  </div>
+  <div class="field label border small small-width">
+    <select id="f-person">
+      <option value="" selected>Anyone</option>
+    </select>
+    <label>Person</label>
+  </div>
+  <div class="field label border small prefix small-width">
+    <i>search</i>
+    <input type="text" id="f-name" placeholder=" ">
+    <label>Filename</label>
+  </div>
+  <div class="field label border small small-width">
+    <select id="f-order">
+      <option value="desc" selected>Newest first</option>
+      <option value="asc">Oldest first</option>
+    </select>
+    <label>Order</label>
+  </div>
+  <label class="checkbox">
+    <input type="checkbox" id="f-undated">
+    <span>Undated only</span>
+  </label>
+  <div class="max"></div>
+  <button class="border small" id="btn-select">
+    <i>check_box</i><span>Select</span>
+  </button>
+</div>
+
+<nav id="bulkbar" class="secondary-container small-round small-padding hidden">
+  <span id="bulk-count" class="bold"></span>
+  <button class="small" id="btn-bulk-date"><i>event</i><span>Set date</span></button>
+  <button class="border small" id="btn-pair" disabled><i>flip</i><span>Pair recto/verso</span></button>
+  <button class="border small" id="btn-stack" disabled><i>layers</i><span>Stack</span></button>
+  <button class="border small" id="btn-select-page"><i>select_all</i><span>Page</span></button>
+  <button class="border small" id="btn-clear-sel"><i>close</i><span>Clear</span></button>
+</nav>
+
+<div id="grid" class="grid"></div>
+
+<nav id="pager" class="center-align">
+  <button class="border small" id="btn-prev" disabled><i>chevron_left</i><span>Prev</span></button>
+  <span id="page-label"></span>
+  <button class="border small" id="btn-next" disabled><span>Next</span><i>chevron_right</i></button>
+</nav>
+
+<dialog class="bottom" id="editor">
+  <nav>
+    <button class="circle transparent" id="ed-prev" aria-label="Previous asset"><i>chevron_left</i></button>
+    <button class="circle transparent" id="ed-next" aria-label="Next asset"><i>chevron_right</i></button>
+    <h6 class="max small-text" id="ed-name"></h6>
+    <button class="circle transparent" data-ui="#editor" aria-label="Close"><i>close</i></button>
+  </nav>
+  <p id="ed-bulk-note" class="hidden"></p>
+
+  <div class="grid">
+    <div class="s12 m4 l4" id="ed-single">
+      <img id="ed-img" class="responsive round surface-variant" alt="">
+      <nav id="ed-pair-bar" class="hidden">
+        <button class="border small" id="btn-flip"><i>flip</i><span id="flip-label">Show verso</span></button>
+        <button class="border small" id="btn-unpair"><i>link_off</i><span>Unlink verso</span></button>
+      </nav>
+      <p class="small-text" id="ed-meta"></p>
+      <nav id="ed-stack-nav" class="hidden">
+        <button class="circle transparent" id="btn-variant-prev" aria-label="Previous variant"><i>chevron_left</i></button>
+        <span class="small-text truncate" id="variant-label"></span>
+        <button class="circle transparent" id="btn-variant-next" aria-label="Next variant"><i>chevron_right</i></button>
+        <button class="border small hidden" id="btn-make-main"><i>star</i><span>Make main</span></button>
+        <button class="border small hidden" id="btn-unstack"><i>layers_clear</i><span>Remove from stack</span></button>
+      </nav>
+    </div>
+
+    <div class="s12 m8 l5">
+      <h6><i class="small">event</i> Date</h6>
+      <div class="row wrap">
+        <div class="field label border small">
+          <select id="d-quality"></select>
+          <label>Quality</label>
+        </div>
+        <div class="field label border small">
+          <select id="d-modifier"></select>
+          <label>Type</label>
+        </div>
+      </div>
+      <div class="row wrap" id="d-start-row">
+        <div class="field label border small part-year">
+          <input type="number" id="d-year" min="1" max="9999" placeholder=" ">
+          <label>Year</label>
+        </div>
+        <div class="field label border small">
+          <select id="d-month"></select>
+          <label>Month</label>
+        </div>
+        <div class="field label border small part-day">
+          <input type="number" id="d-day" min="0" max="31" placeholder=" ">
+          <label>Day</label>
+        </div>
+      </div>
+      <div class="row wrap hidden" id="d-stop-row">
+        <div class="field label border small part-year">
+          <input type="number" id="d-year2" min="1" max="9999" placeholder=" ">
+          <label>End year</label>
+        </div>
+        <div class="field label border small">
+          <select id="d-month2"></select>
+          <label>End month</label>
+        </div>
+        <div class="field label border small part-day">
+          <input type="number" id="d-day2" min="0" max="31" placeholder=" ">
+          <label>End day</label>
+        </div>
+      </div>
+      <div class="field label border small">
+        <input type="text" id="d-text" placeholder=" ">
+        <label>Display text (optional)</label>
+      </div>
+      <p id="d-preview" class="small-text"></p>
+      <nav>
+        <button id="btn-save-date"><i>save</i><span>Save date</span></button>
+        <button class="border" id="btn-del-date"><i>delete</i><span>Remove</span></button>
+      </nav>
+    </div>
+
+    <div class="s12 m12 l3" id="ed-gramps-section">
+      <h6><i class="small">family_history</i> Gramps</h6>
+      <div class="field label border small">
+        <input type="text" id="g-title" placeholder=" ">
+        <label>Media title</label>
+      </div>
+      <p id="g-state" class="small-text"></p>
+      <nav>
+        <button class="border" id="btn-save-title"><i>save</i><span>Save title</span></button>
+      </nav>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="pair">
+  <nav>
+    <h6 class="max">Pair recto &amp; verso</h6>
+    <button class="circle transparent" data-ui="#pair" aria-label="Close"><i>close</i></button>
+  </nav>
+  <p class="small-text">
+    Click on the front of the photo.
+  </p>
+  <div class="grid" id="pair-choices"></div>
+  <p class="small-text" id="pair-note"></p>
+  <nav>
+    <button id="btn-save-pair" disabled><i>link</i><span>Pair</span></button>
+    <button class="border" data-ui="#pair"><span>Cancel</span></button>
+  </nav>
+</dialog>
+
+<dialog id="settings">
+  <nav>
+    <h6 class="max">Albums available in Photos</h6>
+    <button class="circle transparent" data-ui="#settings" aria-label="Close"><i>close</i></button>
+  </nav>
+  <div class="field label border small prefix">
+    <i>search</i>
+    <input type="text" id="set-filter" placeholder=" ">
+    <label>Filter albums</label>
+  </div>
+  <div id="set-list" class="scroll medium-height"></div>
+  <p class="small-text" id="set-count"></p>
+  <nav>
+    <button id="btn-save-settings"><i>save</i><span>Save</span></button>
+    <button class="border" data-ui="#settings"><span>Cancel</span></button>
+  </nav>
+</dialog>
+
+<div class="snackbar" id="snack"><span id="snack-text"></span></div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/app/photos.js"></script>
+{% endblock %}

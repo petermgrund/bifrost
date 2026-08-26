@@ -1,0 +1,217 @@
+import { BifrostElement, html, nothing, api, post, iconYes, iconNo, iconNa, btn, spinner, field, summarize, statusLine } from './core.js';
+
+class PlacesPage extends BifrostElement {
+  static properties = {
+    rows: { state: true },
+    loadError: { state: true },
+    grampsUrl: { state: true },
+    placeId: { state: true },
+    popup: { state: true },
+    editingOsm: { state: true },
+    osmDraft: { state: true },
+    busy: { state: true },
+    result: { state: true },
+    failures: { state: true },
+  };
+
+  constructor() {
+    super();
+    this.rows = null;
+    this.loadError = '';
+    this.grampsUrl = '';
+    this.placeId = '';
+    this.popup = null;
+    this.editingOsm = false;
+    this.osmDraft = '';
+    this.busy = null;
+    this.result = null;
+    this.failures = [];
+  }
+
+  connectedCallback() {
+    super.connectedCallback();
+    this.load();
+  }
+
+  async load(refresh = false) {
+    this.loadError = '';
+    try {
+      const r = await api(`/places/api/list${refresh ? '?refresh=1' : ''}`);
+      this.rows = r.places;
+      this.grampsUrl = r.gramps_url;
+      if (this.popup) {
+        this.popup = this.rows.find((p) => p.handle === this.popup.handle) || null;
+      }
+    } catch (e) {
+      this.loadError = e.message;
+    }
+  }
+
+  lookup() {
+    const id = this.placeId.trim().toUpperCase();
+    if (!id) return;
+    const row = (this.rows || []).find((r) => r.gramps_id.toUpperCase() === id);
+    if (!row) {
+      this.result = { kind: 'error', body: `No place '${id}'` };
+      return;
+    }
+    this.result = null;
+    this.editingOsm = false;
+    this.osmDraft = '';
+    this.popup = row;
+  }
+
+  closePopup() {
+    const dlg = this.renderRoot.querySelector('dialog');
+    if (dlg?.open) dlg.close();
+    else { this.popup = null; this.result = null; }
+  }
+
+  updated() {
+    const dlg = this.renderRoot.querySelector('dialog');
+    if (dlg && !dlg.open) dlg.showModal();
+  }
+
+  async addRelation(row, value, replace = false) {
+    if (!value.trim()) return;
+    this.relBusy ??= new Set();
+    if (this.relBusy.has(row.handle)) return;
+    this.relBusy.add(row.handle);
+    this.result = null;
+    try {
+      await post('/places/api/set-relation', { handle: row.handle, relation: value, replace });
+      this.editingOsm = false;
+      this.osmDraft = '';
+      await this.load(true);
+      // one step: a saved OSM link is a request for its boundary. A replaced
+      // link forces, since the sidecar on disk is now the wrong shape.
+      await this.generate(row, replace);
+    } catch (e) {
+      this.result = { kind: 'error', body: `${row.gramps_id}: ${e.message}` };
+    } finally {
+      this.relBusy.delete(row.handle);
+    }
+  }
+
+  async generate(row, force) {
+    this.busy = row.handle;
+    this.result = null;
+    try {
+      await post('/places/api/generate', { handle: row.handle, force });
+      await this.load(true);
+      this.result = { kind: 'ok', body: 'Boundary generated' };
+    } catch (e) {
+      this.result = { kind: 'error', body: `${row.gramps_id}: ${e.message}` };
+    } finally {
+      this.busy = null;
+    }
+  }
+
+  async generateMissing() {
+    this.busy = 'all';
+    this.result = null;
+    this.failures = [];
+    try {
+      const r = await post('/places/api/generate-missing', {});
+      const c = (r.events.find((e) => e.kind === 'summary') || {}).data || {};
+      this.failures = r.events
+        .filter((e) => e.kind === 'item' && e.action === 'failed')
+        .map((e) => ({ gramps_id: e.gramps_id, title: e.title, detail: e.detail }));
+      this.result = { kind: c.errors ? 'error' : 'ok', body: summarize(c, true) };
+      await this.load(true);
+    } catch (e) {
+      this.result = { kind: 'error', body: e.message };
+    } finally {
+      this.busy = null;
+    }
+  }
+
+  render() {
+    if (this.loadError && !this.rows) {
+      return html`
+        <p>${statusLine('error', this.loadError)}</p>
+        <nav>${btn('Retry', false, () => this.load())}</nav>`;
+    }
+    if (!this.rows) return html`<progress class="circle"></progress>`;
+    const missing = this.rows.filter((r) => r.osm_id && !r.has_boundary).length;
+    return html`
+      <nav class="wrap">
+        ${field('Gramps place ID', this.placeId, (e) => (this.placeId = e.target.value),
+          { mono: true, upper: true, width: 'small', onEnter: () => this.lookup() })}
+        ${btn('Look up', false, () => this.lookup())}
+        ${btn('Refresh', false, () => this.load(true), 'border')}
+      </nav>
+      ${missing ? html`<nav>
+        ${btn(
+          this.busy === 'all' ? 'Generating…' : `Generate missing (${missing})`,
+          !!this.busy, () => this.generateMissing())}
+        ${this.busy === 'all' ? spinner : nothing}
+      </nav>` : nothing}
+      ${!this.popup && this.result ? html`<p>${statusLine(this.result.kind, this.result.body)}</p>` : nothing}
+      ${this.loadError ? html`<p>${statusLine('error', `Reload failed shown data may be stale ${this.loadError}`)}</p>` : nothing}
+      ${this.failures.length ? html`
+        <div class="large-space"></div>
+        <h6 class="small">Failed (${this.failures.length})</h6>
+        <table>
+          <tbody>${this.failures.map((f) => html`<tr>
+            <td>${f.gramps_id}</td><td>${f.title}</td>
+            <td>${f.detail}</td></tr>`)}</tbody>
+        </table>` : nothing}
+      ${this.popup ? this.renderPopup(this.popup) : nothing}`;
+  }
+
+  renderPopup(r) {
+    return html`
+      <dialog class="large-width" @close=${() => { this.popup = null; this.result = null; this.editingOsm = false; this.osmDraft = ''; }}>
+        <nav>
+          <h5 class="max small">${this.grampsUrl
+            ? html`<a class="link" href="${this.grampsUrl}/place/${r.gramps_id}" target="_blank" rel="noopener">${r.name}</a>`
+            : r.name}</h5>
+          <button class="circle transparent" @click=${() => this.closePopup()} aria-label="Close">
+            <i>close</i></button>
+        </nav>
+        <table>
+          <tbody>
+            <tr>
+              <td>ID</td>
+              <td>${r.gramps_id}</td>
+            </tr>
+            <tr>
+              <td>OSM</td>
+              <td>${!r.osm_id || this.editingOsm
+                ? html`<nav class="wrap">
+                    ${field('OSM relation or URL', this.osmDraft, (e) => (this.osmDraft = e.target.value), {
+                      small: true,
+                      onEnter: () => this.addRelation(r, this.osmDraft, this.editingOsm),
+                    })}
+                    <button class="small" ?disabled=${!this.osmDraft.trim()}
+                      @click=${() => this.addRelation(r, this.osmDraft, this.editingOsm)}>Save</button>
+                    ${this.editingOsm ? html`<button class="small border"
+                      @click=${() => (this.editingOsm = false)}>Cancel</button>` : nothing}
+                  </nav>`
+                : html`<nav class="wrap">
+                    <a class="link" href="https://www.openstreetmap.org/${r.osm_type}/${r.osm_id}" target="_blank" rel="noopener">${r.osm_type} ${r.osm_id}</a>
+                    <button class="small" @click=${() => { this.osmDraft = `${r.osm_type}/${r.osm_id}`; this.editingOsm = true; }}>Edit</button>
+                  </nav>`}</td>
+            </tr>
+            <tr>
+              <td>Boundary</td>
+              <td>${!r.osm_id ? html`${iconNa}`
+                : r.has_boundary ? html`present`
+                : html`<span class="secondary-text">not generated</span>`}</td>
+            </tr>
+          </tbody>
+        </table>
+        ${this.result ? html`<p>${statusLine(this.result.kind, this.result.body)}</p>` : nothing}
+        <div class="space"></div>
+        <nav>
+          ${r.osm_id ? btn(
+            this.busy === r.handle ? 'Generating...' : r.has_boundary ? 'Regenerate' : 'Generate',
+            !!this.busy, () => this.generate(r, r.has_boundary)) : nothing}
+          ${this.busy === r.handle ? spinner : nothing}
+          ${btn('Close', false, () => this.closePopup())}
+        </nav>
+      </dialog>`;
+  }
+}
+customElements.define('places-page', PlacesPage);

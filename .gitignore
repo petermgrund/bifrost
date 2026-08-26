@@ -1,0 +1,18 @@
+/config.yaml
+/house_style_master.md
+/data/
+/.deploy.env
+__pycache__/
+*.pyc
+venv/
+.venv/
+*.log
+.DS_Store
+config.yaml.pre-immich-removal.bak
+/config.*.yaml
+# the template must survive the blanket config ignore above
+!/config.example.yaml
+CLAUDE.md
+NOTES.md
+stub_backends.py
+/.claude

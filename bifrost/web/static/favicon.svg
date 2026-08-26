@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 30 30">
+  <!-- Same three-arc mark as the nav header (base.html); the page's theme vars
+       resolved to concrete colors here, with a dark override for browser chrome. -->
+  <style>
+    .t { stroke: #9a4523; }
+    .w { stroke: #b07a00; }
+    .p { stroke: #4a5bae; }
+    @media (prefers-color-scheme: dark) {
+      .t { stroke: #ffb59a; }
+      .w { stroke: #ddb15f; }
+      .p { stroke: #b6c4ff; }
+    }
+  </style>
+  <g fill="none" stroke-width="2.6" stroke-linecap="round">
+    <path class="t" d="M3 21 A12 12 0 0 1 27 21"/>
+    <path class="w" d="M7 21 A8 8 0 0 1 23 21"/>
+    <path class="p" d="M11 21 A4 4 0 0 1 19 21"/>
+  </g>
+</svg>

@@ -1,0 +1,14 @@
+services:
+  bifrost:
+    build: .
+    container_name: bifrost
+    restart: unless-stopped
+    ports:
+      - "8800:8800"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./data:/app/data
+      - .:/app/repo
+      - /mnt/storage/gramps/static-boundaries:/boundaries
+      - ./bifrost/web/static:/app/bifrost/web/static
+      - ./bifrost/web/templates:/app/bifrost/web/templates

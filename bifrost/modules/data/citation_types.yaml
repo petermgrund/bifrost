@@ -1,0 +1,301 @@
+# Citation record types
+#
+# Adding a record type = adding an entry here 
+#
+# Per type: key, label, group, guidance (extra rules passed to the composer),
+# fields: [{key, label, req: bool, hint}]. The universal digital-access
+# fields (platform, url, access date) are defined once and merged into every
+# type by the loader.
+
+digital_access_fields:
+  - { key: platform, label: "Platform (Ancestry, FamilySearch, ArkivDigital…)", req: false }
+  - { key: url, label: "URL", req: false }
+  - { key: access_date, label: "Access date", req: false, hint: "day month year" }
+  - { key: image_ref, label: "Image number / film / image group", req: false }
+
+groups:
+  us: "United States"
+  nordic: "Nordic"
+  italian: "Italian"
+  general: "General"
+
+types:
+  # ---------------- US ----------------
+  - key: us-federal-census
+    label: "US federal census"
+    group: us
+    guidance: >
+      Include the NARA microfilm publication number (M593, T9, T624, T625,
+      T626, T627…) or mark [NEEDED]. 1790-1840 name heads of household only;
+      1880+ have enumeration districts; 1890 mostly destroyed.
+    fields:
+      - { key: year, label: "Census year", req: true }
+      - { key: county_state, label: "County and state", req: true }
+      - { key: page, label: "Page (stamped or printed?)", req: true }
+      - { key: dwelling, label: "Dwelling number", req: false }
+      - { key: family, label: "Family number", req: false }
+      - { key: head, label: "Head of household / person of interest", req: true }
+      - { key: ed, label: "Enumeration district", req: false }
+      - { key: nara, label: "NARA publication + roll", req: false }
+
+  - key: us-state-census
+    label: "US state/territorial census"
+    group: us
+    fields:
+      - { key: year_state, label: "Census year and state", req: true }
+      - { key: county, label: "County (and township/city)", req: true }
+      - { key: page, label: "Page number", req: true }
+      - { key: person, label: "Person / head of household", req: true }
+      - { key: repository, label: "Holding archive + series/volume", req: false }
+
+  - key: us-vital
+    label: "US vital record (birth/marriage/death)"
+    group: us
+    guidance: >
+      Distinguish a digital image of the original certificate from a
+      database-only index entry. For deaths, the informant (and their
+      relationship) matters for the quality assessment.
+    fields:
+      - { key: record_kind, label: "Kind (birth / marriage / death)", req: true }
+      - { key: names, label: "Name(s) on the record", req: true }
+      - { key: event_date, label: "Date of event", req: true }
+      - { key: cert_no, label: "Certificate/license number", req: false }
+      - { key: office, label: "Issuing office (county/city/state)", req: true }
+      - { key: image_or_index, label: "Digital image of original, or index only?", req: false }
+      - { key: informant, label: "Informant + relationship (deaths)", req: false }
+
+  - key: us-church
+    label: "US church record"
+    group: us
+    fields:
+      - { key: church, label: "Church name", req: true }
+      - { key: place, label: "City/town and state", req: true }
+      - { key: record_kind, label: "Record type (baptism/marriage/burial…)", req: true }
+      - { key: volume, label: "Volume or register", req: true }
+      - { key: page, label: "Page", req: true }
+      - { key: person, label: "Person", req: true }
+      - { key: event_date, label: "Date of event", req: true }
+      - { key: holding, label: "Current location of records", req: false }
+
+  - key: us-land
+    label: "US deed / land record"
+    group: us
+    fields:
+      - { key: grantor, label: "Grantor(s)", req: true }
+      - { key: grantee, label: "Grantee(s)", req: true }
+      - { key: doc_kind, label: "Document type (deed/mortgage/patent…)", req: true }
+      - { key: date, label: "Date of instrument", req: true }
+      - { key: county_state, label: "County and state", req: true }
+      - { key: office, label: "Recording office", req: true }
+      - { key: book_page, label: "Book/volume and page", req: true }
+
+  - key: us-probate
+    label: "US will / probate"
+    group: us
+    fields:
+      - { key: person, label: "Testator / deceased", req: true }
+      - { key: county_state, label: "County and state", req: true }
+      - { key: court, label: "Court name", req: true }
+      - { key: dates, label: "Date written / proved / probate opened", req: true }
+      - { key: record_kind, label: "Record type (will book, estate file…)", req: true }
+      - { key: locator, label: "Book+page or case/file number", req: true }
+
+  - key: us-military
+    label: "US military (service/pension/draft)"
+    group: us
+    guidance: >
+      Service records usually NARA RG 94; Civil War+ pensions RG 15. Include
+      microfilm publication + roll, or application/certificate numbers.
+    fields:
+      - { key: person, label: "Servicemember / applicant", req: true }
+      - { key: record_kind, label: "Record type (CSR, muster roll, pension…)", req: true }
+      - { key: unit_war, label: "Unit and war/service period", req: true }
+      - { key: numbers, label: "File/application/certificate numbers", req: false }
+      - { key: repository, label: "Record group / repository detail", req: false }
+
+  - key: us-immigration
+    label: "Passenger list / naturalization"
+    group: us
+    fields:
+      - { key: record_kind, label: "Record type (manifest / declaration / petition / certificate)", req: true }
+      - { key: person, label: "Person (as spelled on the record)", req: true }
+      - { key: ship_or_court, label: "Ship + ports, or court + location", req: true }
+      - { key: date, label: "Arrival / document date", req: true }
+      - { key: numbers, label: "Line/list or case/document number", req: false }
+      - { key: nara, label: "NARA publication + roll / record group", req: false }
+
+  - key: us-newspaper
+    label: "Newspaper item"
+    group: us
+    fields:
+      - { key: item, label: "Article title or description", req: true }
+      - { key: paper, label: "Newspaper name", req: true }
+      - { key: place, label: "City and state of publication", req: true }
+      - { key: issue_date, label: "Issue date", req: true }
+      - { key: page_col, label: "Page (and column)", req: true }
+
+  - key: us-court
+    label: "US court record"
+    group: us
+    fields:
+      - { key: case, label: "Case name / parties", req: true }
+      - { key: court, label: "Court and jurisdiction", req: true }
+      - { key: case_no, label: "Case type and number", req: true }
+      - { key: date, label: "Date", req: true }
+      - { key: record_kind, label: "Record type (minutes, order book, file…)", req: true }
+      - { key: locator, label: "Book/volume and page", req: false }
+
+  - key: us-directory
+    label: "City directory"
+    group: us
+    fields:
+      - { key: title, label: "Directory title (as printed)", req: true }
+      - { key: year, label: "Year", req: true }
+      - { key: publisher, label: "Publisher and place", req: false }
+      - { key: page, label: "Page", req: true }
+      - { key: person, label: "Person listed", req: true }
+
+  - key: online-database
+    label: "Online database entry"
+    group: general
+    guidance: >
+      If the database cites an original record, include the original's
+      details with the "citing" connector; the Gramps Source should lean
+      toward the original record series where identifiable.
+    fields:
+      - { key: entry, label: "Entry title / description", req: true }
+      - { key: database, label: "Database name (as titled)", req: true }
+      - { key: original, label: "Original record the database cites", req: false }
+
+  - key: published-book
+    label: "Published book"
+    group: general
+    fields:
+      - { key: author, label: "Author", req: false }
+      - { key: title, label: "Full title", req: true }
+      - { key: pub, label: "Place, publisher, year", req: true }
+      - { key: pages, label: "Page(s)", req: true }
+      - { key: entry, label: "Specific entry / chapter", req: false }
+
+  - key: manuscript
+    label: "Manuscript / letter / diary / family bible"
+    group: general
+    fields:
+      - { key: creator, label: "Writer/creator", req: true }
+      - { key: item, label: "Item description (and recipient, for letters)", req: true }
+      - { key: date, label: "Date (circa if estimated)", req: false }
+      - { key: holder, label: "Holder: institution + collection + box/folder, or 'privately held by …, [place], [year]'", req: true }
+
+  - key: photograph
+    label: "Photograph"
+    group: general
+    fields:
+      - { key: item, label: "Description of photograph", req: true }
+      - { key: date, label: "Estimated date (circa ok)", req: false }
+      - { key: holder, label: "Holder / repository + collection", req: true }
+
+  - key: cemetery
+    label: "Grave marker / FindAGrave"
+    group: general
+    fields:
+      - { key: person, label: "Name of deceased", req: true }
+      - { key: cemetery, label: "Cemetery, place", req: true }
+      - { key: memorial, label: "Memorial/entry ID", req: false }
+      - { key: contributor, label: "Contributor/photographer", req: false }
+      - { key: visit, label: "If visited in person: date + marker description", req: false }
+
+  # ---------------- Nordic ----------------
+  - key: swedish-church
+    label: "Swedish church book (kyrkobok)"
+    group: nordic
+    guidance: >
+      Cite parish (församling) and län. The volume signum (e.g. C:4, AI:12,
+      F:2) identifies the series: AI husförhörslängd, C födelse/dop,
+      E lysning/vigsel, F död/begravning. Include the Riksarkivet NAD
+      reference (SE/…) as the repository call number when known; ArkivDigital
+      or Riksarkivet digital images get the dual-layer treatment.
+    fields:
+      - { key: parish, label: "Parish (församling) and län", req: true }
+      - { key: series, label: "Series + volume signum (e.g. C:4 1791-1820)", req: true }
+      - { key: record_kind, label: "Entry kind (dop, vigsel, begravning, husförhör…)", req: true }
+      - { key: person, label: "Person(s) in the entry", req: true }
+      - { key: event_date, label: "Date of event", req: true }
+      - { key: page, label: "Page/uppslag or entry number", req: true }
+      - { key: nad, label: "NAD reference (SE/…)", req: false }
+
+  - key: swedish-probate
+    label: "Swedish probate (bouppteckning)"
+    group: nordic
+    guidance: >
+      Cite the häradsrätt (district court), series FII, volume and years
+      e.g. "Älvdals häradsrätt, Bouppteckningar, FII:26 (1832-1833)". NAD
+      reference (SE/VA/…) as repository call number; Riksarkivet holds the
+      originals even when imaged by ArkivDigital.
+    fields:
+      - { key: court, label: "Häradsrätt / rådhusrätt", req: true }
+      - { key: volume, label: "Series + volume + years (FII:26 1832-1833)", req: true }
+      - { key: person, label: "Deceased", req: true }
+      - { key: date, label: "Date of inventory", req: false }
+      - { key: page, label: "Page or entry number", req: true }
+      - { key: nad, label: "NAD reference (SE/…)", req: false }
+
+  - key: norwegian-church
+    label: "Norwegian church book (kirkebok)"
+    group: nordic
+    guidance: >
+      Cite parish (sokn) and fylke, book type (ministerialbok or klokkerbok)
+      with number and years. Digitalarkivet permanent links
+      (digitalarkivet.no) are the standard access layer; Arkivverket holds
+      the originals.
+    fields:
+      - { key: parish, label: "Parish (sokn) and fylke", req: true }
+      - { key: book, label: "Book + number + years (Ministerialbok nr. 2, 1820-1841)", req: true }
+      - { key: record_kind, label: "Entry kind (døpte, viede, begravede, konfirmerte…)", req: true }
+      - { key: person, label: "Person(s) in the entry", req: true }
+      - { key: event_date, label: "Date of event", req: true }
+      - { key: page, label: "Page (side) and entry number", req: true }
+
+  - key: norwegian-census
+    label: "Norwegian census (folketelling)"
+    group: nordic
+    guidance: >
+      Standard years: 1801, 1865, 1875, 1891, 1900, 1910. Cite municipality
+      (kommune/herred) and county, plus the farm/household (bosted) and
+      person list number. Digitalarkivet is the access layer.
+    fields:
+      - { key: year, label: "Census year", req: true }
+      - { key: place, label: "Municipality and county", req: true }
+      - { key: household, label: "Farm/bosted and household", req: true }
+      - { key: person, label: "Person of interest", req: true }
+      - { key: list_no, label: "List/person number", req: false }
+
+  # ---------------- Italian ----------------
+  - key: italian-civil
+    label: "Italian civil registration (stato civile)"
+    group: italian
+    guidance: >
+      Cite the comune and province, the atti series (nascita, matrimonio,
+      morte), year and atto number. FamilySearch image groups usually cite
+      the Archivio di Stato include that with "citing".
+    fields:
+      - { key: comune, label: "Comune and province", req: true }
+      - { key: series, label: "Atti series (nascita/matrimonio/morte) + year", req: true }
+      - { key: atto, label: "Atto number", req: true }
+      - { key: person, label: "Person(s) in the act", req: true }
+      - { key: event_date, label: "Date of event", req: true }
+      - { key: archivio, label: "Archivio di Stato cited by the platform", req: false }
+
+  - key: italian-parish
+    label: "Italian parish register"
+    group: italian
+    guidance: >
+      Cite the parrocchia (e.g. Parrocchia di San Bartolomeo), town and
+      province, the register series (battesimi, matrimoni, sepolture) with
+      year, entry number, and persons, following the existing Vistrorio
+      citations in the tree.
+    fields:
+      - { key: parish, label: "Parish, town, province", req: true }
+      - { key: series, label: "Register series + year (Atti di Matrimonio, 1871)", req: true }
+      - { key: entry, label: "Entry number", req: true }
+      - { key: person, label: "Person(s) in the entry", req: true }
+      - { key: event_date, label: "Date of event", req: true }

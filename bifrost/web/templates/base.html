@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Bifrost{% endblock %}</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/beer.min.css">
+  <link rel="stylesheet" href="/static/bifrost.css">
+  <script type="importmap">
+  { "imports": { "lit": "/static/vendor/lit-all.min.js" } }
+  </script>
+  <script type="module" src="/static/vendor/material-dynamic-colors.min.js"></script>
+  <script type="module" src="/static/vendor/beer.min.js"></script>
+  <script type="module" src="/static/app/theme.js"></script>
+  {% block head %}{% endblock %}
+</head>
+<body class="light">
+  <script>
+    if (localStorage.getItem('bifrost-theme') === 'dark')
+      document.body.classList.replace('light', 'dark');
+    function toggleTheme() {
+      const dark = document.body.classList.toggle('dark');
+      document.body.classList.toggle('light', !dark);
+      localStorage.setItem('bifrost-theme', dark ? 'dark' : 'light');
+      syncThemeIcon();
+      window.__bifrostReapplyTheme?.();
+    }
+    function syncThemeIcon() {
+      document.getElementById('theme-icon').textContent =
+        document.body.classList.contains('dark') ? 'light_mode' : 'dark_mode';
+    }
+    addEventListener('DOMContentLoaded', syncThemeIcon);
+  </script>
+  <main class="responsive {% block main_class %}{% endblock %}">
+    <nav class="bf-header">
+      <svg class="bf-mark" width="60" height="44" viewBox="0 0 30 22" aria-hidden="true">
+        <g fill="none" stroke-width="2.6" stroke-linecap="round">
+          <g class="track">
+            <path d="M3 20 A12 12 0 0 1 27 20" stroke="var(--arc-0)"/>
+            <path d="M7 20 A8 8 0 0 1 23 20" stroke="var(--arc-1)"/>
+            <path d="M11 20 A4 4 0 0 1 19 20" stroke="var(--arc-2)"/>
+          </g>
+          <g class="run">
+            <path d="M3 20 A12 12 0 0 1 27 20" stroke="var(--arc-0)" style="--to:37.699px;stroke-dasharray:37.699 37.699"/>
+            <path d="M7 20 A8 8 0 0 1 23 20" stroke="var(--arc-1)" style="--to:25.133px;stroke-dasharray:25.133 25.133;animation-delay:.16s"/>
+            <path d="M11 20 A4 4 0 0 1 19 20" stroke="var(--arc-2)" style="--to:12.566px;stroke-dasharray:12.566 12.566;animation-delay:.32s"/>
+          </g>
+        </g>
+      </svg>
+      <h5 class="max bf-title">{% block nav_title %}Bifrost{% endblock %}</h5>
+      {% block nav_actions %}
+      <a class="button circle transparent" href="/config" aria-label="Configuration">
+        <i>settings</i>
+      </a>
+      {% endblock %}
+      <button class="circle transparent" onclick="toggleTheme()" aria-label="Toggle dark mode">
+        <i id="theme-icon">dark_mode</i>
+      </button>
+    </nav>
+    <div class="medium-space"></div>
+    {% block content %}{% endblock %}
+  </main>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

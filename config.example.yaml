@@ -1,0 +1,57 @@
+# Bifrost configuration example
+
+gramps:
+  base_url: "http://{device}:{port}/api"
+  username: "REPLACE_ME"
+  password: "REPLACE_ME"
+
+paperless:
+  base_url: "http://{device}:{port}"
+  api_token: "REPLACE_ME"
+
+# Bifrost resolved relative to this file's dir
+database: data/bifrost.db
+
+sync:
+  immich:
+    enabled: true
+    sync_tag: "Sync/Gramps"
+    place_tag_handle: ""
+    id_tag_prefix: "ID"
+    public_url: "https://your-immich-public-url"
+    path_mappings:
+      - immich_prefix: "/usr/src/app/upload/upload/"
+        gramps_prefix: "immich/"
+  paperless:
+    sync_tags: ["tag-1", "tag-2"]
+    public_url: "https://your-paperless-public-url"
+    gramps_public_url: "https://your-gramps-public-url"
+    gramps_id_field_id: null
+    gramps_url_field_id: null
+    date_qualifier_field_id: null
+    source_url_field_id: null
+    transcription_tag_id: null
+    ocr_tag: "Gemini OCR"
+
+citations:
+  # house_style_path: "/path/to/house_style_master.md"
+
+anthropic:
+  api_key: "REPLACE_ME"
+  model: "claude-opus-4-8"
+
+gemini:
+  api_key: "REPLACE_ME"
+  model: "gemini-3-flash-preview"
+  # thinking_budget: 8192
+
+places:
+  boundaries_dir: "/boundaries"
+
+immich:
+  base_url: "http://{device}:2283"
+  accounts:
+    - api_key: "REPLACE_ME"
+      label: "person-1"
+    # - api_key: "REPLACE_ME"
+    #   label: "person-2"

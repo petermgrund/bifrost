@@ -217,8 +217,8 @@ export class SyncPage extends BifrostElement {
         ${btn(this.running ? 'Applying...' : `Apply ${nSel} change${nSel === 1 ? '' : 's'}`,
           this.running || !nSel, () => this.apply())}
         ${btn('Cancel', this.running, () => this.cancel(), 'error')}
-        ${this.running ? progressLine(this.progress) : nothing}
-      </nav>`;
+      </nav>
+      ${this.running ? html`<div class="space"></div>${progressLine(this.progress)}` : nothing}`;
   }
 
   placeTip(ev) {

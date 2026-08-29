@@ -49,23 +49,9 @@ COMPOSE_SCHEMA = {
         "analysis": {
             "type": "string",
             "description": (
-                "FILL THIS FIRST!! reason on paper before drafting any other "
-                "field. Work through, in order: (1) the record's country, era and "
-                "exact type and which house-style guide section governs it. quote the specific "
-                "worked-example template you will follow. (2) The correct "
-                "JURISDICTION hierarchy for THIS record type: use the source's "
-                "own administrative path and never borrow a different system by "
-                "analogy. for instance an urban civil census follows the civil administrative "
-                "hierarchy, NOT the ecclesiastical one, and never repeat the "
-                "same place name across levels. (3) The exact "
-                "locator/district token format the guide specifies (e.g. its "
-                "'district [N] [name]' form), copying its punctuation and order, "
-                "omitting anything the source title already implies. (4) The "
-                "FRN-vs-abstract split: the First Reference Note LOCATES the "
-                "record and names the subject and co-residents by relationship "
-                "only...extracted facts (birth years, birthplaces, occupations) "
-                "go in the abstract, NEVER the FRN. Then draft the fields to "
-                "match this analysis"
+                "Working notes: record type and era, governing style section "
+                "and its template, jurisdiction path, locator format, "
+                "abstract-vs-FRN split."
             ),
         },
         "repository": {

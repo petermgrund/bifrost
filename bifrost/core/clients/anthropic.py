@@ -54,7 +54,7 @@ class AnthropicClient:
             "messages": [{"role": "user", "content": user}],
             "tools": [{
                 "name": "emit_result",
-                "description": "Emit the structured result. Always call this tool.",
+                "description": "Emit the structured result.",
                 "input_schema": schema,
             }],
             "tool_choice": {"type": "tool", "name": "emit_result"},

@@ -281,6 +281,9 @@ dialog.style-table-dialog table input:focus-visible {
   outline: 0.125rem solid var(--primary);
   outline-offset: 0.125rem;
 }
+dialog.style-link-dialog {
+  inline-size: min(34rem, 94vw);
+}
 .style-preview {
   block-size: 75vh;
   max-block-size: none;
@@ -300,7 +303,11 @@ dialog.style-table-dialog table input:focus-visible {
   margin: 0.75rem 0;
   padding: 0.25rem 1rem;
 }
-
+.style-preview a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
 input[type="color"].seed-input {
   position: static !important;
   opacity: 1 !important;

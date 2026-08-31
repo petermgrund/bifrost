@@ -60,6 +60,7 @@ export function field(label, value, onInput, opts = {}) {
   const input = opts.rows
     ? html`<textarea rows=${opts.rows} .value=${value ?? ''} @input=${oninput}></textarea>`
     : html`<input type=${opts.type || 'text'} class="${opts.mono ? 'mono' : ''}"
+        placeholder=${opts.placeholder || nothing}
         .value=${value ?? ''} @input=${oninput}
         @change=${(e) => { if (opts.onChange) opts.onChange(e); }}
         @keydown=${(e) => { if (e.key === 'Enter' && opts.onEnter) opts.onEnter(e); }}>`;

@@ -1,6 +1,6 @@
 import '/static/vendor/marked.min.js';
 import { unsafeHTML } from 'lit';
-import { BifrostElement, html, nothing, api, post, btn, chip, spinner, statusLine } from './core.js';
+import { BifrostElement, html, nothing, api, post, btn, chip, field, spinner, statusLine } from './core.js';
 
 const DRAFT_KEY = 'bifrost-style-draft';
 const WRAP_KEY = 'bifrost-style-wrap';
@@ -58,6 +58,71 @@ function serializeTable(t) {
   return [row(t.head), sep, ...t.rows.map(row)];
 }
 
+const LINK_RE = /\[((?:[^\][\\]|\\.)*)\]\(((?:[^()]|\([^()]*\))*)\)/g;
+
+function parseDest(raw) {
+  let url = raw.trim();
+  let title = '';
+  if (url.startsWith('<')) {
+    const gt = url.indexOf('>');
+    if (gt !== -1) { title = url.slice(gt + 1).trim(); url = url.slice(1, gt); }
+  } else {
+    const sp = url.search(/\s/);
+    if (sp !== -1) { title = url.slice(sp).trim(); url = url.slice(0, sp); }
+  }
+  return { url, title };
+}
+
+function findLink(text, selStart, selEnd) {
+  LINK_RE.lastIndex = 0;
+  let m;
+  while ((m = LINK_RE.exec(text)) !== null) {
+    const start = m.index;
+    const end = start + m[0].length;
+    if (start > selEnd) return null;
+    const hit = selStart === selEnd
+      ? selEnd <= end
+      : selStart < end && selEnd > start;
+    if (hit) {
+      return { start, end, text: m[1].replace(/\\([\][])/g, '$1'),
+        ...parseDest(m[2]), edit: true };
+    }
+  }
+  return null;
+}
+
+function findBareUrl(text, caret) {
+  const ls = text.lastIndexOf('\n', caret - 1) + 1;
+  let le = text.indexOf('\n', caret);
+  if (le === -1) le = text.length;
+  const re = /https?:\/\/[^\s<>]+/g;
+  let m;
+  while ((m = re.exec(text.slice(ls, le))) !== null) {
+    const url = m[0].replace(/[.,;:!?)\]]+$/, '');
+    const start = ls + m.index;
+    const end = start + url.length;
+    if (caret >= start && caret <= end) return { start, end, url };
+  }
+  return null;
+}
+
+function balancedParens(s) {
+  let depth = 0;
+  for (const ch of s) {
+    if (ch === '(') depth += 1;
+    if (ch === ')' && (depth -= 1) < 0) return false;
+  }
+  return depth === 0;
+}
+
+function serializeLink(text, url, title) {
+  const t = (text.trim() || url).replace(/([\][])/g, '\\$1');
+  const dest = /[\s<>]/.test(url) || !balancedParens(url)
+    ? '<' + url.replace(/([<>])/g, '\\$1') + '>'
+    : url;
+  return `[${t}](${dest}${title ? ' ' + title : ''})`;
+}
+
 class StylePage extends BifrostElement {
   static properties = {
     text: { state: true },
@@ -69,6 +134,7 @@ class StylePage extends BifrostElement {
     wrap: { state: true },
     showPreview: { state: true },
     tbl: { state: true },
+    lnk: { state: true },
   };
 
   constructor() {
@@ -82,6 +148,7 @@ class StylePage extends BifrostElement {
     this.wrap = localStorage.getItem(WRAP_KEY) !== '0';
     this.showPreview = localStorage.getItem(PV_KEY) !== '0';
     this.tbl = null;
+    this.lnk = null;
     this._draftTimer = 0;
     this._pvTimer = 0;
     this._pvSrc = null;
@@ -91,9 +158,15 @@ class StylePage extends BifrostElement {
     };
     this._onKey = (e) => {
       if (e.key === 'Escape' && this.tbl) { this.tbl = null; return; }
+      if (e.key === 'Escape' && this.lnk) { this.lnk = null; return; }
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        if (!this.tbl && !this.lnk) this.openLink();
+        return;
+      }
       if ((e.ctrlKey || e.metaKey) && e.key === 's') {
         e.preventDefault();
-        if (!this.tbl) this.save();
+        if (!this.tbl && !this.lnk) this.save();
       }
     };
   }
@@ -344,6 +417,85 @@ class StylePage extends BifrostElement {
       </dialog>`;
   }
 
+    openLink() {
+    const ta = this.querySelector('textarea');
+    if (!ta) return;
+    this.result = null;
+    let [start, end] = [ta.selectionStart, ta.selectionEnd];
+    const found = findLink(this.text, start, end);
+    if (found) {
+      this.lnk = found;
+    } else {
+      const raw = this.text.slice(start, end);
+      let text = raw.trim();
+      if (text) {
+        start += raw.length - raw.trimStart().length;
+        end = start + text.length;
+      } else {
+        end = start;
+      }
+      let url = '';
+      if (start === end) {
+        const bare = findBareUrl(this.text, start);
+        if (bare) ({ start, end, url } = bare);
+      } else if (/^https?:\/\/\S+$/i.test(text)) {
+        [url, text] = [text, ''];
+      }
+      this.lnk = { start, end, text, url, title: '', edit: false };
+    }
+    this.updateComplete.then(() => {
+      const inputs = this.querySelectorAll('.style-link-dialog input');
+      const focus = this.lnk?.text && inputs[1] ? inputs[1] : inputs[0];
+      if (focus) { focus.focus(); focus.select(); }
+    });
+  }
+
+  applyLink(unlink = false) {
+    const l = this.lnk;
+    const url = l.url.trim();
+    if (!unlink && !url) return;
+    const md = unlink ? l.text.trim() : serializeLink(l.text, url, l.title);
+    const caret = l.start + md.length;
+    this.setText(this.text.slice(0, l.start) + md + this.text.slice(l.end));
+    this.dirty = true;
+    this.queueDraft();
+    this.lnk = null;
+    this.updateComplete.then(() => {
+      const ta = this.querySelector('textarea');
+      if (!ta) return;
+      ta.focus();
+      ta.setSelectionRange(caret, caret);
+    });
+  }
+
+  renderLinkDialog() {
+    const l = this.lnk;
+    const apply = (e) => { e.preventDefault(); this.applyLink(); };
+    return html`
+      <div class="overlay active" @click=${() => (this.lnk = null)}></div>
+      <dialog class="active style-link-dialog">
+        <h6 class="small">${l.edit ? 'Edit link' : 'Add link'}</h6>
+        ${field('Text', l.text, (e) => { this.lnk = { ...this.lnk, text: e.target.value }; },
+          { onEnter: apply, placeholder: ' ' })}
+        ${field('URL', l.url, (e) => { this.lnk = { ...this.lnk, url: e.target.value }; },
+          { mono: true, onEnter: apply, placeholder: ' ' })}
+        <nav class="wrap">
+          ${l.edit ? btn('Unlink', false, () => this.applyLink(true), 'border') : nothing}
+          <div class="max"></div>
+          ${btn('Cancel', false, () => (this.lnk = null), 'border')}
+          ${btn('Apply', !l.url.trim(), apply)}
+        </nav>
+      </dialog>`;
+  }
+
+  updated() {
+    for (const a of this.querySelectorAll('.style-preview a[href]:not([href^="#"])')) {
+      a.target = '_blank';
+      a.rel = 'noopener';
+    }
+  }
+
+
   get previewHtml() {
     if (this._pvSrc !== this.pvText) {
       this._pvSrc = this.pvText;
@@ -367,6 +519,7 @@ class StylePage extends BifrostElement {
           <i>arrow_drop_down</i>
         </div>
         ${btn('Edit table', false, () => this.openTable(), 'border small-round')}
+        ${btn('Hyperlink', false, () => this.openLink(), 'border small-round')}
         ${chip('Wrap', this.wrap, () => this.toggleWrap())}
         ${chip('Preview', this.showPreview, () => this.togglePreview())}
         ${btn(this.busy ? 'Saving…' : 'Save', this.busy || !this.dirty, () => this.save())}
@@ -392,7 +545,8 @@ class StylePage extends BifrostElement {
           <article class="style-preview">${unsafeHTML(this.previewHtml)}</article>
         </div>` : nothing}
       </div>
-      ${this.tbl ? this.renderTableDialog() : nothing}`;
-  }
+      ${this.tbl ? this.renderTableDialog() : nothing}
+      ${this.lnk ? this.renderLinkDialog() : nothing}`;
+    }
 }
 customElements.define('style-page', StylePage);

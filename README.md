@@ -6,7 +6,7 @@
 
 # Bifrost
 
-Bifrost is a curation console for connecting Gramps Web to other services. Think of it as a companion web app for a Gramps Web family tree. Gramps holds people, families, events, places, sources, and media, but what if your files live elsewhere? Bifrost connects other services, like Paperless-ngx, to Gramps and lets you bring their content in. Now, you don't need to have several copies of the same file scattered across several different services.
+Bifrost is a curation console for connecting Gramps Web to other services. Think of it as a companion web app for a Gramps Web family tree. Gramps holds people, families, events, places, sources, and media, but what if your files live elsewhere? Bifrost connects other services, like Paperless-ngx and Immich, to Gramps and lets you bring their content in. Now, you don't need to have several copies of the same file scattered across several different services.
 
 Bifrost is also a citation-generating assistant. The citation and transcription features are powered by AI models which provide you with an initial rough draft. 
 
@@ -14,15 +14,15 @@ Your family-tree data itself always lives in Gramps and the source systems. Bifr
 
 # Features
 
-* Sync Immich photos into Gramps as media objects. Tags in Immich drive it all: one tag marks a photo for sync, others carry its title and a fuzzy genealogical date (like about 1920 or before June 1955).
-* Sync documents in Paperless-ngx to Gramps Web as media objects; their versions, titles, dates, and transcription text are kept up to date
-    * Paperless now lets a document have multiple versions and serve whichever you select. Bifrost notices when the selected version changes and repoints the Gramps media to it so Gramps always shows the version you picked.
-* Link Immich's face recognition to Gramps people: pair each recognized face with its Gramps person once, and every synced photo gets the right person links and face boxes including photos synced before the pairing was made
-* Draft properly formatted genealogical source citations
-* Old handwriting and faded print often defeat regular OCR. Bifrost sends the page to an AI model and writes the transcription back into Paperless, so the document becomes searchable everywhere.
-* Rebuild a Paperless PDF so every page shares the same width
-* Give places boundaries on the minimap
+* Sync Immich photos into Gramps as media objects. Use Tags in Immich to mark a photo for sync and define a fuzzy date (like about 1920 or before June 1955).
+* Sync documents in Paperless-ngx to Gramps Web as media objects, and keep their versions, titles, dates, and transcription text up to date.
+* Link Immich's face recognition to Gramps people by pairing each recognized face with its Gramps person once. Then, every synced photo gets face boxes in Gramps.
+* Draft properly formatted genealogical source citations with the help of AI.
+* Old handwriting and faded print often defeat regular OCR. Bifrost sends the page to an AI model and writes the transcription back into Paperless and Gramps.
+* Rebuild a Paperless PDF so every page shares the same width.
+* Give places boundaries on the minimap so you can see the extent of their jurisdiction.
 
+I am developing Bifrost to assist me in my genealogical documentation workflow. Therefore, you may not be interested in using all of the features. Feel free to pick and choose which tools you'd like to use. At a minimum, you need to configure Gramps Web and Paperless-ngx.
 
 # Running Bifrost
 

@@ -72,9 +72,7 @@ async def _links_payload(request: Request) -> dict:
     st = _state(request)
     accounts = _accounts(request)
     return {
-        # one Gramps; reuse the Paperless public link (same convention as sync)
         "gramps_url": st.cfg.sync_paperless.gramps_public_url,
-        # config order: the page colors and sorts faces by an account's index
         "accounts": [getattr(c, "label", "") for c in accounts],
         "faces": await faces.grouped_links(accounts, st.conn),
     }
@@ -118,12 +116,9 @@ async def create_link(request: Request, body: LinkBody):
         break
     if info is None:
         if hard is not None:
-            # an account was unreachable: nonexistence is not established
+            # an account was unreachable but does it exist?
             raise HTTPException(502, f"could not verify the person id: {hard.message}")
         raise HTTPException(404, "no configured Immich account knows this person id")
-    # annotate any legacy NULL-owner rows for this person first, so the
-    # per-account replace in set_link applies deterministically even for
-    # direct API callers that never loaded the page
     for row in st.conn.execute(
             "SELECT immich_person_id FROM person_links "
             "WHERE gramps_handle=? AND owner_user_id IS NULL", (handle,)).fetchall():
@@ -147,16 +142,28 @@ async def remove_link(request: Request, gramps_handle: str):
     return await _links_payload(request)
 
 
-class ApplyBody(BaseModel):
-    apply: bool = False
+class BackfillBody(BaseModel):
+    selected: list[str] | None = None
+
+@router.get("/api/backfill/config")
+async def backfill_config(request: Request) -> dict:
+    return {"enabled": bool(getattr(_state(request), "immich_accounts", []))}
 
 
-@router.post("/api/apply")
-async def apply_links(request: Request, body: ApplyBody):
+@router.post("/api/backfill/preview")
+async def backfill_preview(request: Request, body: BackfillBody = BackfillBody()):
     st = _state(request)
-    gen = faces.apply_links(st.gramps, _accounts(request), st.conn,
-                            apply=body.apply)
-    job = "faces.apply" if body.apply else "faces.apply.preview"
-    run_id, events = await record_run(st.conn, job, gen)
-    return {"run_id": run_id, "apply": body.apply,
-            "events": [e.__dict__ for e in events]}
+    gen = faces.apply_links(st.gramps, _accounts(request), st.conn, apply=False)
+    run_id, events = await record_run(st.conn, "faces.backfill.preview", gen)
+    return {"run_id": run_id, "apply": False, "events": [e.__dict__ for e in events]}
+
+
+@router.post("/api/backfill/apply")
+async def backfill_apply(request: Request, body: BackfillBody = BackfillBody()):
+    st = _state(request)
+    gen = faces.apply_links(
+        st.gramps, _accounts(request), st.conn, apply=True,
+        selected=set(body.selected) if body.selected is not None else None)
+    run_id, events = await record_run(st.conn, "faces.backfill", gen)
+    st.caches.clear()
+    return {"run_id": run_id, "apply": True, "events": [e.__dict__ for e in events]}

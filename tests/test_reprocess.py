@@ -12,6 +12,7 @@ from bifrost.modules.reprocess import (
     rebuild,
     run,
     run_batch,
+    scan,
     scan_mixed_widths,
 )
 
@@ -204,3 +205,37 @@ def test_run_batch_merges_summaries_and_suppresses_page_events():
     outcomes = {e.source_id: e.action for e in events if e.entity == "doc"}
     assert outcomes == {"1": "updated", "2": "skipped"}
     assert sum(1 for e in events if e.kind == "summary") == 1
+
+
+def test_scan_events_have_the_sync_pages_shape():
+    fake = FakePaperless({
+        1: (_pdf((612, 792), (495, 700)), "application/pdf"),
+        2: (_pdf((612, 792), (612, 792)), "application/pdf"),
+        3: (b"\xff\xd8jpeg", "image/jpeg"),
+    })
+    events = _events(scan(fake, "doc"))
+    rows = [e for e in events if e.kind == "item"]
+    assert [(e.source_id, e.entity, e.action) for e in rows] == [("1", "doc", "would_update")]
+    assert rows[0].data["pages"] == 2
+    assert rows[0].data["cols"] == {"pages": "2", "widths": "495–612 pt"}
+    progress = [e for e in events if e.kind == "progress"]
+    assert progress[0].data["done"] == 0
+    assert progress[-1].data["done"] == progress[-1].data["total"] == 2
+    assert _summary(events) == {"mixed": 1, "errors": 0}
+
+
+def test_scan_unknown_tag_is_an_error_event():
+    events = _events(scan(FakePaperless({}), "nope"))
+    assert events[0].kind == "error" and "nope" in events[0].detail
+    assert events[-1].kind == "summary"
+
+
+def test_run_batch_reports_progress_per_document():
+    fake = FakePaperless({
+        1: (_pdf((612, 792), (495, 700)), "application/pdf"),
+        2: (_pdf((612, 792), (612, 792)), "application/pdf"),
+    })
+    events = _events(run_batch(fake, [1, 2], MODE_WIDEST))
+    progress = [e.data for e in events if e.kind == "progress"]
+    assert [d["done"] for d in progress] == [0, 1, 2]
+    assert {d["total"] for d in progress} == {2}

@@ -589,10 +589,18 @@ class Immich:
         return {t["value"].lower(): t["id"] for t in self._check(client.get("/tags"), "list tags").json()}
 
     def find_asset(self, client: httpx.Client, filename: str) -> dict | None:
+        """The sample asset by file name; a trashed one is restored, since a
+        re-run's job is to put the fixtures back (uploading it again would only
+        hand back the trashed duplicate's id)"""
         r = self._check(client.post("/search/metadata",
-                                    json={"originalFileName": filename, "size": 50, "page": 1}), "search")
+                                    json={"originalFileName": filename, "size": 50, "page": 1,
+                                          "withDeleted": True}), "search")
         for item in (r.json().get("assets") or {}).get("items") or []:
             if item.get("originalFileName") == filename:
+                if item.get("isTrashed"):
+                    self._check(client.post("/trash/restore/assets", json={"ids": [item["id"]]}),
+                                "restore from trash")
+                    log(f"immich: restored {filename} from the trash")
                 return item
         return None
 
@@ -619,6 +627,41 @@ class Immich:
 
     def asset(self, client: httpx.Client, asset_id: str) -> dict:
         return self._check(client.get(f"/assets/{asset_id}"), "get asset").json()
+
+    def ensure_person(self, client: httpx.Client, name: str) -> str:
+        page = 1
+        while True:
+            data = self._check(client.get("/people", params={"page": page, "size": 500,
+                                                             "withHidden": "true"}), "list people").json()
+            for p in data.get("people") or []:
+                if (p.get("name") or "").strip() == name:
+                    return p["id"]
+            if not data.get("hasNextPage"):
+                break
+            page += 1
+        r = self._check(client.post("/people", json={"name": name}), "create person")
+        log(f"immich: created person '{name}'")
+        return r.json()["id"]
+
+    def ensure_face(self, client: httpx.Client, asset_id: str, person_id: str,
+                    box: tuple[float, float, float, float]) -> None:
+        """A manually tagged face (Immich's own feature) so face detection is
+        not needed for the Faces page and the backfill to have work to do.
+        `box` is (x, y, w, h) as fractions of the image."""
+        for f in self._check(client.get("/faces", params={"id": asset_id}), "list faces").json():
+            if (f.get("person") or {}).get("id") == person_id:
+                return
+        a = self.asset(client, asset_id)
+        exif = a.get("exifInfo") or {}
+        w, h = exif.get("exifImageWidth") or a.get("width"), exif.get("exifImageHeight") or a.get("height")
+        if not w or not h:
+            log(f"immich: no dimensions yet for {asset_id}, face skipped (re-run the seed later)")
+            return
+        x, y, bw, bh = box
+        self._check(client.post("/faces", json={
+            "assetId": asset_id, "personId": person_id, "imageWidth": w, "imageHeight": h,
+            "x": int(x * w), "y": int(y * h), "width": int(bw * w), "height": int(bh * h)}),
+            "create face")
 
 
 def exif_when(spec: dict) -> dt.datetime:
@@ -684,6 +727,23 @@ def seed_immich(photos: list[dict], photos_dir: Path) -> dict:
     else:
         log(f"immich: no real photos in {photos_dir}; run 'bifrost-dev.sh fetch-photos' for faces")
 
+    # people with manually tagged faces (owner and partner each own one
+    # person), then Bifrost's own link register so the Faces section and the
+    # face backfill have something to show without real photographs
+    people = {}
+    for account, name, spots in (
+            ("owner", "Anders Lindqvist", [("wedding-1894.jpg", (0.28, 0.24, 0.20, 0.17)),
+                                           ("lindqvist-farm-1923.jpg", (0.41, 0.38, 0.09, 0.14))]),
+            ("owner", "Maria Lindqvist", [("wedding-1894.jpg", (0.55, 0.27, 0.19, 0.16))]),
+            ("partner", "Elsa Peterson", [("elsa-about-1920.jpg", (0.36, 0.22, 0.28, 0.22))])):
+        pid = im.ensure_person(clients[account], name)
+        people[name] = (account, pid)
+        for filename, box in spots:
+            if filename in uploaded:
+                im.ensure_face(clients[account], uploaded[filename], pid, box)
+    log("immich: people Anders, Maria (owner) and Elsa (partner) with manually tagged faces")
+    link_people(people, {"owner": owner_id, "partner": partner_id})
+
     prefix = "/data/upload/"
     if first_owner_asset:
         original = im.asset(clients["owner"], first_owner_asset).get("originalPath", "")
@@ -694,6 +754,29 @@ def seed_immich(photos: list[dict], photos_dir: Path) -> dict:
             log(f"immich: WARNING could not derive the upload prefix from originalPath {original!r}")
         log(f"immich: originals live under {prefix} (mounted into Gramps at /app/media/immich)")
     return {"keys": keys, "immich_prefix": prefix}
+
+
+def link_people(people: dict[str, tuple[str, str]], user_ids: dict[str, str]) -> None:
+    """Pair the Immich people with their Gramps persons in Bifrost's register.
+    Written straight into Bifrost's database with its own module: on the first
+    seed Bifrost is still on the placeholder config and cannot talk to Immich."""
+    from bifrost.core import db
+    from bifrost.modules import faces
+    gramps_ids = {"Anders Lindqvist": "I9001", "Maria Lindqvist": "I9002", "Elsa Peterson": "I9004"}
+    g = Gramps(URLS["gramps"], GRAMPS_USER, PASSWORD)
+    conn = db.connect(DEV / "data" / "bifrost" / "bifrost.db")
+    try:
+        for name, (account, person_id) in people.items():
+            found = g.find("/people/", gramps_id=gramps_ids[name])
+            if not found:
+                log(f"bifrost: no Gramps person {gramps_ids[name]} for {name}; link skipped")
+                continue
+            # no label: Bifrost then shows the Immich person's name, as in real use
+            faces.set_link(conn, found[0]["handle"], person_id, "",
+                           owner_user_id=user_ids[account])
+    finally:
+        conn.close()
+    log(f"bifrost: {len(people)} Immich people linked to Gramps persons (Faces section)")
 
 
 # ------------------------------------------------------------------- config

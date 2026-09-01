@@ -28,28 +28,41 @@ async def reprocess_page(request: Request):
     return RedirectResponse(url="/#reprocess")
 
 
-@router.post("/api/scan")
-async def scan_mixed(request: Request):
-    st = request.app.state
-    try:
-        return await reprocess.scan_mixed_widths(st.paperless, _scan_tag(request))
-    except ValueError as exc:
-        raise HTTPException(404, str(exc))
+@router.get("/api/config")
+async def config(request: Request) -> dict:
+    return {"enabled": True, "tag": _scan_tag(request)}
 
 
-class BatchBody(BaseModel):
-    doc_ids: list[int]
+class ApplyBody(BaseModel):
+    selected: list[str] | None = None
     mode: str = reprocess.MODE_WIDEST
 
 
-@router.post("/api/batch")
-async def batch_widths(request: Request, body: BatchBody):
+def _doc_ids(selected: list[str] | None) -> list[int]:
+    ids = []
+    for key in selected or []:
+        entity, _, raw = key.partition(":")
+        if entity == "doc" and raw.isdigit():
+            ids.append(int(raw))
+    return ids
+
+
+@router.post("/api/preview")
+async def preview(request: Request, body: ApplyBody = ApplyBody()):
     st = request.app.state
-    if not body.doc_ids:
-        raise HTTPException(400, "no documents selected")
+    gen = reprocess.scan(st.paperless, _scan_tag(request))
+    run_id, events = await record_run(st.conn, "reprocess.widths.preview", gen)
+    return {"run_id": run_id, "apply": False, "events": [e.__dict__ for e in events]}
+
+
+@router.post("/api/apply")
+async def apply(request: Request, body: ApplyBody):
+    st = request.app.state
     _check_mode(body.mode)
-    gen = reprocess.run_batch(st.paperless, body.doc_ids, body.mode)
-    run_id, events = await record_run(st.conn, "reprocess.widths.batch", gen)
+    doc_ids = _doc_ids(body.selected)
+    if not doc_ids:
+        raise HTTPException(400, "no documents selected")
+    gen = reprocess.run_batch(st.paperless, doc_ids, body.mode)
+    run_id, events = await record_run(st.conn, "reprocess.widths", gen)
     st.caches.clear()
-    return {"run_id": run_id, "apply": True,
-            "events": [e.__dict__ for e in events]}
+    return {"run_id": run_id, "apply": True, "events": [e.__dict__ for e in events]}

@@ -57,6 +57,16 @@ code, .mono { font-family: "Space Mono", ui-monospace, monospace; }
   transition: opacity var(--speed2), visibility var(--speed2);
 }
 .scroll.capped-width { max-inline-size: 40rem; }
+nav.pager { margin-block: 0.5rem 0; gap: 0.25rem; }
+.pager-count { font-size: 1rem; }
+table.sync-table { table-layout: fixed; inline-size: 100%; }
+table.sync-table col.col-check { inline-size: 2.75rem; }
+table.sync-table col.col-action { inline-size: 6.5rem; }
+table.sync-table col.col-media { inline-size: 7rem; }
+table.sync-table :is(td, th):is(:nth-child(3), :nth-child(4)) {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+table.sync-table tbody > tr > td { block-size: 3rem; box-sizing: border-box; padding-block: 0; }
 .progress { display: flex; flex-direction: column; gap: 0.5rem; }
 .bands {
   display: flex;
@@ -323,3 +333,4 @@ input[type="color"].seed-input {
 .seed-input::-webkit-color-swatch { border: none; border-radius: 0.35rem; }
 .seed-input::-moz-color-swatch { border: none; border-radius: 0.35rem; }
 config-page table td { block-size: auto; padding-block: 0.25rem; }
+.field.recent-width { inline-size: 18rem; }

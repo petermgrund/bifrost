@@ -177,6 +177,25 @@ def letter_pages() -> list[Image.Image]:
     return [p1, p2]
 
 
+DIARY = [
+    ["## Dagbok 1912", "", "Januari. Kallt, tjugo grader. Anders har kört", "timmer hela veckan. Elsa läser för Oskar", "om kvällarna.", "", "Februari. Brev från mor i Vimmerby. Hon", "mår bra men saknar oss alla."],
+    ["Mars. Isen på sjön är tjock ännu. Karl", "har fått arbete i staden, i verkstaden", "vid kvarnen.", "", "April. Första lärkan den 14:e."],
+    ["Maj. Sådden klar den 20:e. Vackert väder", "hela veckan.", "", "Juni. Midsommar hos Swansons. Hilda spelade", "dragspel och alla dansade till midnatt."],
+]
+
+
+def diary_pages() -> list[Image.Image]:
+    """Three pages of three widths: a second mixed-width fixture for the Reprocess
+    scan, in case the letter has already been rebuilt"""
+    widths = [1240, 1000, 1100]
+    pages = []
+    for i, (w, lines) in enumerate(zip(widths, DIARY)):
+        pg = paper(w, 1754, tone=(238, 230, 208), seed=90 + i)
+        typed(pg, lines, 110, 140, 32, "serif-italic", leading=1.7, ink=(50, 40, 70), seed=20 + i)
+        pages.append(pg)
+    return pages
+
+
 def census_page() -> Image.Image:
     img = paper(2200, 1500, tone=(228, 218, 190), seed=31)
     typed(img, ["## THIRTEENTH CENSUS OF THE UNITED STATES: 1910 — POPULATION",
@@ -364,6 +383,9 @@ def generate(out: Path) -> dict:
              title="Letter from Maria Lindqvist to Elsa Peterson, spring 1931",
              created="1931-04-02", qualifier="Circa", tags=["doc", "transcription", "Gemini OCR"],
              content=LETTER_CONTENT),
+        dict(path=save_pdf(diary_pages(), "diary-maria-1912.pdf"),
+             title="Diary of Maria Lindqvist, 1912",
+             created="1912-01-01", qualifier="Year only", tags=["doc"], content=None),
         dict(path=save_pdf([census_page()], "census-1910-lindqvist.pdf"),
              title="Lindqvist household 1910",
              created="1910-04-21", qualifier="Year only", tags=["doc"], content=None),
@@ -403,6 +425,18 @@ def generate(out: Path) -> dict:
              description="Elsa, about 1920 (partner account)",
              tags=["Sync/Gramps", "Sync/Date", "Sync/Description", "Date/Approximate"],
              account="partner", image=lambda: photo(900, 1300, "parlor", "Elsa, about 1920", 75)),
+        dict(name="harvest-1905.jpg", when="1905:08:20 09:00:00", gps=farm,
+             description="Threshing crew at the Lindqvist farm, 1905",
+             tags=["Sync/Gramps", "Sync/Date", "Sync/Location", "Sync/Description", "Date/Year"],
+             account="owner", image=lambda: photo(1500, 1000, "farm", "Threshing, 1905", 76)),
+        dict(name="porch-1938.jpg", when="1938:07:04 14:00:00", gps=None,
+             description="Fourth of July on the porch, 1938",
+             tags=["Sync/Gramps", "Sync/Date", "Sync/Description"],
+             account="owner", image=lambda: photo(1400, 1050, "parlor", "Fourth of July, 1938", 77)),
+        dict(name="chisago-lake-1952.jpg", when="1952:06:08 16:30:00", gps=farm,
+             description="Ruth and Harold at the lake, June 1952",
+             tags=["Sync/Gramps", "Sync/Date", "Sync/Location", "Sync/Description", "Date/Month"],
+             account="owner", image=lambda: photo(1600, 1100, "tree", "The lake, June 1952", 78)),
     ]
     for spec in photos:
         spec["path"] = save_jpeg(spec.pop("image")(), spec["name"], quality=86,

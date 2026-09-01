@@ -1,5 +1,7 @@
 import { BifrostElement, html, nothing, api, post, btn, spinner, field, statusLine } from './core.js';
 
+const short = (t) => (t.length > 15 ? `${t.slice(0, 15)}...` : t);
+
 class CitationsPage extends BifrostElement {
   static properties = {
     step: { state: true },
@@ -17,6 +19,8 @@ class CitationsPage extends BifrostElement {
     urls: { state: true },
     extra: { state: true },
     matched: { state: true },
+    recent: { state: true },
+    recentPick: { state: true },
   };
 
   constructor() {
@@ -37,6 +41,8 @@ class CitationsPage extends BifrostElement {
     this.extra = '';
     this.pl = null;
     this.matched = null;
+    this.recent = [];
+    this.recentPick = '';
   }
 
   connectedCallback() {
@@ -51,6 +57,19 @@ class CitationsPage extends BifrostElement {
     } catch (e) {
       this.loadError = e.message;
     }
+    this.loadRecent();
+  }
+
+  async loadRecent() {
+    try { this.recent = await api('/citations/api/recent'); }
+    catch { this.recent = []; }
+  }
+
+  pickRecent(gid) {
+    this.recentPick = gid;
+    if (!gid) return;
+    this.mediaId = gid;
+    this.lookupMedia();
   }
 
   reset() {
@@ -156,6 +175,7 @@ class CitationsPage extends BifrostElement {
         repository_handle: this.pick.repository?.handle || null,
         source_handle: this.pick.source?.handle || null,
       });
+      this.loadRecent();  // the cited flag on the pick list just changed
     } catch (e) {
       this.error = e.message;
     } finally {
@@ -178,6 +198,18 @@ class CitationsPage extends BifrostElement {
         ${btn(lookingUp ? 'Looking up...' : 'Look up', lookingUp, () => this.lookupMedia())}
         ${lookingUp ? spinner : nothing}
       </nav>
+      ${this.recent.length ? html`<nav class="wrap">
+        <div class="field label suffix fill recent-width">
+          <select .value=${this.recentPick} ?disabled=${lookingUp}
+            @change=${(e) => this.pickRecent(e.target.value)}>
+            <option value="" ?selected=${this.recentPick === ''}></option>
+            ${this.recent.map((r) => html`<option value=${r.gramps_id} ?disabled=${!r.in_gramps}
+              ?selected=${this.recentPick === r.gramps_id}>${short(r.title)} (${r.gramps_id})${r.cited ? ', cited' : ''}${r.in_gramps ? '' : ', missing'}</option>`)}
+          </select>
+          <label>Recently synced</label>
+          <i>arrow_drop_down</i>
+        </div>
+      </nav>` : nothing}
       <div class="medium-space"></div>
       <nav class="wrap left-align">
         <a class="button" href="/style">Edit citation style</a>

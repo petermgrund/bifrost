@@ -191,3 +191,21 @@ def test_next_sequential_id():
     assert next_sequential_id("N", {"N0134", "N_XNH8SH", "N_RX4ZRR"}) == "N0135"
     assert next_sequential_id("R", set()) == "R0001"
     assert next_sequential_id("C", {"C9999"}) == "C10000"
+
+
+def test_recent_minted_is_newest_first_and_capped(tmp_path):
+    from bifrost.core import db
+    from bifrost.modules.citations import recent_minted
+    conn = db.connect(tmp_path / "t.db")
+    for gid, system, ts in [("A1", "paperless", "2026-09-01T10:00:00"),
+                            ("B2", "immich", "2026-09-02T10:00:00+00:00"),
+                            ("C3", "paperless", "2026-08-30T10:00:00")]:
+        conn.execute(
+            "INSERT INTO minted_media (gramps_id, source_system, source_id, title, minted_at) "
+            "VALUES (?, ?, '1', 't', ?)", (gid, system, ts))
+    conn.commit()
+    rows = recent_minted(conn, 1)
+    assert [r["gramps_id"] for r in rows] == ["A1"]      # newest Paperless doc, Immich excluded
+    assert [r["gramps_id"] for r in recent_minted(conn)] == ["A1", "C3"]
+    assert [r["gramps_id"] for r in recent_minted(conn, source_system="immich")] == ["B2"]
+    conn.close()

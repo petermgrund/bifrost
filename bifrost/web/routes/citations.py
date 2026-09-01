@@ -49,6 +49,23 @@ async def get_media(request: Request, uncited: bool = False, refresh: bool = Fal
     return st.caches[key]
 
 
+@router.get("/api/recent")
+async def get_recent(request: Request, limit: int = 10):
+    st = _state(request)
+    rows = citations.recent_minted(st.conn, limit)
+    if st.caches.get("citations_cited_set") is None:
+        st.caches["citations_cited_set"] = await citations.cited_media_set(st.gramps)
+    if st.caches.get("citations_media_handles") is None:
+        st.caches["citations_media_handles"] = {
+            m["gramps_id"]: m["handle"]
+            for m in await st.gramps._paged("/media/", keys="handle,gramps_id")
+            if m.get("gramps_id")}
+    cited = st.caches["citations_cited_set"]
+    handles = st.caches["citations_media_handles"]
+    return [{**r, "in_gramps": r["gramps_id"] in handles,
+             "cited": handles.get(r["gramps_id"]) in cited} for r in rows]
+
+
 @router.get("/api/media/{gramps_id}")
 async def get_media_by_id(request: Request, gramps_id: str):
     st = _state(request)

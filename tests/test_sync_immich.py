@@ -227,6 +227,22 @@ class TestSyncAssetsScan:
             "VALUES (?, 'immich', ?, ?, '2026-01-01')", (gid, source_id, title))
         conn.commit()
 
+    def test_progress_covers_every_band_and_closes_each(self, conn):
+        self._mint(conn, "K1", "a2")
+        im = FakeImmich(assets={"a1": asset("a1"), "a2": asset("a2")}, tagged={"a1"})
+        gr = FakeGramps(media={"K1": {"gramps_id": "K1", "handle": "mh", "desc": "t",
+                                      "path": "immich/img.jpg", "mime": "image/jpeg"}})
+        events = run_scan(im, gr, conn)
+        progress = [e.data for e in events if e.kind == "progress"]
+        assert progress and {d["band_count"] for d in progress} == {3}
+        assert [d["band_index"] for d in progress] == sorted(d["band_index"] for d in progress)
+        for band in range(3):
+            steps = [d for d in progress if d["band_index"] == band]
+            assert steps, f"band {band} never reported"
+            assert steps[-1]["done"] == steps[-1]["total"] > 0
+        assert events.index(next(e for e in events if e.kind == "summary")) > \
+            events.index(next(e for e in reversed(events) if e.kind == "progress"))
+
     def test_tagged_unsynced_is_a_create_candidate(self, conn):
         im = FakeImmich(assets={"a1": asset("a1", "img1.jpg")}, tagged={"a1"})
         events = run_scan(im, FakeGramps(), conn)

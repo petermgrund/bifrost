@@ -1,0 +1,219 @@
+name: bifrost-dev
+
+x-gramps-env: &gramps-env
+  GRAMPSWEB_TREE: "Bifrost Dev"
+  GRAMPSWEB_CELERY_CONFIG__broker_url: redis://grampsweb-redis:6379/0
+  GRAMPSWEB_CELERY_CONFIG__result_backend: redis://grampsweb-redis:6379/0
+  GRAMPSWEB_RATELIMIT_STORAGE_URI: redis://grampsweb-redis:6379/1
+  GRAMPSWEB_CORS_ORIGINS: "*"
+  TZ: ${TZ:-Etc/UTC}
+
+x-gramps-volumes: &gramps-volumes
+  - gramps_users:/app/users
+  - gramps_index:/app/indexdir
+  - gramps_thumb_cache:/app/thumbnail_cache
+  - gramps_cache:/app/cache
+  - gramps_secret:/app/secret
+  - gramps_db:/root/.gramps/grampsdb
+  - gramps_tmp:/tmp
+  - ./data/gramps/media:/app/media
+  - ./data/paperless/media/documents/originals:/app/media/paperless:ro
+  - ./data/immich/library/upload:/app/media/immich:ro
+
+x-bifrost: &bifrost
+  build:
+    context: ..
+    dockerfile: dev/Dockerfile
+  environment: &bifrost-env
+    BIFROST_CONFIG: /app/dev/config.yaml
+    PYTHONPATH: /app
+    PYTHONDONTWRITEBYTECODE: "1"
+    PYTHONUNBUFFERED: "1"
+    TZ: ${TZ:-Etc/UTC}
+  volumes:
+    - ..:/app
+    - ./data/boundaries:/boundaries
+
+services:
+  bifrost:
+    <<: *bifrost
+    command: uvicorn bifrost.web.app:app --host 0.0.0.0 --port 8800 --reload --reload-dir /app/bifrost
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${BIFROST_PORT:-8800}:8800"
+    restart: unless-stopped
+
+  seed:
+    <<: *bifrost
+    profiles: [tools]
+    command: python dev/seed/seed.py
+    environment:
+      <<: *bifrost-env
+      DEV_PASSWORD: ${DEV_PASSWORD:-bifrost-dev}
+      GRAMPS_URL: http://grampsweb:5000
+      PAPERLESS_URL: http://paperless:8000
+      IMMICH_URL: http://immich-server:2283
+      GRAMPS_PUBLIC_URL: http://localhost:${GRAMPS_PORT:-5555}
+      PAPERLESS_PUBLIC_URL: http://localhost:${PAPERLESS_PORT:-8000}
+      IMMICH_PUBLIC_URL: http://localhost:${IMMICH_PORT:-2283}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    depends_on:
+      grampsweb: {condition: service_healthy}
+      paperless: {condition: service_healthy}
+      immich-server: {condition: service_healthy}
+
+  # ---------------------------------------------------------------- Gramps Web
+  grampsweb:
+    image: ghcr.io/gramps-project/grampsweb:${GRAMPSWEB_VERSION:-latest}
+    restart: unless-stopped
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${GRAMPS_PORT:-5555}:5000"
+    environment: *gramps-env
+    volumes: *gramps-volumes
+    depends_on:
+      grampsweb-redis: {condition: service_started}
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/')"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+
+  grampsweb-celery:
+    image: ghcr.io/gramps-project/grampsweb:${GRAMPSWEB_VERSION:-latest}
+    restart: unless-stopped
+    environment: *gramps-env
+    volumes: *gramps-volumes
+    depends_on:
+      grampsweb: {condition: service_healthy}
+      grampsweb-redis: {condition: service_started}
+    command: celery -A gramps_webapi.celery worker --loglevel=INFO --concurrency=1
+
+  grampsweb-redis:
+    image: docker.io/valkey/valkey:8-alpine
+    restart: unless-stopped
+
+  # ------------------------------------------------------------- Paperless-ngx
+  paperless:
+    image: ghcr.io/paperless-ngx/paperless-ngx:${PAPERLESS_VERSION:-latest}
+    restart: unless-stopped
+    depends_on:
+      paperless-postgres: {condition: service_healthy}
+      paperless-redis: {condition: service_started}
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${PAPERLESS_PORT:-8000}:8000"
+    volumes:
+      - paperless_data:/usr/src/paperless/data
+      - ./data/paperless/media:/usr/src/paperless/media
+      - ./data/paperless/export:/usr/src/paperless/export
+      - ./data/paperless/consume:/usr/src/paperless/consume
+    environment:
+      PAPERLESS_REDIS: redis://paperless-redis:6379
+      PAPERLESS_DBENGINE: postgresql
+      PAPERLESS_DBHOST: paperless-postgres
+      PAPERLESS_DBNAME: paperless
+      PAPERLESS_DBUSER: paperless
+      PAPERLESS_DBPASS: paperless
+      PAPERLESS_SECRET_KEY: bifrost-dev-not-a-secret
+      PAPERLESS_URL: http://localhost:${PAPERLESS_PORT:-8000}
+      PAPERLESS_ADMIN_USER: admin
+      PAPERLESS_ADMIN_PASSWORD: ${DEV_PASSWORD:-bifrost-dev}
+      PAPERLESS_ADMIN_MAIL: admin@bifrost.dev
+      PAPERLESS_TIME_ZONE: ${TZ:-Etc/UTC}
+      PAPERLESS_OCR_LANGUAGE: eng
+      PAPERLESS_CONSUMER_POLLING: "10"
+      PAPERLESS_TASK_WORKERS: "1"
+      PAPERLESS_THREADS_PER_WORKER: "2"
+
+  paperless-postgres:
+    image: docker.io/library/postgres:18
+    restart: unless-stopped
+    volumes:
+      - paperless_pgdata:/var/lib/postgresql
+    environment:
+      POSTGRES_DB: paperless
+      POSTGRES_USER: paperless
+      POSTGRES_PASSWORD: paperless
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U paperless -d paperless"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  paperless-redis:
+    image: docker.io/valkey/valkey:9-alpine
+    restart: unless-stopped
+    volumes:
+      - paperless_redisdata:/data
+
+  # -------------------------------------------------------------------- Immich
+  immich-server:
+    image: ghcr.io/immich-app/immich-server:${IMMICH_VERSION:-v3}
+    restart: unless-stopped
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${IMMICH_PORT:-2283}:2283"
+    volumes:
+      - ./data/immich/library:/data
+    environment:
+      DB_HOSTNAME: immich-postgres
+      DB_USERNAME: postgres
+      DB_PASSWORD: postgres
+      DB_DATABASE_NAME: immich
+      REDIS_HOSTNAME: immich-redis
+      IMMICH_MACHINE_LEARNING_URL: http://immich-machine-learning:3003
+      TZ: ${TZ:-Etc/UTC}
+    depends_on:
+      immich-redis: {condition: service_healthy}
+      immich-postgres: {condition: service_healthy}
+    healthcheck:
+      disable: false
+
+  immich-machine-learning:
+    image: ghcr.io/immich-app/immich-machine-learning:${IMMICH_VERSION:-v3}
+    restart: unless-stopped
+    volumes:
+      - immich_model_cache:/cache
+    environment:
+      TZ: ${TZ:-Etc/UTC}
+    healthcheck:
+      disable: false
+
+  immich-redis:
+    image: docker.io/valkey/valkey:9@sha256:8e8d64b405ce18f41b8e5ee20aa4687a8ed0022d1298f2ce31cdcf3a76e09411
+    restart: unless-stopped
+    healthcheck:
+      test: redis-cli ping || exit 1
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  immich-postgres:
+    image: ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0@sha256:bcf63357191b76a916ae5eb93464d65c07511da41e3bf7a8416db519b40b1c23
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_DB: immich
+      POSTGRES_INITDB_ARGS: '--data-checksums'
+    volumes:
+      - immich_pgdata:/var/lib/postgresql/data
+    shm_size: 128mb
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d immich"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+
+volumes:
+  gramps_users:
+  gramps_index:
+  gramps_thumb_cache:
+  gramps_cache:
+  gramps_secret:
+  gramps_db:
+  gramps_tmp:
+  paperless_data:
+  paperless_pgdata:
+  paperless_redisdata:
+  immich_pgdata:
+  immich_model_cache:

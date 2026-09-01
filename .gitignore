@@ -10,9 +10,17 @@ venv/
 .DS_Store
 config.yaml.pre-immich-removal.bak
 /config.*.yaml
-# the template must survive the blanket config ignore above
+
 !/config.example.yaml
 CLAUDE.md
 NOTES.md
 stub_backends.py
 /.claude
+
+# dev
+/dev/.env
+/dev/config.yaml
+/dev/data/
+/dev/samples/photos/*
+!/dev/samples/photos/README.md
+/dev/samples/example.gramps

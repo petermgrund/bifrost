@@ -1,0 +1,3 @@
+pytest
+pillow
+piexif==1.1.3

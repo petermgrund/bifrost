@@ -179,3 +179,16 @@ class ImmichClient:
             "GET", f"/assets/{_checked_id(asset_id)}/thumbnail",
             params={"size": "thumbnail"})
         return resp.content, resp.headers.get("Content-Type", "image/jpeg")
+
+    async def preview_file(self, asset_id: str) -> tuple[str, str] | None:
+        """(extension, mime) of the asset's preview rendition, None when Immich has none"""
+        try:
+            resp = await self._request(
+                "HEAD", f"/assets/{_checked_id(asset_id)}/thumbnail",
+                params={"size": "preview"})
+        except ImmichError as exc:
+            if exc.status == 404:
+                return None
+            raise
+        mime = resp.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
+        return ("webp" if mime == "image/webp" else "jpeg"), mime

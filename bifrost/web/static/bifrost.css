@@ -240,8 +240,7 @@ th { font-weight: normal; }
 }
 .faces-empty > i { font-size: 1.5rem; }
 .faces-note { font-size: 0.75rem; color: var(--secondary); }
-dialog.faces-dialog { inline-size: min(30rem, 92vw); overflow: visible; }
-.faces-dialog .faces-fields { display: flex; flex-direction: column; gap: 1.25rem; }
+.faces-join { font-size: 1.25rem; color: var(--secondary); }
 
 summary.none { cursor: pointer; }
 .field-helper { margin: 0.25rem 0 1rem 0.25rem; }

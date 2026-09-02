@@ -272,8 +272,7 @@ async def generate_one(
 def _progress(label: str, done: int, total: int) -> SyncEvent:
     return SyncEvent(kind="progress", detail=label,
                      data={"done": done, "total": total,
-                           "percent": round(100 * done / total) if total else 100,
-                           "band_index": 0, "band_count": 1})
+                           "percent": round(100 * done / total) if total else 100})
 
 
 def _row(row: dict) -> dict:
@@ -294,6 +293,18 @@ def _plan(row: dict, match: dict) -> dict:
     if not row["has_coords"] and "lat" in match:
         plan["coordinates"] = f'{match["lat"]:.4f}, {match["lon"]:.4f}'
     return plan
+
+
+def _boundary_source(row: dict, plan: dict, match: dict,
+                     boundaries_dir: Path | None) -> tuple[str, int] | None:
+    """The OSM area whose boundary the apply should fetch, if any"""
+    if not boundaries_dir:
+        return None
+    if "osm" in plan:
+        return match["osm_type"], match["osm_id"]
+    if row["osm_type"] in ("relation", "way") and (not row["has_boundary"] or outdated(row)):
+        return row["osm_type"], row["osm_id"]
+    return None
 
 
 async def _find(row: dict) -> dict | None:
@@ -330,6 +341,8 @@ async def scan_links(
                 suggestions[row["handle"]] = match
                 counts["linked"] += "osm" in plan
                 counts["located"] += "coordinates" in plan
+                if _boundary_source(row, plan, match, boundaries_dir):
+                    plan["boundary"] = "fetch"
                 yield SyncEvent(**_row(row),
                                 action="would_create" if "osm" in plan else "would_update",
                                 data={"cols": {**plan, "match": match["display_name"]},
@@ -349,7 +362,7 @@ async def apply_links(
     handles = [k.partition(":")[2] for k in selected if k.startswith("place:")]
     todo = [by_handle[h] for h in handles if h in by_handle]
     yield SyncEvent(kind="started", detail=f"{len(todo)} place(s) to update")
-    counts = {"linked": 0, "located": 0, "errors": 0}
+    counts = {"linked": 0, "located": 0, "generated": 0, "errors": 0}
     for i, row in enumerate(todo):
         yield _progress("Updating places", i, len(todo))
         match = suggestions.get(row["handle"])
@@ -378,6 +391,16 @@ async def apply_links(
         suggestions.pop(row["handle"], None)
         counts["linked"] += "osm" in plan
         counts["located"] += "coordinates" in plan
+        if _boundary_source(row, plan, match, boundaries_dir):
+            try:
+                await generate_one(gramps, boundaries_dir, row["handle"], force=True)
+                counts["generated"] += 1
+                plan["boundary"] = "written"
+            except Exception as exc:  # noqa: BLE001
+                counts["errors"] += 1
+                plan["boundary"] = f"failed: {str(exc)[:160]}"
+            if i < len(todo) - 1:
+                await asyncio.sleep(1)
         yield SyncEvent(**_row(row), action="created" if "osm" in plan else "updated",
                         data={"cols": {**plan, "match": match["display_name"]}})
     if todo:

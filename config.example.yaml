@@ -22,6 +22,7 @@ sync:
     path_mappings:
       - immich_prefix: "/usr/src/app/upload/upload/"
         gramps_prefix: "immich/"
+    previews_prefix: "immich-previews/"
   paperless:
     sync_tags: ["tag-1", "tag-2"]
     public_url: "https://your-paperless-public-url"

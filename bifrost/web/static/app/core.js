@@ -85,11 +85,11 @@ function searchKeys(opts) {
 
 function searchRows({ items, active = -1, onPick, empty = 'No matches' }) {
   const fallback = (e) => e.target.replaceWith(Object.assign(document.createElement('i'), { textContent: 'image' }));
-  if (!items.length) return html`<li class="secondary-text">${empty}</li>`;
+  if (!items.length) return empty ? html`<li class="secondary-text">${empty}</li>` : nothing;
   return items.map((it, i) => html`<li class=${i === active ? 'active' : ''}
       @mousedown=${(e) => { e.preventDefault(); onPick(it); e.currentTarget.closest('menu').querySelector('input')?.blur(); document.activeElement?.blur(); }}>
       ${it.thumb ? html`<img class="circle" src=${it.thumb} alt="" @error=${fallback}>`
-        : html`<i>${it.icon || 'search'}</i>`}
+        : it.icon ? html`<i>${it.icon}</i>` : nothing}
       <div class="max">
         <div>${it.label}</div>
         ${it.sub ? html`<div class="small-text secondary-text ${it.mono ? 'mono' : ''}">${it.sub}</div>` : nothing}
@@ -196,14 +196,9 @@ export function statusLine(kind, msg) {
 
 export function progressLine(p) {
   if (!p || !p.total) return spinner;
-  const count = p.band_count || 1;
-  const at = p.band_index || 0;
   const pct = Math.round((100 * (p.done || 0)) / p.total);
   return html`<div class="progress">
-    <div class="bands">
-      ${Array.from({ length: count }, (_, i) => html`<div class="band">
-        <div style="width:${i < at ? 100 : i > at ? 0 : pct}%"></div></div>`)}
-    </div>
+    <div class="bands"><div class="band"><div style="width:${pct}%"></div></div></div>
     <div class="band-line">
       <span class="max secondary-text">${p.detail || ''}</span>
       <span class="mono small-text">${p.done}/${p.total}</span>

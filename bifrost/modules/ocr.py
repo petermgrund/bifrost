@@ -205,17 +205,17 @@ async def run(
         _set_ocr(conn, doc_id, gem_cfg.model, len(new_text))
         cols["new text"] = f"{len(new_text)} chars"
 
+        cur_tags = set(doc.get("tags") or [])
         tt = cfg.transcription_tag_id
+        wanted = (cur_tags | ({tt} if tt else set())) - {tag_id}
         if tt:
-            cur_tags = doc.get("tags") or []
-            if tt in cur_tags:
-                cols["transcription tag"] = "already set"
-            else:
-                try:
-                    await paperless.patch_tags(doc_id, sorted(set(cur_tags) | {tt}))
-                    cols["transcription tag"] = "added"
-                except Exception as exc:  # noqa: BLE001
-                    cols["transcription tag"] = f"add failed: {exc}"
+            cols["transcription tag"] = "already set" if tt in cur_tags else "added"
+        cols["OCR tag"] = "removed"
+        if wanted != cur_tags:
+            try:
+                await paperless.patch_tags(doc_id, sorted(wanted))
+            except Exception as exc:  # noqa: BLE001
+                cols["tags"] = f"update failed: {exc}"
 
         counts["transcribed" if create else "replaced"] += 1
         yield SyncEvent(**row, action="created" if create else "replaced", data={"cols": cols})

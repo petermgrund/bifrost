@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import json
 
 import pytest
@@ -67,7 +68,7 @@ PLACE_WAY = {"handle": "ph3", "gramps_id": "P0003", "name": {"value": "Kyrkan"},
 
 class ListingGramps(FakeGramps):
     def __init__(self, places):
-        self.places = {p["handle"]: p for p in places}
+        self.places = {p["handle"]: copy.deepcopy(p) for p in places}
 
     async def list_places_full(self):
         return list(self.places.values())
@@ -173,8 +174,22 @@ def _fake_osm(monkeypatch):
     return searches, lookups
 
 
+def _fake_geojson(monkeypatch, fail_for=()):
+    fetched = []
+
+    async def fake_fetch(osm_type, osm_id, **kw):
+        fetched.append((osm_type, osm_id))
+        if (osm_type, osm_id) in fail_for:
+            raise boundaries.BoundaryFetchError("no polygon")
+        return GEOM
+
+    monkeypatch.setattr(boundaries, "fetch_geojson", fake_fetch)
+    return fetched
+
+
 def test_link_scan_suggests_links_and_coordinates(tmp_path, monkeypatch):
     searches, lookups = _fake_osm(monkeypatch)
+    fetched = _fake_geojson(monkeypatch)
     gr = LinkingGramps([PLACE, PLACE_PARENT, PLACE_CHILD, PLACE_LOCATED, PLACE_FARM])
     suggestions = {}
     events = _events(boundaries.scan_links(gr, tmp_path, suggestions))
@@ -184,13 +199,15 @@ def test_link_scan_suggests_links_and_coordinates(tmp_path, monkeypatch):
                                 "Lindqvist farm, Minnesota", "Minnesota"]
     assert rows["P0101"].action == "would_create"
     assert rows["P0101"].data["cols"] == {"osm": "relation 1795848", "coordinates": "45.0000, -93.4000",
+                                          "boundary": "fetch",
                                           "match": "Hennepin County, Minnesota, United States"}
     assert rows["P0102"].action == "would_create"
-    assert set(rows["P0102"].data["cols"]) == {"osm", "match"}
+    assert set(rows["P0102"].data["cols"]) == {"osm", "boundary", "match"}
     assert rows["P0103"].action == "would_update"
     assert set(rows["P0103"].data["cols"]) == {"coordinates", "match"}
     assert rows["P0001"].action == "would_update"
     assert rows["P0001"].data["cols"]["coordinates"] == "60.5000, 13.2000"
+    assert rows["P0001"].data["cols"]["boundary"] == "fetch"
     assert "P0100" not in rows
     assert events[-1].data == {"linked": 2, "located": 3, "unmatched": 1, "errors": 0}
     assert set(suggestions) == {"ph-hc", "ph-cc", "ph-farm", "ph1"}
@@ -207,6 +224,39 @@ def test_link_scan_suggests_links_and_coordinates(tmp_path, monkeypatch):
     assert boundaries.osm_ref(gr.places["ph1"]) == ("relation", 62411)
     assert gr.places["ph1"]["long"] == "13.200000"
     assert suggestions == {}
+    assert sorted(fetched) == [("relation", 62411), ("relation", 137256), ("relation", 1795848)]
+    assert {p.name for p in tmp_path.glob("*.geojson")} == {"P0001.geojson", "P0101.geojson", "P0102.geojson"}
+    cols = {e.gramps_id: e.data["cols"] for e in events if e.kind == "item"}
+    assert cols["P0101"]["boundary"] == "written" and "boundary" not in cols["P0103"]
+    assert events[-1].data == {"linked": 2, "located": 3, "generated": 3, "errors": 0}
+
+
+def test_link_apply_without_a_boundaries_dir_only_writes_the_place(tmp_path, monkeypatch):
+    _fake_osm(monkeypatch)
+    fetched = _fake_geojson(monkeypatch)
+    gr = LinkingGramps([PLACE_PARENT, PLACE_CHILD])
+    suggestions = {}
+    events = _events(boundaries.scan_links(gr, None, suggestions))
+    assert "boundary" not in [e for e in events if e.kind == "item"][0].data["cols"]
+    events = _events(boundaries.apply_links(gr, None, {"place:ph-hc"}, suggestions))
+    assert fetched == []
+    assert [e.action for e in events if e.kind == "item"] == ["created"]
+    assert events[-1].data == {"linked": 1, "located": 1, "generated": 0, "errors": 0}
+
+
+def test_link_apply_keeps_the_link_when_the_boundary_fails(tmp_path, monkeypatch):
+    _fake_osm(monkeypatch)
+    _fake_geojson(monkeypatch, fail_for={("relation", 1795848)})
+    gr = LinkingGramps([PLACE_PARENT, PLACE_CHILD])
+    suggestions = {}
+    _events(boundaries.scan_links(gr, tmp_path, suggestions))
+    events = _events(boundaries.apply_links(gr, tmp_path, {"place:ph-hc"}, suggestions))
+    row = [e for e in events if e.kind == "item"][0]
+    assert row.action == "created"
+    assert row.data["cols"]["boundary"] == "failed: no polygon"
+    assert boundaries.osm_ref(gr.places["ph-hc"]) == ("relation", 1795848)
+    assert not list(tmp_path.glob("*.geojson"))
+    assert events[-1].data == {"linked": 1, "located": 1, "generated": 0, "errors": 1}
 
 
 def test_boundary_scan_flags_an_outdated_sidecar_and_regenerates_it(tmp_path, monkeypatch):

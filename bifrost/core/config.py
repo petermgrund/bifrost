@@ -42,6 +42,7 @@ class SyncImmichConfig:
     sync_tag: str = "Sync/Gramps"
     public_url: str = ""
     path_mappings: tuple[tuple[str, str], ...] = ()
+    previews_prefix: str = ""
     # temp legacy face-linker person_map.yaml
     person_map_path: Path | None = None
     place_tag_handle: str = ""
@@ -160,12 +161,16 @@ def load_config(path: str | Path | None = None) -> Config:
                 f"and 'gramps_prefix' keys, got: {m!r}"
             )
         mappings.append((m["immich_prefix"], m["gramps_prefix"]))
+    previews_prefix = (si_raw.get("previews_prefix") or "").strip()
+    if previews_prefix and not previews_prefix.endswith("/"):
+        previews_prefix += "/"
 
     sync_immich = SyncImmichConfig(
         enabled=si_raw.get("enabled") is not False,
         sync_tag=(si_raw.get("sync_tag") or "Sync/Gramps").strip() or "Sync/Gramps",
         public_url=(si_raw.get("public_url") or "").rstrip("/"),
         path_mappings=tuple(mappings),
+        previews_prefix=previews_prefix,
         person_map_path=Path(p) if (p := si_raw.get("person_map_path")) else None,
         place_tag_handle=(si_raw.get("place_tag_handle") or "").strip(),
         id_tag_prefix=str(si_raw.get("id_tag_prefix", "ID") or "").strip().strip("/"),

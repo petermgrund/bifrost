@@ -367,6 +367,14 @@ def generate(out: Path) -> dict:
             img.save(p, "JPEG", **kw)
         return p
 
+    def save_heic(img: Image.Image, name: str, exif: bytes | None = None) -> Path:
+        import pillow_heif
+        pillow_heif.register_heif_opener()
+        p = out / name
+        if not p.exists():
+            img.save(p, "HEIF", quality=86, exif=exif)
+        return p
+
     def save_pdf(pages: list[Image.Image], name: str, dpi: int = 150) -> Path:
         p = out / name
         if not p.exists():
@@ -436,8 +444,14 @@ def generate(out: Path) -> dict:
              description="Ruth and Harold at the lake, June 1952",
              tags=["Sync/Gramps", "Sync/Date", "Sync/Location", "Sync/Description", "Date/Month"],
              account="owner", image=lambda: photo(1600, 1100, "tree", "The lake, June 1952", 78)),
+        dict(name="cabin-2019.heic", when="2019:07:14 18:20:00", gps=farm,
+             description="Ruth's grandchildren at the cabin, July 2019 (iPhone HEIC)",
+             tags=["Sync/Gramps", "Sync/Date", "Sync/Location", "Sync/Description"],
+             account="owner", image=lambda: photo(2000, 1500, "tree", "The cabin, July 2019", 79)),
     ]
     for spec in photos:
-        spec["path"] = save_jpeg(spec.pop("image")(), spec["name"], quality=86,
-                                 exif=exif_bytes(spec["when"], spec["description"], spec["gps"]))
+        exif = exif_bytes(spec["when"], spec["description"], spec["gps"])
+        img = spec.pop("image")()
+        spec["path"] = (save_heic(img, spec["name"], exif=exif) if spec["name"].endswith(".heic")
+                        else save_jpeg(img, spec["name"], quality=86, exif=exif))
     return {"documents": documents, "photos": photos}

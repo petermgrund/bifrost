@@ -33,6 +33,14 @@ def _suggestions(request: Request) -> dict:
     return _state(request).caches.setdefault("osm_suggestions", {})
 
 
+@router.get("/api/list")
+async def list_places(request: Request) -> list[dict]:
+    """Places without an OSM relation for search"""
+    rows = await boundaries.listing(_state(request).gramps, None)
+    return [{"handle": r["handle"], "gramps_id": r["gramps_id"], "name": r["name"],
+             "hierarchy": r["hierarchy"]} for r in rows if not r["osm_id"]]
+
+
 @router.get("/api/links/config")
 async def links_config(request: Request) -> dict:
     return {"enabled": True}
@@ -93,10 +101,18 @@ async def set_relation(request: Request, body: LinkBody):
             st.gramps, place["handle"], osm=(kind, oid), coords=coords, replace=body.replace)
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
+    boundary_error = None
+    if st.cfg.places.boundaries_dir:
+        try:
+            await boundaries.generate_one(
+                st.gramps, st.cfg.places.boundaries_dir, place["handle"], force=True)
+        except Exception as exc:  # noqa: BLE001
+            boundary_error = str(exc)[:200]
     return {"handle": place["handle"], "osm_type": kind, "osm_id": oid, "gramps_id": gid,
             "name": (place.get("name") or {}).get("value") or gid,
             "replaced": f"{had[0]} {had[1]}" if had else None,
-            "coordinates": f"{coords[0]:.4f}, {coords[1]:.4f}" if coords else None}
+            "coordinates": f"{coords[0]:.4f}, {coords[1]:.4f}" if coords else None,
+            "boundary_error": boundary_error}
 
 
 # ---- boundaries

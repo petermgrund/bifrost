@@ -85,3 +85,18 @@ def test_no_immich_section_means_no_accounts(tmp_path):
 def test_legacy_partner_key_alone_stays_disabled(tmp_path):
     cfg = _load(tmp_path, 'immich: {base_url: "http://i", partner_api_key: k2}\n')
     assert cfg.immich.accounts == ()
+
+
+def test_previews_prefix_gets_a_trailing_slash(tmp_path):
+    cfg = _load(tmp_path, """\
+immich: {base_url: "http://i", api_key: k}
+sync:
+  immich:
+    previews_prefix: immich-previews
+""")
+    assert cfg.sync_immich.previews_prefix == "immich-previews/"
+
+
+def test_previews_prefix_defaults_empty(tmp_path):
+    cfg = _load(tmp_path, 'immich: {base_url: "http://i", api_key: k}\n')
+    assert cfg.sync_immich.previews_prefix == ""

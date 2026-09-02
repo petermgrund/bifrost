@@ -1,4 +1,4 @@
-import { BifrostElement, html, nothing, api, post, btn, field, spinner, statusLine, searchField } from './core.js';
+import { BifrostElement, html, nothing, api, post, btn, field, spinner, statusLine, searchMenu } from './core.js';
 
 class FacesPage extends BifrostElement {
   static properties = {
@@ -10,7 +10,8 @@ class FacesPage extends BifrostElement {
     query: { state: true },
     filter: { state: true },
     open: { state: true },
-    dialogOpen: { state: true },
+    openI: { state: true },
+    openG: { state: true },
     selG: { state: true },
     selI: { state: true },
     qG: { state: true },
@@ -33,7 +34,8 @@ class FacesPage extends BifrostElement {
     this.query = '';
     this.filter = 'all';
     this.open = null;
-    this.dialogOpen = false;
+    this.openI = false;
+    this.openG = false;
     this.selG = '';
     this.selI = '';
     this.qG = '';
@@ -49,13 +51,6 @@ class FacesPage extends BifrostElement {
   connectedCallback() {
     super.connectedCallback();
     this.load();
-  }
-
-  updated() {
-    // the dialogOpen check matters: close() fires its event a task later, so
-    // without it a render in between would re-open the dialog we just closed
-    const dlg = this.renderRoot.querySelector('dialog');
-    if (this.dialogOpen && dlg && !dlg.open) dlg.showModal();
   }
 
   async load(refresh = false) {
@@ -116,7 +111,7 @@ class FacesPage extends BifrostElement {
   }
 
   // an unnamed Immich cluster has nothing to match a Gramps person on, so it
-  // is neither offered in the dialog nor listed as a backlog card
+  // is neither offered in the picker nor listed as a backlog card
   get named() {
     return this.iPeople.filter((p) => !p.is_hidden && p.name.trim());
   }
@@ -192,51 +187,22 @@ class FacesPage extends BifrostElement {
     }
   }
 
-  openDialog(immichId = '') {
-    this.selI = immichId;
-    this.qI = this.named.find((p) => p.id === immichId)?.name || '';
-    this.selG = '';
-    this.qG = '';
-    this.hiI = -1;
-    this.hiG = -1;
-    this.label = '';
-    this.result = null;
-    this.dialogOpen = true;
-  }
-
-  resetDialog() {
-    this.dialogOpen = false;
+  resetForm() {
     this.selI = '';
     this.selG = '';
     this.qI = '';
     this.qG = '';
+    this.hiI = -1;
+    this.hiG = -1;
+    this.openI = false;
+    this.openG = false;
     this.label = '';
-    this.result = null;
   }
 
-  // reset directly rather than waiting on the close event: it is dispatched
-  // from a queued task, and a missed one would leave the dialog unopenable
-  closeDialog() {
-    const dlg = this.renderRoot.querySelector('dialog');
-    if (dlg?.open) dlg.close();
-    this.resetDialog();
-  }
-
-  // Dismissal needs a press AND a release on the backdrop. A coordinate test
-  // alone is not enough: the backdrop and the dialog's own padding are the
-  // same element, and picking from a native select popup (or activating by
-  // keyboard) reports a click at 0,0, which reads as "outside the dialog" and
-  // tore the dialog down mid-edit. Requiring the press to have started on the
-  // backdrop also stops a drag that ends outside from dismissing.
-  pressScrim(e) {
-    this._onScrim = e.target === e.currentTarget;
-  }
-
-  scrimClick(e) {
-    if (!this._onScrim || e.target !== e.currentTarget || e.detail === 0) return;
-    const r = e.currentTarget.getBoundingClientRect();
-    if (e.clientX < r.left || e.clientX > r.right
-      || e.clientY < r.top || e.clientY > r.bottom) this.closeDialog();
+  useBacklog(p) {
+    this.pickImmich({ id: p.id, label: p.name, sub: p.account_label,
+      thumb: `/faces/api/person-thumbnail/${p.id}` });
+    this.renderRoot.querySelector('.faces-link')?.scrollIntoView({ block: 'nearest' });
   }
 
   async addLink() {
@@ -246,8 +212,8 @@ class FacesPage extends BifrostElement {
     let ok = false;
     try {
       const r = await post('/faces/api/links', {
-        gramps_handle: this.selG,
-        immich_person_id: this.selI,
+        gramps_handle: this.selG.id,
+        immich_person_id: this.selI.id,
         label: this.label.trim(),
       });
       this.links = r.faces;
@@ -259,7 +225,7 @@ class FacesPage extends BifrostElement {
     } finally {
       this.busy = '';
     }
-    if (ok) this.closeDialog();
+    if (ok) this.resetForm();
   }
 
   async removeLink(handle) {
@@ -287,7 +253,6 @@ class FacesPage extends BifrostElement {
   renderBar(counts) {
     return html`<div class="faces-bar">
       <nav class="wrap">
-        ${btn(html`<i>add</i><span>Add link</span>`, this.busy !== '', () => this.openDialog())}
         <div class="field border small prefix no-margin faces-search">
           <i>search</i>
           <input type="text" placeholder="Search name, label or Gramps ID"
@@ -354,7 +319,7 @@ class FacesPage extends BifrostElement {
 
   backlogCard(p) {
     return html`<article class="border no-margin faces-card"
-      @click=${() => this.openDialog(p.id)}>
+      @click=${() => this.useBacklog(p)}>
       <div class="faces-head">
         <div class="faces-thumbs"><img class="face-thumb acct-${this.acctIndex(p.account_label)}"
           loading="lazy" alt="" title=${`${p.name} (${p.account_label})`}
@@ -378,55 +343,75 @@ class FacesPage extends BifrostElement {
 
   immichMatches() {
     const q = this.qI.trim().toLowerCase();
-    return this.named.filter((p) => !q || p.name.toLowerCase().includes(q)).slice(0, 10)
+    if (!q) return [];
+    return this.named.filter((p) => p.name.toLowerCase().includes(q)).slice(0, 5)
       .map((p) => ({ id: p.id, label: p.name, sub: p.account_label,
-        thumb: `/faces/api/person-thumbnail/${p.id}`, icon: 'face' }));
+        thumb: `/faces/api/person-thumbnail/${p.id}` }));
   }
 
   grampsMatches() {
     const q = this.qG.trim().toLowerCase();
+    if (!q) return [];
     return this.gPeople
-      .filter((p) => !q || p.name.toLowerCase().includes(q) || p.gramps_id.toLowerCase().includes(q))
-      .slice(0, 10)
-      .map((p) => ({ id: p.handle, label: p.name, sub: p.gramps_id, mono: true, icon: 'person' }));
+      .filter((p) => p.name.toLowerCase().includes(q) || p.gramps_id.toLowerCase().includes(q))
+      .slice(0, 5)
+      .map((p) => ({ id: p.handle, label: p.name, sub: p.gramps_id, mono: true }));
   }
 
-  pickImmich(it) { this.selI = it.id; this.qI = it.label; this.hiI = -1; }
-  pickGramps(it) { this.selG = it.id; this.qG = it.label; this.hiG = -1; }
+  pickImmich(it) { this.selI = it; this.qI = ''; this.hiI = -1; this.openI = false; }
+  pickGramps(it) { this.selG = it; this.qG = ''; this.hiG = -1; this.openG = false; }
 
-  renderDialog() {
+  chosen(it, mono = false) {
+    return html`${it.thumb ? html`<img class="circle" src=${it.thumb} alt="">` : nothing}
+      <div>
+        <div>${it.label}</div>
+        <div class="small-text secondary-text ${mono ? 'mono' : ''}">${it.sub}</div>
+      </div>`;
+  }
+
+  renderLinkForm() {
     const iItems = this.immichMatches();
     const gItems = this.grampsMatches();
     const move = (key, n) => (d) => { if (n) this[key] = (this[key] + d + n) % n; };
-    return html`
-      <dialog class="faces-dialog" @mousedown=${(e) => this.pressScrim(e)}
-        @click=${(e) => this.scrimClick(e)}
-        @cancel=${() => this.resetDialog()} @close=${() => this.resetDialog()}>
-        <h5 class="small">Link a face</h5>
-        <div class="faces-fields">
-          ${searchField({
-    placeholder: 'Immich person', value: this.qI, items: iItems, active: this.hiI, icon: 'face',
-    onInput: (e) => { this.qI = e.target.value; this.selI = ''; this.hiI = -1; },
+    return html`<div class="faces-link">
+      <h6 class="small">Link an Immich person to a Gramps person</h6>
+      <div class="chosen-media">
+        ${this.selI ? this.chosen(this.selI) : nothing}
+        ${this.selI && this.selG ? html`<i class="faces-join">link</i>` : nothing}
+        ${this.selG ? this.chosen(this.selG, true) : nothing}
+      </div>
+      <nav class="wrap">
+        ${searchMenu({
+    label: 'Immich person', icon: 'face', value: this.qI, items: iItems, active: this.hiI,
+    open: this.openI,
+    onToggle: () => { this.openI = !this.openI; this.openG = false; },
+    onClose: () => { this.openI = false; },
+    onInput: (e) => { this.qI = e.target.value; this.hiI = -1; },
     onPick: (it) => this.pickImmich(it),
     onEnter: () => { if (this.hiI >= 0 && this.hiI < iItems.length) this.pickImmich(iItems[this.hiI]); },
-    onMove: move('hiI', iItems.length), empty: 'No named Immich person matches',
+    onMove: move('hiI', iItems.length),
+    empty: this.qI.trim() ? 'No named Immich person matches' : '',
   })}
-          ${searchField({
-    placeholder: 'Gramps person: name or ID', value: this.qG, items: gItems, active: this.hiG, icon: 'person',
-    onInput: (e) => { this.qG = e.target.value; this.selG = ''; this.hiG = -1; },
+        ${searchMenu({
+    label: 'Gramps person', icon: 'person', value: this.qG, items: gItems, active: this.hiG,
+    open: this.openG,
+    onToggle: () => { this.openG = !this.openG; this.openI = false; },
+    onClose: () => { this.openG = false; },
+    onInput: (e) => { this.qG = e.target.value; this.hiG = -1; },
     onPick: (it) => this.pickGramps(it),
     onEnter: () => { if (this.hiG >= 0 && this.hiG < gItems.length) this.pickGramps(gItems[this.hiG]); },
-    onMove: move('hiG', gItems.length), empty: 'No Gramps person matches',
+    onMove: move('hiG', gItems.length),
+    empty: this.qG.trim() ? 'No Gramps person matches' : '',
   })}
-          ${field('Label (optional)', this.label, (e) => (this.label = e.target.value),
-    { small: true })}
-        </div>
-        ${this.result ? html`<p>${statusLine(this.result.kind, this.result.body)}</p>` : nothing}
-        <nav class="right-align">
-          ${btn('Cancel', this.busy !== '', () => this.closeDialog(), 'border')}
-          ${btn('Link', this.busy !== '' || !this.selG || !this.selI, () => this.addLink())}
-        </nav>
-      </dialog>`;
+        ${field('Label (optional)', this.label, (e) => (this.label = e.target.value),
+    { width: 'small', onEnter: () => this.addLink() })}
+        ${btn(this.busy === 'link' ? 'Linking...' : 'Link',
+    this.busy !== '' || !this.selG || !this.selI, () => this.addLink())}
+        ${this.busy === 'link' ? spinner : nothing}
+      </nav>
+      ${this.result ? html`<p>${statusLine(this.result.kind, this.result.body)}</p>` : nothing}
+    </div>
+    <div class="medium-space"></div>`;
   }
 
   render() {
@@ -444,6 +429,7 @@ class FacesPage extends BifrostElement {
       ? ['Immich people with no Gramps link', people.length]
       : ['Linked people', groups.length];
     return html`
+      ${this.renderLinkForm()}
       ${this.renderBar(counts)}
       <div class="faces-group">
         <h6 class="small">${heading}</h6>
@@ -456,9 +442,7 @@ class FacesPage extends BifrostElement {
             <div class="faces-letter"><span class="mono">${b.letter}</span>
               <span class="rule"></span></div>
             <div class="faces-grid">${b.groups.map((g) => this.card(g))}</div>`)}
-      ${this.result && !this.dialogOpen
-    ? html`<p>${statusLine(this.result.kind, this.result.body)}</p>` : nothing}
-      ${this.dialogOpen ? this.renderDialog() : nothing}`;
+`;
   }
 }
 customElements.define('faces-page', FacesPage);

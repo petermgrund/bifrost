@@ -85,11 +85,11 @@ function searchKeys(opts) {
 
 function searchRows({ items, active = -1, onPick, empty = 'No matches' }) {
   const fallback = (e) => e.target.replaceWith(Object.assign(document.createElement('i'), { textContent: 'image' }));
-  if (!items.length) return html`<li class="secondary-text">${empty}</li>`;
+  if (!items.length) return empty ? html`<li class="secondary-text">${empty}</li>` : nothing;
   return items.map((it, i) => html`<li class=${i === active ? 'active' : ''}
       @mousedown=${(e) => { e.preventDefault(); onPick(it); e.currentTarget.closest('menu').querySelector('input')?.blur(); document.activeElement?.blur(); }}>
       ${it.thumb ? html`<img class="circle" src=${it.thumb} alt="" @error=${fallback}>`
-        : html`<i>${it.icon || 'search'}</i>`}
+        : it.icon ? html`<i>${it.icon}</i>` : nothing}
       <div class="max">
         <div>${it.label}</div>
         ${it.sub ? html`<div class="small-text secondary-text ${it.mono ? 'mono' : ''}">${it.sub}</div>` : nothing}

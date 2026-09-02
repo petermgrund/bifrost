@@ -55,6 +55,25 @@ ensure_env() {
   fi
 }
 
+overlay_dir() { # the gramps-boundary-overlay checkout named in dev/.env, if any
+  local d; d="$(env_get BOUNDARY_OVERLAY_DIR '')"
+  [ -n "$d" ] && [ -f "$d/overlay.js" ] && printf '%s' "$d"
+}
+
+overlay_sw() { # service worker patched to precache the overlay's config.js, not the stock one
+  local dir="$1" image out=data/gramps-overlay/sw.js stock ours
+  image="ghcr.io/gramps-project/grampsweb:$(env_get GRAMPSWEB_VERSION latest)"
+  mkdir -p data/gramps-overlay
+  docker image inspect "$image" >/dev/null 2>&1 || docker pull -q "$image"
+  stock="$(docker run --rm --entrypoint md5sum "$image" /app/static/config.js | cut -d' ' -f1)"
+  ours="$(python3 -c 'import hashlib,sys; print(hashlib.md5(open(sys.argv[1],"rb").read()).hexdigest())' "$dir/config.js")"
+  docker run --rm --entrypoint cat "$image" /app/static/sw.js \
+    | sed "s/{\"revision\":\"$stock\",\"url\":\"config.js\"}/{\"revision\":\"$ours\",\"url\":\"config.js\"}/" > "$out"
+  grep -q "\"revision\":\"$ours\",\"url\":\"config.js\"" "$out" \
+    || echo "warning: no config.js precache entry found in sw.js; boundaries may need a hard refresh"
+  echo "boundary overlay: $dir (sw.js regenerated)"
+}
+
 ensure_dirs() {
   mkdir -p data/gramps/media \
            data/paperless/media/documents/originals data/paperless/export data/paperless/consume \
@@ -126,10 +145,15 @@ status() {
   fi
 }
 
+if overlay="$(overlay_dir)"; then
+  export COMPOSE_FILE="docker-compose.yml:compose.boundary-overlay.yml"
+fi
+
 cmd="${1:-}"; shift || true
 case "$cmd" in
   up)
     ensure_env; ensure_dirs; ensure_config
+    [ -n "${overlay:-}" ] && overlay_sw "$overlay"
     docker compose up -d --build "$@"
     wait_healthy || true
     status

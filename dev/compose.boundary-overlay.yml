@@ -1,0 +1,6 @@
+services:
+  grampsweb:
+    volumes:
+      - ${BOUNDARY_OVERLAY_DIR}/config.js:/app/static/config.js:ro
+      - ${BOUNDARY_OVERLAY_DIR}/overlay.js:/app/static/overlay.js:ro
+      - ./data/gramps-overlay/sw.js:/app/static/sw.js:ro

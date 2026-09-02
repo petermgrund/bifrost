@@ -1,6 +1,6 @@
 import '/static/vendor/marked.min.js';
 import { unsafeHTML } from 'lit';
-import { BifrostElement, html, nothing, api, post, btn, chip, field, spinner, statusLine } from './core.js';
+import { BifrostElement, html, nothing, api, post, btn, chip, field, spinner, statusLine, searchField } from './core.js';
 
 const DRAFT_KEY = 'bifrost-style-draft';
 const WRAP_KEY = 'bifrost-style-wrap';
@@ -125,6 +125,8 @@ function serializeLink(text, url, title) {
 
 class StylePage extends BifrostElement {
   static properties = {
+    jumpQ: { state: true },
+    hiJ: { state: true },
     text: { state: true },
     pvText: { state: true },
     baseMtime: { state: true },
@@ -314,12 +316,17 @@ class StylePage extends BifrostElement {
     }
   }
 
-  jump(e) {
-    const raw = e.target.value;
-    e.target.value = '';
-    if (raw === '') return;
+  jumpTo(line) {
+    this.jumpQ = '';
+    this.hiJ = -1;
     const ta = this.querySelector('textarea');
-    if (ta) this.scrollToLine(ta, Number(raw));
+    if (ta) this.scrollToLine(ta, Number(line));
+  }
+
+  jumpItems() {
+    const q = (this.jumpQ || '').trim().toLowerCase();
+    return this.outline.filter((h) => !q || h.label.toLowerCase().includes(q)).slice(0, 12)
+      .map((h) => ({ id: h.line, label: h.label, icon: 'subdirectory_arrow_right' }));
   }
 
   openTable() {
@@ -510,14 +517,13 @@ class StylePage extends BifrostElement {
     }
     return html`
       <nav class="wrap">
-        <div class="field label suffix small no-margin small-width">
-          <select @change=${(e) => this.jump(e)}>
-            <option value="" selected></option>
-            ${this.outline.map((h) => html`<option value=${h.line}>${h.label}</option>`)}
-          </select>
-          <label>Jump to section</label>
-          <i>arrow_drop_down</i>
-        </div>
+        ${searchField({
+    placeholder: 'Jump to section', value: this.jumpQ || '', items: this.jumpItems(), width: 'small',
+    onInput: (e) => { this.jumpQ = e.target.value; }, onPick: (it) => this.jumpTo(it.id),
+    onEnter: () => { const items = this.jumpItems(); if (this.hiJ >= 0 && this.hiJ < items.length) this.jumpTo(items[this.hiJ].id); },
+    onMove: (d) => { const n = this.jumpItems().length; if (n) this.hiJ = ((this.hiJ ?? -1) + d + n) % n; }, active: this.hiJ ?? -1,
+    empty: 'No section matches',
+  })}
         ${btn('Edit table', false, () => this.openTable(), 'border small-round')}
         ${btn('Hyperlink', false, () => this.openLink(), 'border small-round')}
         ${chip('Wrap', this.wrap, () => this.toggleWrap())}

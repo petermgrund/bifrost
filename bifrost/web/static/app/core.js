@@ -72,6 +72,71 @@ export function field(label, value, onInput, opts = {}) {
     : box;
 }
 
+function searchKeys(opts) {
+  return (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); opts.onEnter?.(e); }
+    else if (e.key === 'Escape') e.target.blur();
+    else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      opts.onMove?.(e.key === 'ArrowDown' ? 1 : -1);
+    }
+  };
+}
+
+function searchRows({ items, active = -1, onPick, empty = 'No matches' }) {
+  const fallback = (e) => e.target.replaceWith(Object.assign(document.createElement('i'), { textContent: 'image' }));
+  if (!items.length) return html`<li class="secondary-text">${empty}</li>`;
+  return items.map((it, i) => html`<li class=${i === active ? 'active' : ''}
+      @mousedown=${(e) => { e.preventDefault(); onPick(it); e.currentTarget.closest('menu').querySelector('input')?.blur(); document.activeElement?.blur(); }}>
+      ${it.thumb ? html`<img class="circle" src=${it.thumb} alt="" @error=${fallback}>`
+        : html`<i>${it.icon || 'search'}</i>`}
+      <div class="max">
+        <div>${it.label}</div>
+        ${it.sub ? html`<div class="small-text secondary-text ${it.mono ? 'mono' : ''}">${it.sub}</div>` : nothing}
+      </div>
+    </li>`);
+}
+
+export function searchField(opts) {
+  const { placeholder, value, onInput, width = '', icon = 'search' } = opts;
+  return html`<div class="field prefix fill no-margin search-field ${WIDTH[width] || ''}">
+    <i class="front">${icon}</i>
+    <input type="text" placeholder=${placeholder} .value=${value ?? ''} autocomplete="off"
+      @input=${onInput} @keydown=${searchKeys(opts)}>
+    <menu class="search-results">${searchRows(opts)}</menu>
+  </div>`;
+}
+
+export function searchMenu(opts) {
+  const { label, icon, value, onInput, open = false, onToggle, onClose,
+    placeholder = 'Search', cls = 'border' } = opts;
+  const toggle = (e) => {
+    const opening = !open;
+    onToggle?.();
+    if (!opening) return;
+    const el = e.currentTarget.parentElement;
+    const focusInput = () => {
+      const input = el.querySelector('input');
+      if (input && document.activeElement !== input) input.focus();
+    };
+    requestAnimationFrame(focusInput);
+    for (const ms of [60, 160, 320]) setTimeout(focusInput, ms);
+  };
+  return html`<div class="search-menu">
+    <button class=${cls} @click=${toggle}><i>${icon}</i><span>${label}</span></button>
+    <menu class="search-results ${open ? 'active' : ''}">
+      <li class="transparent">
+        <div class="field prefix small no-margin">
+          <i class="front">search</i>
+          <input type="text" placeholder=${placeholder} .value=${value ?? ''} autocomplete="off"
+            @input=${onInput} @keydown=${searchKeys(opts)} @blur=${() => onClose?.()}>
+        </div>
+      </li>
+      ${searchRows(opts)}
+    </menu>
+  </div>`;
+}
+
 export class BifrostElement extends LitElement {
   createRenderRoot() {
     return this;
@@ -86,16 +151,19 @@ const ACTION_WORDS = {
   dates_updated: ['set', 'set', 'date'],
   descs_updated: ['update', 'updated', 'description'],
   links_updated: ['re-link', 're-linked', 'photo'],
+  linked: ['link', 'linked', 'place'],
+  located: ['locate', 'located', 'place'],
   tx_created: ['add', 'added', 'transcription'],
   tx_updated: ['rewrite', 'rewrote', 'transcription'],
   transcribed: ['transcribe', 'transcribed', 'doc'],
+  replaced: ['replace', 'replaced', 'transcript'],
   pages_scaled: ['scale', 'scaled', 'page'],
   uploaded: ['upload', 'uploaded', 'new version', 'new versions'],
   id_tags_written: ['write', 'wrote', 'ID tag', 'ID tags'],
   faces_linked: ['link', 'linked', 'face'],
   boxes_added: ['add', 'added', 'face box', 'face boxes'],
 };
-const QUIET = new Set(['skipped', 'tx_skipped', 'baselined', 'errors', 'unreadable']);
+const QUIET = new Set(['skipped', 'tx_skipped', 'baselined', 'errors', 'unreadable', 'unmatched']);
 
 export function summarize(counts, applied) {
   if (!counts) return '';

@@ -1,4 +1,4 @@
-import { BifrostElement, html, nothing, api, post, btn, field, spinner, statusLine } from './core.js';
+import { BifrostElement, html, nothing, api, post, btn, field, spinner, statusLine, searchField } from './core.js';
 
 class FacesPage extends BifrostElement {
   static properties = {
@@ -13,6 +13,10 @@ class FacesPage extends BifrostElement {
     dialogOpen: { state: true },
     selG: { state: true },
     selI: { state: true },
+    qG: { state: true },
+    qI: { state: true },
+    hiG: { state: true },
+    hiI: { state: true },
     label: { state: true },
     labelDraft: { state: true },
     busy: { state: true },
@@ -32,6 +36,10 @@ class FacesPage extends BifrostElement {
     this.dialogOpen = false;
     this.selG = '';
     this.selI = '';
+    this.qG = '';
+    this.qI = '';
+    this.hiG = -1;
+    this.hiI = -1;
     this.label = '';
     this.labelDraft = '';
     this.busy = '';
@@ -186,7 +194,11 @@ class FacesPage extends BifrostElement {
 
   openDialog(immichId = '') {
     this.selI = immichId;
+    this.qI = this.named.find((p) => p.id === immichId)?.name || '';
     this.selG = '';
+    this.qG = '';
+    this.hiI = -1;
+    this.hiG = -1;
     this.label = '';
     this.result = null;
     this.dialogOpen = true;
@@ -196,6 +208,8 @@ class FacesPage extends BifrostElement {
     this.dialogOpen = false;
     this.selI = '';
     this.selG = '';
+    this.qI = '';
+    this.qG = '';
     this.label = '';
     this.result = null;
   }
@@ -362,35 +376,48 @@ class FacesPage extends BifrostElement {
     return html`<div class="faces-empty"><i>search_off</i><span>${msg}</span></div>`;
   }
 
+  immichMatches() {
+    const q = this.qI.trim().toLowerCase();
+    return this.named.filter((p) => !q || p.name.toLowerCase().includes(q)).slice(0, 10)
+      .map((p) => ({ id: p.id, label: p.name, sub: p.account_label,
+        thumb: `/faces/api/person-thumbnail/${p.id}`, icon: 'face' }));
+  }
+
+  grampsMatches() {
+    const q = this.qG.trim().toLowerCase();
+    return this.gPeople
+      .filter((p) => !q || p.name.toLowerCase().includes(q) || p.gramps_id.toLowerCase().includes(q))
+      .slice(0, 10)
+      .map((p) => ({ id: p.handle, label: p.name, sub: p.gramps_id, mono: true, icon: 'person' }));
+  }
+
+  pickImmich(it) { this.selI = it.id; this.qI = it.label; this.hiI = -1; }
+  pickGramps(it) { this.selG = it.id; this.qG = it.label; this.hiG = -1; }
+
   renderDialog() {
-    const named = this.named;
+    const iItems = this.immichMatches();
+    const gItems = this.grampsMatches();
+    const move = (key, n) => (d) => { if (n) this[key] = (this[key] + d + n) % n; };
     return html`
       <dialog class="faces-dialog" @mousedown=${(e) => this.pressScrim(e)}
         @click=${(e) => this.scrimClick(e)}
         @cancel=${() => this.resetDialog()} @close=${() => this.resetDialog()}>
         <h5 class="small">Link a face</h5>
         <div class="faces-fields">
-          <div class="field label suffix small no-margin">
-            <select .value=${this.selI} @change=${(e) => (this.selI = e.target.value)}>
-              <option value="" ?selected=${this.selI === ''}></option>
-              ${[...new Set(named.map((p) => p.account_label))].map((acct) => html`
-                <optgroup label=${acct || 'account'}>
-                  ${named.filter((p) => p.account_label === acct).map((p) => html`
-                    <option value=${p.id} ?selected=${this.selI === p.id}>${p.name}</option>`)}
-                </optgroup>`)}
-            </select>
-            <label>Immich person</label>
-            <i>arrow_drop_down</i>
-          </div>
-          <div class="field label suffix small no-margin">
-            <select .value=${this.selG} @change=${(e) => (this.selG = e.target.value)}>
-              <option value="" ?selected=${this.selG === ''}></option>
-              ${this.gPeople.map((p) => html`<option value=${p.handle}
-                ?selected=${this.selG === p.handle}>${p.name} (${p.gramps_id})</option>`)}
-            </select>
-            <label>Gramps person</label>
-            <i>arrow_drop_down</i>
-          </div>
+          ${searchField({
+    placeholder: 'Immich person', value: this.qI, items: iItems, active: this.hiI, icon: 'face',
+    onInput: (e) => { this.qI = e.target.value; this.selI = ''; this.hiI = -1; },
+    onPick: (it) => this.pickImmich(it),
+    onEnter: () => { if (this.hiI >= 0 && this.hiI < iItems.length) this.pickImmich(iItems[this.hiI]); },
+    onMove: move('hiI', iItems.length), empty: 'No named Immich person matches',
+  })}
+          ${searchField({
+    placeholder: 'Gramps person: name or ID', value: this.qG, items: gItems, active: this.hiG, icon: 'person',
+    onInput: (e) => { this.qG = e.target.value; this.selG = ''; this.hiG = -1; },
+    onPick: (it) => this.pickGramps(it),
+    onEnter: () => { if (this.hiG >= 0 && this.hiG < gItems.length) this.pickGramps(gItems[this.hiG]); },
+    onMove: move('hiG', gItems.length), empty: 'No Gramps person matches',
+  })}
           ${field('Label (optional)', this.label, (e) => (this.label = e.target.value),
     { small: true })}
         </div>

@@ -240,7 +240,7 @@ th { font-weight: normal; }
 }
 .faces-empty > i { font-size: 1.5rem; }
 .faces-note { font-size: 0.75rem; color: var(--secondary); }
-dialog.faces-dialog { inline-size: min(30rem, 92vw); }
+dialog.faces-dialog { inline-size: min(30rem, 92vw); overflow: visible; }
 .faces-dialog .faces-fields { display: flex; flex-direction: column; gap: 1.25rem; }
 
 summary.none { cursor: pointer; }
@@ -333,4 +333,14 @@ input[type="color"].seed-input {
 .seed-input::-webkit-color-swatch { border: none; border-radius: 0.35rem; }
 .seed-input::-moz-color-swatch { border: none; border-radius: 0.35rem; }
 config-page table td { block-size: auto; padding-block: 0.25rem; }
-.field.recent-width { inline-size: 18rem; }
+menu.search-results { border-radius: 0; }
+menu.search-results > li { white-space: normal; padding-block: 0.625rem; flex: none; }
+menu.search-results > li > .max > div:first-child { line-height: 1.25rem; }
+menu.search-results > li > .max > div + div { margin-block-start: 0.125rem; }
+menu.search-results > li > img.circle { inline-size: 2.5rem; block-size: 2.5rem; object-fit: cover; flex: none; }
+.search-menu { position: relative; display: inline-flex; }
+.search-menu > menu { inline-size: 26rem; }
+.search-menu > menu > li.transparent { padding: 0.25rem 0.5rem 0.5rem; }
+.chosen-media { display: flex; align-items: center; gap: 1rem; min-block-size: 3.5rem; margin-block: 0.875rem 1rem; }
+.chosen-media > img.circle { inline-size: 3.5rem; block-size: 3.5rem; object-fit: cover; flex: none; }
+.chosen-media > i { font-size: 2rem; }

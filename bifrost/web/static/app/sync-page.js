@@ -37,9 +37,13 @@ export class SyncPage extends BifrostElement {
   get lastColLabel() { return 'Media object'; }
   get scanHeading() { return 'Scan Paperless for new or changed objects'; }
   get primaryEntity() { return 'doc'; }
+  get disabledText() { return 'Sync is disabled'; }
+  get groups() { return [['create', 'Create'], ['update', 'Update']]; }
+  get preselect() { return true; }
   lastCol(r) { return r.gramps_id || ' '; }
+  previewBody() { return {}; }
   applyBody() { return { selected: [...this.selected] }; }
-  renderApplyExtras() { return nothing; }
+  renderScanExtras() { return nothing; }    // e.g. a scope toggle next to Scan
 
   connectedCallback() {
     super.connectedCallback();
@@ -81,8 +85,9 @@ export class SyncPage extends BifrostElement {
     this.running = true; this.error = ''; this.applied = null;
     this.startProgress(`${this.jobName}.preview`);
     try {
-      this.result = await post(`${this.apiBase}/preview`, {});
-      this.selected = new Set(this.items.filter((e) => this.isActionable(e)).map((e) => this.keyOf(e)));
+      this.result = await post(`${this.apiBase}/preview`, this.previewBody());
+      this.selected = new Set(this.preselect
+        ? this.items.filter((e) => this.isActionable(e)).map((e) => this.keyOf(e)) : []);
       this.page = 0;
       this.phase = 'results';
     } catch (e) {
@@ -98,8 +103,9 @@ export class SyncPage extends BifrostElement {
     this.startProgress(this.jobName);
     try {
       this.applied = await post(`${this.apiBase}/apply`, this.applyBody());
-      const summary = this.applied.events?.find((e) => e.kind === 'summary')?.data || {};
-      if (summary.errors) this.phase = 'applied';
+      const events = this.applied.events || [];
+      const summary = events.find((e) => e.kind === 'summary')?.data || {};
+      if (summary.errors || events.some((e) => e.kind === 'error')) this.phase = 'applied';
       else this.runAnother();
     } catch (e) {
       this.error = e.message;
@@ -119,12 +125,16 @@ export class SyncPage extends BifrostElement {
   groupOf(action) {
     if (action === 'would_create' || action === 'created') return 'create';
     if (action === 'would_update' || action === 'updated') return 'update';
+    if (action === 'would_replace' || action === 'replaced') return 'replace';
     if (action === 'failed') return 'error';
     return 'skip';
   }
 
   keyOf(e) { return `${e.entity}:${e.source_id}`; }
-  isActionable(e) { const g = this.groupOf(e.action); return g === 'create' || g === 'update'; }
+  isActionable(e) {
+    const g = this.groupOf(e.action);
+    return g === 'create' || g === 'update' || g === 'replace';
+  }
 
   get rows() {
     const out = [];
@@ -143,7 +153,7 @@ export class SyncPage extends BifrostElement {
         byDoc.set(e.source_id, r);
         out.push(r);
       }
-      if (e.entity === this.primaryEntity && this.groupOf(e.action) === 'create') r.group = 'create';
+      if (e.entity === this.primaryEntity && this.groupOf(e.action) !== 'update') r.group = this.groupOf(e.action);
       r.keys.push(this.keyOf(e));
       Object.assign(r.cols, e.data?.cols);
       r.data = { ...r.data, ...(e.data || {}) };
@@ -182,7 +192,7 @@ export class SyncPage extends BifrostElement {
     if (this.config && this.config.enabled === false) {
       return html`
         <h6 class="small">${this.scanHeading}</h6>
-        <p class="secondary-text">Sync is disabled</p>`;
+        <p class="secondary-text">${this.disabledText}</p>`;
     }
     const p = this.progress;
     return html`
@@ -190,13 +200,13 @@ export class SyncPage extends BifrostElement {
       <nav>
         ${this.running
           ? progressLine(p)
-          : btn('Scan', false, () => this.runPreview())}
+          : html`${btn('Scan', false, () => this.runPreview())}${this.renderScanExtras()}`}
       </nav>`;
   }
 
   renderResults() {
     const rows = this.rows;
-    const c = { create: 0, update: 0, skip: 0, error: 0 };
+    const c = { create: 0, update: 0, replace: 0, skip: 0, error: 0 };
     for (const r of rows) c[r.group]++;
     const shown = this.filter === 'all' ? rows : rows.filter((r) => r.group === this.filter);
     const pages = Math.max(1, Math.ceil(shown.length / PAGE_SIZE));
@@ -213,8 +223,7 @@ export class SyncPage extends BifrostElement {
       ${this.scanErrors.map((e) => html`<p>${statusLine('error', e.detail)}</p>`)}
       <nav class="wrap">
         ${chip(`All ${rows.length}`, this.filter === 'all', () => this.setFilter('all'))}
-        ${chip(`Create ${c.create}`, this.filter === 'create', () => this.setFilter('create'))}
-        ${chip(`Update ${c.update}`, this.filter === 'update', () => this.setFilter('update'))}
+        ${this.groups.map(([g, label]) => chip(`${label} ${c[g]}`, this.filter === g, () => this.setFilter(g)))}
         ${c.error ? chip(`Failed ${c.error}`, this.filter === 'error', () => this.setFilter('error')) : nothing}
       </nav>
 
@@ -244,7 +253,6 @@ export class SyncPage extends BifrostElement {
 
       <div class="large-space"></div>
       <nav class="wrap">
-        ${this.renderApplyExtras()}
         ${btn(this.running ? 'Applying...' : `Apply ${nSel} change${nSel === 1 ? '' : 's'}`,
           this.running || !nSel, () => this.apply())}
         ${btn('Cancel', this.running, () => this.cancel(), 'border')}
@@ -264,6 +272,7 @@ export class SyncPage extends BifrostElement {
 
   row(r) {
     const CHIP = { create: ['green', 'Create'], update: ['primary-container', 'Update'],
+      replace: ['tertiary-container', 'Replace'],   // same weight as Update, a word that asks for a second look
       skip: ['', 'Skip'], error: ['error', 'Failed'] }[r.group];
     const tip = Object.entries(r.cols).map(([k, v]) => `${k}: ${v}`);
     if (r.detail) tip.push(r.detail);
@@ -281,11 +290,16 @@ export class SyncPage extends BifrostElement {
   }
 
   renderApplied() {
-    const summary = summarize(this.applied?.events?.find((e) => e.kind === 'summary')?.data, true);
-    const failed = (this.applied?.events || []).filter((e) => e.action === 'failed');
+    const events = this.applied?.events || [];
+    const counts = events.find((e) => e.kind === 'summary')?.data;
+    const summary = summarize(counts, true);
+    const errors = events.filter((e) => e.kind === 'error');
+    const failed = events.filter((e) => e.action === 'failed');
     return html`
       <h6 class="small">${this.scanHeading}</h6>
-      <p>${statusLine('error', summary || 'Finished with errors')}</p>
+      ${errors.map((e) => html`<p>${statusLine('error', e.detail)}</p>`)}
+      ${errors.length && !counts?.errors ? nothing
+        : html`<p>${statusLine('error', summary || 'Finished with errors')}</p>`}
       ${failed.length ? html`<div class="scroll capped capped-width">
         <table><tbody>${failed.map((e) => html`<tr>
           <td>${e.title || e.source_id || ''}</td>

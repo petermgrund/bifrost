@@ -242,8 +242,7 @@ async def apply_links(
     def progress(done: int) -> SyncEvent:
         return SyncEvent(kind="progress", detail="Checking faces",
                          data={"done": done, "total": len(rows),
-                               "percent": round(100 * done / len(rows)),
-                               "band_index": 0, "band_count": 1})
+                               "percent": round(100 * done / len(rows))})
 
     yield progress(0)
     media_by_gid = {

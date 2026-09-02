@@ -272,28 +272,26 @@ async def sync(
         yield SyncEvent(kind="started",
                         detail=f"{len(documents)} tagged document(s) in Paperless")
 
-    if versions_only:
-        bands = ["versions"]
-    elif transcriptions_only:
-        bands = ["tx"]
-    else:
-        bands = ["versions", "details"]
+    tx_docs: list[dict] | None = None
+    if cfg.transcription_tag_id and not versions_only:
+        tx_docs = await paperless.list_documents_by_tag(cfg.transcription_tag_id)
+        if single_doc_id is not None:
+            tx_docs = [d for d in tx_docs if d["id"] == single_doc_id]
+    passes = 0 if transcriptions_only else (1 if versions_only else 3)
+    total = passes * len(documents) + (len(tx_docs) if tx_docs is not None else 0)
+    done = 0
+    label = ""
 
-    def _progress(band: str, label: str = "", done: int = 0, total: int = 0) -> SyncEvent | None:
-        if band not in bands:
-            return None
-        index = bands.index(band)
-        frac = (index + (done / total if total else 0)) / len(bands)
-        return SyncEvent(kind="progress", detail=label,
+    def _progress(step: str) -> SyncEvent:
+        nonlocal label
+        label = step
+        return SyncEvent(kind="progress", detail=step,
                          data={"done": done, "total": total,
-                               "percent": round(100 * frac),
-                               "band_index": index, "band_count": len(bands)})
+                               "percent": round(100 * done / total) if total else 100})
 
-    n_docs = len(documents)
-    for i, doc in enumerate(documents if not versions_only else []):
-        _p = _progress("media", "Checking new documents", i, n_docs)
-        if _p is not None:
-            yield _p
+    for doc in (documents if not versions_only else []):
+        yield _progress("Checking new documents")
+        done += 1
         doc_id = doc["id"]
         title = doc.get("title", f"Untitled (Paperless #{doc_id})")
         if _doc_gramps_id(doc, cfg.gramps_id_field_id):
@@ -385,10 +383,9 @@ async def sync(
                         data={"path": gramps_path, "cols": _prospective_cols(doc)})
 
     img_tag_id = tag_map.get("img")
-    for i, doc in enumerate(documents):
-        _p = _progress("versions", "Checking versions", i, n_docs)
-        if _p is not None:
-            yield _p
+    for doc in documents:
+        yield _progress("Checking versions")
+        done += 1
         doc_id = doc["id"]
         title = doc.get("title", f"Untitled (Paperless #{doc_id})")
         gramps_id = _doc_gramps_id(doc, cfg.gramps_id_field_id)
@@ -469,10 +466,9 @@ async def sync(
         except Exception:  # noqa BLE001
             skip_tag_handle = None
 
-    for i, doc in enumerate(documents if not versions_only else []):
-        _p = _progress("details", "Checking titles and dates", i, n_docs)
-        if _p is not None:
-            yield _p
+    for doc in (documents if not versions_only else []):
+        yield _progress("Checking titles and dates")
+        done += 1
         doc_id = doc["id"]
         title = doc.get("title", f"Untitled (Paperless #{doc_id})")
         gramps_id = _doc_gramps_id(doc, cfg.gramps_id_field_id)
@@ -531,10 +527,8 @@ async def sync(
                             source_id=str(doc_id), gramps_id=gramps_id, title=title,
                             data={"cols": mcols})
 
-    if cfg.transcription_tag_id and not versions_only:
-        tx_docs = await paperless.list_documents_by_tag(cfg.transcription_tag_id)
+    if tx_docs is not None:
         if single_doc_id is not None:
-            tx_docs = [d for d in tx_docs if d["id"] == single_doc_id]
             detail = (f"document #{single_doc_id} (transcription-tagged)"
                       if tx_docs
                       else f"document #{single_doc_id} is not transcription-tagged")
@@ -543,10 +537,9 @@ async def sync(
             yield SyncEvent(kind="started",
                             detail=f"{len(tx_docs)} document(s) with transcription tag")
         note_ids: set[str] | None = None
-        for i, doc in enumerate(tx_docs):
-            _p = _progress("tx", "Checking transcriptions", i, len(tx_docs))
-            if _p is not None:
-                yield _p
+        for doc in tx_docs:
+            yield _progress("Checking transcriptions")
+            done += 1
             doc_id = doc["id"]
             if selected is not None and not ({f"note:{doc_id}", f"doc:{doc_id}"} & selected):
                 continue
@@ -666,4 +659,6 @@ async def sync(
                 yield SyncEvent(kind="item", entity="note", action="failed",
                                 source_id=str(doc_id), title=title, detail=str(exc))
 
+    if total:
+        yield _progress(label)
     yield SyncEvent(kind="summary", data=counts)

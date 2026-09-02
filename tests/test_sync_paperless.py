@@ -172,15 +172,17 @@ class TestProgressBands:
         conn.close()
         return [e for e in events if e.kind == "progress"]
 
-    def test_progress_names_its_band_and_the_band_count(self, tmp_path):
+    def test_progress_is_one_running_count_across_the_passes(self, tmp_path):
         progress = self._progress(tmp_path)
         assert progress, "expected progress events"
-        assert progress[0].data["band_index"] == 0
-        assert progress[0].data["band_count"] == 2
-        assert {e.data["band_index"] for e in progress} == {0, 1}
-        assert {e.detail for e in progress} == {
-            "Checking versions", "Checking titles and dates"}
+        assert len({e.data["total"] for e in progress}) == 1
+        dones = [e.data["done"] for e in progress]
+        assert dones == sorted(dones) and dones[0] == 0
+        assert dones[-1] == progress[-1].data["total"]
+        assert {e.detail for e in progress} >= {"Checking new documents", "Checking versions",
+                                                "Checking titles and dates"}
 
-    def test_versions_only_run_has_a_single_band(self, tmp_path):
+    def test_versions_only_run_counts_only_the_version_pass(self, tmp_path):
         progress = self._progress(tmp_path, versions_only=True)
-        assert all(e.data["band_count"] == 1 for e in progress)
+        assert progress and {e.detail for e in progress} == {"Checking versions"}
+        assert progress[-1].data["done"] == progress[-1].data["total"]

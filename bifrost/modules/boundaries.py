@@ -272,8 +272,7 @@ async def generate_one(
 def _progress(label: str, done: int, total: int) -> SyncEvent:
     return SyncEvent(kind="progress", detail=label,
                      data={"done": done, "total": total,
-                           "percent": round(100 * done / total) if total else 100,
-                           "band_index": 0, "band_count": 1})
+                           "percent": round(100 * done / total) if total else 100})
 
 
 def _row(row: dict) -> dict:

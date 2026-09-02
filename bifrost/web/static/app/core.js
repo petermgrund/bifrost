@@ -196,14 +196,9 @@ export function statusLine(kind, msg) {
 
 export function progressLine(p) {
   if (!p || !p.total) return spinner;
-  const count = p.band_count || 1;
-  const at = p.band_index || 0;
   const pct = Math.round((100 * (p.done || 0)) / p.total);
   return html`<div class="progress">
-    <div class="bands">
-      ${Array.from({ length: count }, (_, i) => html`<div class="band">
-        <div style="width:${i < at ? 100 : i > at ? 0 : pct}%"></div></div>`)}
-    </div>
+    <div class="bands"><div class="band"><div style="width:${pct}%"></div></div></div>
     <div class="band-line">
       <span class="max secondary-text">${p.detail || ''}</span>
       <span class="mono small-text">${p.done}/${p.total}</span>

@@ -237,8 +237,7 @@ async def scan_mixed_widths(paperless: PaperlessClient, tag_name: str) -> dict:
 def _progress(label: str, done: int, total: int) -> SyncEvent:
     return SyncEvent(kind="progress", detail=label,
                      data={"done": done, "total": total,
-                           "percent": round(100 * done / total) if total else 100,
-                           "band_index": 0, "band_count": 1})
+                           "percent": round(100 * done / total) if total else 100})
 
 
 async def scan(paperless: PaperlessClient, tag_name: str) -> AsyncIterator[SyncEvent]:

@@ -115,7 +115,8 @@ class Tree:
         return obj["handle"]
 
     def place(self, name: str, ptype: str, parent: str | None = None,
-              coords: tuple[float, float] | None = None, title: str | None = None) -> str:
+              coords: tuple[float, float] | None = None, title: str | None = None,
+              osm_relation: int | None = None) -> str:
         h = handle()
         obj = {"_class": "Place", "handle": h, "gramps_id": self.gid("P"),
                "name": {"_class": "PlaceName", "value": name}, "place_type": ptype,
@@ -124,6 +125,10 @@ class Tree:
                "lat": f"{coords[0]:.6f}" if coords else "",
                "long": f"{coords[1]:.6f}" if coords else "",
                "tag_list": [self.place_tag] if coords else []}
+        if osm_relation:
+            obj["urls"] = [{"_class": "Url", "type": "OSM URL", "desc": "",
+                            "path": f"https://www.openstreetmap.org/relation/{osm_relation}",
+                            "private": False}]
         self.places[name] = h
         return self.add(obj)
 
@@ -202,7 +207,8 @@ def build_tree(place_tag: str) -> Tree:
     center_city = t.place("Center City", "Town", chisago, P["Center City"], "Center City, Chisago County, Minnesota")
     farm = t.place("Lindqvist farm", "Farm", chisago, P["Lindqvist farm"], "Lindqvist farm, Chisago County, Minnesota")
     hennepin = t.place("Hennepin County", "County", minnesota, title="Hennepin County, Minnesota")
-    minneapolis = t.place("Minneapolis", "City", hennepin, P["Minneapolis"], "Minneapolis, Hennepin County, Minnesota")
+    minneapolis = t.place("Minneapolis", "City", hennepin, P["Minneapolis"],
+                          "Minneapolis, Hennepin County, Minnesota", osm_relation=136712)
     t.place("Foshay Tower", "Building", minneapolis, P["Foshay Tower"], "Foshay Tower, Minneapolis, Minnesota")
     new_york = t.place("New York", "State", usa, title="New York, United States")
     ellis = t.place("Ellis Island", "Locality", new_york, P["Ellis Island"], "Ellis Island, New York")
@@ -589,9 +595,7 @@ class Immich:
         return {t["value"].lower(): t["id"] for t in self._check(client.get("/tags"), "list tags").json()}
 
     def find_asset(self, client: httpx.Client, filename: str) -> dict | None:
-        """The sample asset by file name; a trashed one is restored, since a
-        re-run's job is to put the fixtures back (uploading it again would only
-        hand back the trashed duplicate's id)"""
+        """Sample asset by file name; restores a trashed one"""
         r = self._check(client.post("/search/metadata",
                                     json={"originalFileName": filename, "size": 50, "page": 1,
                                           "withDeleted": True}), "search")
@@ -645,9 +649,7 @@ class Immich:
 
     def ensure_face(self, client: httpx.Client, asset_id: str, person_id: str,
                     box: tuple[float, float, float, float]) -> None:
-        """A manually tagged face (Immich's own feature) so face detection is
-        not needed for the Faces page and the backfill to have work to do.
-        `box` is (x, y, w, h) as fractions of the image."""
+        """Manually tagged face; box is (x, y, w, h) as fractions"""
         for f in self._check(client.get("/faces", params={"id": asset_id}), "list faces").json():
             if (f.get("person") or {}).get("id") == person_id:
                 return
@@ -727,9 +729,6 @@ def seed_immich(photos: list[dict], photos_dir: Path) -> dict:
     else:
         log(f"immich: no real photos in {photos_dir}; run 'bifrost-dev.sh fetch-photos' for faces")
 
-    # people with manually tagged faces (owner and partner each own one
-    # person), then Bifrost's own link register so the Faces section and the
-    # face backfill have something to show without real photographs
     people = {}
     for account, name, spots in (
             ("owner", "Anders Lindqvist", [("wedding-1894.jpg", (0.28, 0.24, 0.20, 0.17)),
@@ -757,9 +756,7 @@ def seed_immich(photos: list[dict], photos_dir: Path) -> dict:
 
 
 def link_people(people: dict[str, tuple[str, str]], user_ids: dict[str, str]) -> None:
-    """Pair the Immich people with their Gramps persons in Bifrost's register.
-    Written straight into Bifrost's database with its own module: on the first
-    seed Bifrost is still on the placeholder config and cannot talk to Immich."""
+    """Link Immich people to Gramps persons"""
     from bifrost.core import db
     from bifrost.modules import faces
     gramps_ids = {"Anders Lindqvist": "I9001", "Maria Lindqvist": "I9002", "Elsa Peterson": "I9004"}
@@ -771,7 +768,6 @@ def link_people(people: dict[str, tuple[str, str]], user_ids: dict[str, str]) ->
             if not found:
                 log(f"bifrost: no Gramps person {gramps_ids[name]} for {name}; link skipped")
                 continue
-            # no label: Bifrost then shows the Immich person's name, as in real use
             faces.set_link(conn, found[0]["handle"], person_id, "",
                            owner_user_id=user_ids[account])
     finally:

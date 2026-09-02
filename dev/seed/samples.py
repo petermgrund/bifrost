@@ -185,8 +185,7 @@ DIARY = [
 
 
 def diary_pages() -> list[Image.Image]:
-    """Three pages of three widths: a second mixed-width fixture for the Reprocess
-    scan, in case the letter has already been rebuilt"""
+    """Three pages, three widths"""
     widths = [1240, 1000, 1100]
     pages = []
     for i, (w, lines) in enumerate(zip(widths, DIARY)):

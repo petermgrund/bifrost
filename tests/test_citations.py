@@ -205,7 +205,7 @@ def test_recent_minted_is_newest_first_and_capped(tmp_path):
             "VALUES (?, ?, '1', 't', ?)", (gid, system, ts))
     conn.commit()
     rows = recent_minted(conn, 1)
-    assert [r["gramps_id"] for r in rows] == ["A1"]      # newest Paperless doc, Immich excluded
+    assert [r["gramps_id"] for r in rows] == ["A1"]
     assert [r["gramps_id"] for r in recent_minted(conn)] == ["A1", "C3"]
     assert [r["gramps_id"] for r in recent_minted(conn, source_system="immich")] == ["B2"]
     conn.close()

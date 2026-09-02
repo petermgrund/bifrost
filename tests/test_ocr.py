@@ -23,7 +23,7 @@ class FakePaperless:
         return 5 if name == "Gemini OCR" else None
 
     async def list_documents_by_tag(self, tag_id):
-        return self.docs
+        return [d for d in self.docs if tag_id in d["tags"]]
 
     async def download_original(self, doc_id):
         return b"not really a pdf", "application/pdf"
@@ -36,6 +36,9 @@ class FakePaperless:
 
     async def patch_tags(self, doc_id, tag_ids):
         self.tags_set[doc_id] = tag_ids
+        for d in self.docs:
+            if d["id"] == doc_id:
+                d["tags"] = list(tag_ids)
 
 
 class FakeGemini:
@@ -89,18 +92,20 @@ def test_scan_lists_every_tagged_doc_as_create_or_replace(conn):
     assert rows[0].gramps_id == "ABC123" and rows[1].gramps_id is None
 
 
-def test_selected_limits_an_apply_and_transcribed_docs_stay_listed(conn):
+def test_selected_limits_an_apply_and_transcribed_docs_lose_the_ocr_tag(conn):
     pl, gem = FakePaperless(_docs()), FakeGemini()
     events = _events(ocr.run(pl, gem, conn, CFG, GEM, apply=True, selected={"doc:2", "doc:1"}))
     assert sorted(pl.patched) == [1, 2] and gem.calls == ["application/pdf"] * 2
-    assert [(e.source_id, e.action) for e in _rows(events)] == [("1", "replaced"), ("2", "created")]
-    assert _rows(events)[0].data["cols"]["new text"] == "16 chars"
-    assert _rows(events)[1].data["cols"]["transcription tag"] == "already set"
+    rows = _rows(events)
+    assert [(e.source_id, e.action) for e in rows] == [("1", "replaced"), ("2", "created")]
+    assert rows[0].data["cols"]["new text"] == "16 chars"
+    assert rows[0].data["cols"]["transcription tag"] == "added"
+    assert rows[1].data["cols"]["transcription tag"] == "already set"
+    assert all(e.data["cols"]["OCR tag"] == "removed" for e in rows)
+    assert pl.tags_set == {1: [9], 2: [9]}
     assert events[-1].data == {"transcribed": 1, "replaced": 1, "errors": 0}
     rows = _rows(_events(ocr.run(pl, gem, conn, CFG, GEM, apply=False)))
-    assert [e.source_id for e in rows] == ["1", "2", "3"]
-    assert rows[1].action == "would_replace"
-    assert rows[1].data["cols"]["transcribed"].endswith("(gemini-test)")
+    assert [e.source_id for e in rows] == ["3"]
 
 
 def test_run_with_sync_skips_the_note_sync_when_nothing_was_transcribed(conn):

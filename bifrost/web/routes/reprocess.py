@@ -17,12 +17,6 @@ def _scan_tag(request: Request) -> str:
     return request.app.state.cfg.sync_paperless.sync_tags[0]
 
 
-def _check_mode(mode: str) -> None:
-    if mode not in (reprocess.MODE_WIDEST, reprocess.MODE_NARROWEST):
-        raise HTTPException(400, f"mode must be '{reprocess.MODE_WIDEST}'"
-                                 f" or '{reprocess.MODE_NARROWEST}'")
-
-
 @router.get("")
 async def reprocess_page(request: Request):
     return RedirectResponse(url="/#reprocess")
@@ -35,7 +29,6 @@ async def config(request: Request) -> dict:
 
 class ApplyBody(BaseModel):
     selected: list[str] | None = None
-    mode: str = reprocess.MODE_WIDEST
 
 
 def _doc_ids(selected: list[str] | None) -> list[int]:
@@ -58,11 +51,10 @@ async def preview(request: Request, body: ApplyBody = ApplyBody()):
 @router.post("/api/apply")
 async def apply(request: Request, body: ApplyBody):
     st = request.app.state
-    _check_mode(body.mode)
     doc_ids = _doc_ids(body.selected)
     if not doc_ids:
         raise HTTPException(400, "no documents selected")
-    gen = reprocess.run_batch(st.paperless, doc_ids, body.mode)
+    gen = reprocess.run_batch(st.paperless, doc_ids, reprocess.MODE_WIDEST)
     run_id, events = await record_run(st.conn, "reprocess.widths", gen)
     st.caches.clear()
     return {"run_id": run_id, "apply": True, "events": [e.__dict__ for e in events]}

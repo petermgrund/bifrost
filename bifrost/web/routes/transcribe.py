@@ -34,11 +34,11 @@ async def run_for_media(request: Request, body: RunBody):
             404, f"no Gramps media '{media_id}', or it has no Paperless ID attribute")
 
     gen = ocr.run(st.paperless, st.gemini, st.conn, st.cfg.sync_paperless,
-                  st.cfg.gemini, apply=True, force=True, single_doc_id=doc_id)
+                  st.cfg.gemini, apply=True, single_doc_id=doc_id)
     _, ocr_events = await record_run(st.conn, "ocr.gemini", gen)
 
     summary = next((e.data for e in ocr_events if e.kind == "summary"), None) or {}
-    if not summary.get("transcribed"):
+    if not (summary.get("transcribed") or summary.get("replaced")):
         err = next((e for e in ocr_events if e.kind == "error"), None)
         if err is not None:
             raise HTTPException(409, err.detail)
@@ -92,9 +92,34 @@ async def lookup(request: Request, media_id: str):
     }
 
 
+class ApplyBody(BaseModel):
+    selected: list[str] | None = None
+
+
+@router.post("/api/preview")
+async def preview(request: Request, body: ApplyBody = ApplyBody()):
+    st = request.app.state
+    gen = ocr.run(st.paperless, st.gemini, st.conn, st.cfg.sync_paperless,
+                  st.cfg.gemini, apply=False)
+    run_id, events = await record_run(st.conn, "transcribe.ocr.preview", gen)
+    return {"run_id": run_id, "apply": False, "events": [e.__dict__ for e in events]}
+
+
+@router.post("/api/apply")
+async def apply(request: Request, body: ApplyBody = ApplyBody()):
+    st = request.app.state
+    gen = ocr.run_with_sync(
+        st.paperless, st.gramps, st.gemini, st.conn, st.cfg.sync_paperless, st.cfg.gemini,
+        selected=set(body.selected) if body.selected is not None else None)
+    run_id, events = await record_run(st.conn, "transcribe.ocr", gen)
+    st.caches.clear()
+    return {"run_id": run_id, "apply": True, "events": [e.__dict__ for e in events]}
+
+
 @router.get("/api/config")
 async def transcribe_config(request: Request):
-    cfg = request.app.state.cfg
+    st = request.app.state
+    cfg = st.cfg
     # house_style_path isn't on the config dataclass
     house_style = ""
     try:
@@ -103,6 +128,9 @@ async def transcribe_config(request: Request):
     except Exception:
         pass
     return {
+        "enabled": bool(cfg.sync_paperless.ocr_tag),
+        "ocr_tag": cfg.sync_paperless.ocr_tag,
+        "gemini": st.gemini.configured,
         "model": cfg.gemini.model,
         "house_style_path": house_style,
         "gramps_public_url": cfg.sync_paperless.gramps_public_url,

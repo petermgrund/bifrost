@@ -24,8 +24,10 @@ const SECTIONS = [
     body: html`<citations-page></citations-page>` },
   { id: 'faces', title: 'Faces', desc: 'Link Immich face recognition to Gramps people',
     body: html`<faces-page></faces-page>` },
-  { id: 'places', title: 'Places', desc: 'Generate a boundary polygon on a Gramps map',
-    body: html`<places-page></places-page>` },
+  { id: 'places', title: 'Places', desc: 'Link Gramps places to OpenStreetMap and draw their boundaries on the map',
+    body: html`<places-links-page></places-links-page>
+      <div class="large-space"></div>
+      <places-page></places-page>` },
 ];
 
 class BifrostApp extends BifrostElement {

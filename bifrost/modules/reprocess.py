@@ -192,41 +192,41 @@ async def run(
     yield SyncEvent(kind="summary", data=counts)
 
 
+def _candidates(docs: list[dict]) -> list[dict]:
+    return [d for d in docs
+            if d.get("mime_type") == "application/pdf" and (d.get("page_count") or 2) > 1]
+
+
+async def _measure(paperless: PaperlessClient, doc: dict, sem: asyncio.Semaphore) -> dict | None:
+    title = doc.get("title", f"Untitled (Paperless #{doc['id']})")
+    async with sem:
+        try:
+            data, mime = await paperless.download_original(doc["id"])
+        except Exception as exc:  # noqa BLE001
+            return {"doc_id": doc["id"], "title": title,
+                    "error": f"download failed: {exc}"}
+    if mime != "application/pdf":
+        return None
+    try:
+        plan = plan_pages(data, MODE_WIDEST)
+    except ValueError as exc:
+        return {"doc_id": doc["id"], "title": title, "error": str(exc)}
+    widths = [p["width"] for p in plan]
+    if len(plan) < 2 or max(widths) - min(widths) <= TOLERANCE_PT:
+        return None
+    return {"doc_id": doc["id"], "title": title, "pages": len(plan),
+            "widths": sorted({round(w) for w in widths}),
+            "min_width": round(min(widths)), "max_width": round(max(widths))}
+
+
 async def scan_mixed_widths(paperless: PaperlessClient, tag_name: str) -> dict:
     tag_id = await paperless.resolve_tag_id(tag_name)
     if tag_id is None:
         raise ValueError(f"tag '{tag_name}' not found in Paperless")
     docs = await paperless.list_documents_by_tag(tag_id)
-    candidates = [
-        d for d in docs
-        if d.get("mime_type") == "application/pdf"
-        and (d.get("page_count") or 2) > 1
-    ]
-
+    candidates = _candidates(docs)
     sem = asyncio.Semaphore(SCAN_CONCURRENCY)
-
-    async def measure(doc: dict) -> dict | None:
-        title = doc.get("title", f"Untitled (Paperless #{doc['id']})")
-        async with sem:
-            try:
-                data, mime = await paperless.download_original(doc["id"])
-            except Exception as exc:  # noqa BLE001
-                return {"doc_id": doc["id"], "title": title,
-                        "error": f"download failed: {exc}"}
-        if mime != "application/pdf":
-            return None
-        try:
-            plan = plan_pages(data, MODE_WIDEST)
-        except ValueError as exc:
-            return {"doc_id": doc["id"], "title": title, "error": str(exc)}
-        widths = [p["width"] for p in plan]
-        if len(plan) < 2 or max(widths) - min(widths) <= TOLERANCE_PT:
-            return None
-        return {"doc_id": doc["id"], "title": title, "pages": len(plan),
-                "widths": sorted({round(w) for w in widths}),
-                "min_width": round(min(widths)), "max_width": round(max(widths))}
-
-    measured = await asyncio.gather(*(measure(d) for d in candidates))
+    measured = await asyncio.gather(*(_measure(paperless, d, sem) for d in candidates))
     rows = sorted((m for m in measured if m and "error" not in m),
                   key=lambda r: r["doc_id"], reverse=True)
     errors = [m for m in measured if m and "error" in m]
@@ -234,15 +234,65 @@ async def scan_mixed_widths(paperless: PaperlessClient, tag_name: str) -> dict:
             "rows": rows, "errors": errors}
 
 
+def _progress(label: str, done: int, total: int) -> SyncEvent:
+    return SyncEvent(kind="progress", detail=label,
+                     data={"done": done, "total": total,
+                           "percent": round(100 * done / total) if total else 100,
+                           "band_index": 0, "band_count": 1})
+
+
+async def scan(paperless: PaperlessClient, tag_name: str) -> AsyncIterator[SyncEvent]:
+    counts = {"mixed": 0, "errors": 0}
+    tag_id = await paperless.resolve_tag_id(tag_name)
+    if tag_id is None:
+        yield SyncEvent(kind="error", detail=f"tag '{tag_name}' not found in Paperless")
+        yield SyncEvent(kind="summary", data=counts)
+        return
+    docs = await paperless.list_documents_by_tag(tag_id)
+    candidates = _candidates(docs)
+    yield SyncEvent(kind="started",
+                    detail=f"{len(docs)} document(s) tagged '{tag_name}', "
+                           f"{len(candidates)} multi-page PDF(s) to measure")
+    sem = asyncio.Semaphore(SCAN_CONCURRENCY)
+    pending = [asyncio.ensure_future(_measure(paperless, d, sem)) for d in candidates]
+    measured: list[dict | None] = []
+    for i, fut in enumerate(asyncio.as_completed(pending)):
+        yield _progress("Measuring page widths", i, len(candidates))
+        measured.append(await fut)
+    if candidates:
+        yield _progress("Measuring page widths", len(candidates), len(candidates))
+    for m in sorted((m for m in measured if m), key=lambda r: r["doc_id"], reverse=True):
+        if "error" in m:
+            counts["errors"] += 1
+            yield SyncEvent(kind="item", entity="doc", action="failed",
+                            source_id=str(m["doc_id"]), title=m["title"], detail=m["error"])
+            continue
+        counts["mixed"] += 1
+        yield SyncEvent(kind="item", entity="doc", action="would_update",
+                        source_id=str(m["doc_id"]), title=m["title"],
+                        data={"pages": m["pages"],
+                              "cols": {"pages": str(m["pages"]),
+                                       "widths": f"{m['min_width']}–{m['max_width']} pt"}})
+    yield SyncEvent(kind="summary", data=counts)
+
+
 async def run_batch(
     paperless: PaperlessClient, doc_ids: list[int], mode: str,
 ) -> AsyncIterator[SyncEvent]:
     totals = {"pages_scaled": 0, "skipped": 0, "uploaded": 0, "errors": 0}
-    for doc_id in doc_ids:
+    label = "Rebuilding documents"
+    for i, doc_id in enumerate(doc_ids):
+        yield _progress(label, i, len(doc_ids))
         async for ev in run(paperless, doc_id, mode, apply=True, wait_consume=False):
             if ev.kind == "summary":
                 for key, n in (ev.data or {}).items():
                     totals[key] = totals.get(key, 0) + n
+            elif ev.kind == "error" and ev.source_id:
+                yield SyncEvent(kind="item", entity="doc", action="failed",
+                                source_id=ev.source_id,
+                                title=f"Paperless #{ev.source_id}", detail=ev.detail)
             elif ev.kind != "started" and ev.entity != "page":
                 yield ev
+    if doc_ids:
+        yield _progress(label, len(doc_ids), len(doc_ids))
     yield SyncEvent(kind="summary", data=totals)

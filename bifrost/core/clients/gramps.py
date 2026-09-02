@@ -192,6 +192,10 @@ class GrampsClient:
         )
         return resp.json()
 
+    async def media_thumbnail(self, handle: str, size: int = 64) -> tuple[bytes, str]:
+        resp = await self._request("GET", f"/media/{handle}/thumbnail/{size}")
+        return resp.content, resp.headers.get("Content-Type", "image/jpeg")
+
     async def get_media_backlinks(self, handle: str) -> dict:
         """Objects referencing a media object"""
         resp = await self._request(
@@ -216,6 +220,18 @@ class GrampsClient:
         for t in resp.json() or []:
             if t.get("name") == name:
                 return t.get("handle")
+        return None
+
+    async def get_place_by_gramps_id(self, gramps_id: str) -> dict | None:
+        resp = await self._request(
+            "GET", "/places/", ok_404=True, params={"gramps_id": gramps_id})
+        if resp.status_code == 404:
+            return None
+        items = resp.json()
+        if isinstance(items, list):
+            for p in items:
+                if p.get("gramps_id") == gramps_id:
+                    return p
         return None
 
     async def get_place(self, handle: str) -> dict:

@@ -7,7 +7,8 @@ from typing import Literal
 Kind = Literal["started", "item", "summary", "error", "progress"]
 Entity = Literal["media", "face", "note", "place", "doc", "page"]
 Action = Literal[
-    "created", "updated", "skipped", "failed", "would_create", "would_update"
+    "created", "updated", "replaced", "skipped", "failed",
+    "would_create", "would_update", "would_replace",
 ]
 
 

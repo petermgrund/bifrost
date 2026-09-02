@@ -733,6 +733,15 @@ async def context(gramps: GrampsClient) -> dict:
     }
 
 
+def recent_minted(conn: sqlite3.Connection, limit: int = 10,
+                  source_system: str = "paperless") -> list[dict]:
+    """Recently synced media, newest first"""
+    rows = conn.execute(
+        "SELECT gramps_id, source_system, source_id, title, minted_at FROM minted_media "
+        "WHERE source_system=? ORDER BY minted_at DESC LIMIT ?", (source_system, limit)).fetchall()
+    return [dict(r) for r in rows]
+
+
 async def cited_media_set(gramps: GrampsClient) -> set[str]:
     cited: set[str] = set()
     for c in await gramps._paged("/citations/"):

@@ -110,11 +110,15 @@ def _mint(conn, gid, aid):
     conn.commit()
 
 
-def _run(gramps, immich, conn, apply):
+def _run(gramps, immich, conn, apply, selected=None):
     async def collect():
         return [e async for e in faces.apply_links(
-            gramps, [immich], conn, apply=apply)]
+            gramps, [immich], conn, apply=apply, selected=selected)]
     return asyncio.run(collect())
+
+
+def _items(events):
+    return [e for e in events if e.kind == "item"]
 
 
 class ResolvingImmich(BackfillImmich):
@@ -283,11 +287,39 @@ class TestBackfill:
     def test_preview_writes_nothing(self, conn):
         im, gr = self._world(conn)
         events = _run(gr, im, conn, apply=False)
-        created = [e for e in events if e.entity == "face" and e.action == "created"]
-        assert len(created) == 1 and created[0].title == "Ed"
+        rows = _items(events)
+        assert len(rows) == 1
+        assert rows[0].action == "would_create" and rows[0].entity == "face"
+        assert rows[0].source_id == "a1" and rows[0].gramps_id == "K1"
+        assert rows[0].title and rows[0].title != "Ed"
+        assert rows[0].data == {"cols": {"Ed": "link"}}
         assert gr.updated_people == []
         summary = events[-1]
         assert summary.kind == "summary" and summary.data["faces_linked"] == 1
+
+    def test_row_title_is_the_gramps_media_desc(self, conn):
+        im, gr = self._world(conn)
+        gr.media["K1"]["desc"] = "Ed at the lake"
+        rows = _items(_run(gr, im, conn, apply=False))
+        assert rows[0].title == "Ed at the lake"
+
+    def test_progress_events_bracket_the_scan(self, conn):
+        im, gr = self._world(conn)
+        events = _run(gr, im, conn, apply=False)
+        progress = [e for e in events if e.kind == "progress"]
+        assert progress and progress[0].data["done"] == 0
+        assert progress[-1].data["done"] == progress[-1].data["total"] == 1
+
+    def test_selected_limits_an_apply(self, conn):
+        im, gr = self._world(conn)
+        _mint(conn, "K2", "a2")
+        im.assets["a2"] = asset("a2")
+        im.faces["a2"] = [{"person": {"id": "uuid-ed", "name": "Ed"}}]
+        gr.media["K2"] = {"gramps_id": "K2", "handle": "mh2"}
+        events = _run(gr, im, conn, apply=True, selected={"face:a2"})
+        assert [e.source_id for e in _items(events)] == ["a2"]
+        assert [p["media_list"][0]["ref"] for p in gr.updated_people] == ["mh2"]
+        assert im.faces_requested == ["a2"]
 
     def test_apply_links_face(self, conn):
         im, gr = self._world(conn)

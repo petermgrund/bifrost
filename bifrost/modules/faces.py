@@ -46,8 +46,7 @@ def set_link(
     conn: sqlite3.Connection, gramps_handle: str, immich_person_id: str,
     label: str = "", owner_user_id: str | None = None,
 ) -> None:
-    """One link per Immich person, and per Gramps person per account.
-    owner_user_id None keeps the legacy whole-person replace semantics."""
+    """One link per Immich person"""
     with conn:
         conn.execute(
             "DELETE FROM person_links WHERE immich_person_id=?",
@@ -57,7 +56,7 @@ def set_link(
                 "DELETE FROM person_links WHERE gramps_handle=?",
                 (gramps_handle,))
         else:
-            # NULL-owner rows are of unknown account; a definite relink
+            # NULL-owner rows are of unknown account a definite relink
             # replaces them too, or the one-per-account rule could break
             conn.execute(
                 "DELETE FROM person_links WHERE gramps_handle=? "
@@ -79,9 +78,6 @@ def delete_link(conn: sqlite3.Connection, gramps_handle: str) -> bool:
 
 
 def import_person_map_yaml(conn: sqlite3.Connection, path: Path | None) -> int:
-    """One-time import of a legacy face-linker person_map.yaml into the
-    person_links table. No-op unless the table is empty and the file exists.
-    Returns the number of imported links."""
     if path is None or not path.exists():
         return 0
     if conn.execute("SELECT 1 FROM person_links LIMIT 1").fetchone():
@@ -106,9 +102,7 @@ def import_person_map_yaml(conn: sqlite3.Connection, path: Path | None) -> int:
 
 
 async def resolve_person(accounts, person_id: str) -> dict | None:
-    """Which account knows this person; the direct GET works around the
-    v3.0.1 listing under-report. owner_user_id is '' when the account's
-    own identity cannot be resolved (callers must not backfill it then)."""
+    """Which account knows this person"""
     for client in accounts:
         try:
             p = await client.get_person(person_id)
@@ -125,8 +119,7 @@ async def resolve_person(accounts, person_id: str) -> dict | None:
 
 
 async def _people_by_account(accounts):
-    """(client, uid, label, people) per REACHABLE account; a down account
-    degrades to absent instead of failing the whole listing"""
+    """(client, uid, label, people) per REACHABLE account"""
     out = []
     for client in accounts:
         try:
@@ -182,9 +175,7 @@ async def enrich_links(accounts, conn: sqlite3.Connection) -> list[dict]:
 async def person_thumbnail_bytes(
     accounts, conn: sqlite3.Connection, person_id: str,
 ) -> tuple[bytes, str]:
-    """Thumbnail via the owning account first (the register knows the
-    owner), then the others. Raises a 404-class ImmichError only when
-    every account said 404; a harder failure wins otherwise."""
+    """Thumbnail via the owning account first"""
     ordered = list(accounts)
     row = conn.execute(
         "SELECT owner_user_id FROM person_links WHERE immich_person_id=?",
@@ -211,8 +202,7 @@ async def person_thumbnail_bytes(
 
 
 async def grouped_links(accounts, conn: sqlite3.Connection) -> list[dict]:
-    """One entry per Gramps person; its per-account links nested inside.
-    A person linked in both accounts is still ONE face row."""
+    """One entry per Gramps person"""
     groups: dict[str, dict] = {}
     for row in await enrich_links(accounts, conn):
         g = groups.setdefault(row["gramps_handle"], {
@@ -228,10 +218,8 @@ async def apply_links(
     accounts: list[ImmichClient],
     conn: sqlite3.Connection,
     apply: bool,
+    selected: set[str] | None = None,
 ) -> AsyncIterator[SyncEvent]:
-    """Backfill person↔media face refs across every synced Immich media
-    the follow-up after new links are made, since the sync's update pass
-    checks title/date/file drift, not faces."""
     person_map = person_links_map(conn)
     counts = {"faces_linked": 0, "boxes_added": 0, "unreadable": 0, "errors": 0}
     if not person_map:
@@ -242,6 +230,8 @@ async def apply_links(
     rows = conn.execute(
         "SELECT gramps_id, source_id FROM minted_media WHERE source_system='immich'"
     ).fetchall()
+    if selected is not None:
+        rows = [r for r in rows if f"face:{r['source_id']}" in selected]
     yield SyncEvent(
         kind="started",
         detail=f"{len(rows)} synced media to scan against {len(person_map)} link(s)")
@@ -249,18 +239,28 @@ async def apply_links(
         yield SyncEvent(kind="summary", data=counts)
         return
 
+    def progress(done: int) -> SyncEvent:
+        return SyncEvent(kind="progress", detail="Checking faces",
+                         data={"done": done, "total": len(rows),
+                               "percent": round(100 * done / len(rows)),
+                               "band_index": 0, "band_count": 1})
+
+    yield progress(0)
     media_by_gid = {
         m["gramps_id"]: m for m in await gramps.list_media() if m.get("gramps_id")}
     details = await _merged_details(accounts, [r["source_id"] for r in rows])
 
-    for r in rows:
+    for i, r in enumerate(rows):
+        yield progress(i)
         asset = details.get(r["source_id"])
         media = media_by_gid.get(r["gramps_id"])
+        title = ((media or {}).get("desc") or (asset or {}).get("originalFileName")
+                 or r["source_id"])
         if asset is None or media is None:
             counts["unreadable"] += 1
             yield SyncEvent(
                 kind="item", entity="face", action="failed",
-                source_id=r["source_id"], gramps_id=r["gramps_id"],
+                source_id=r["source_id"], gramps_id=r["gramps_id"], title=title,
                 detail="asset detail unreadable" if asset is None
                        else "no Gramps media with this id")
             continue
@@ -268,17 +268,31 @@ async def apply_links(
         if account_err:
             yield SyncEvent(
                 kind="item", entity="face", action="failed",
-                source_id=r["source_id"], detail=account_err)
+                source_id=r["source_id"], gramps_id=r["gramps_id"], title=title,
+                detail=account_err)
         results = new_face_results()
         async for ev in link_asset_faces(
                 gramps, faces_client, asset, r["source_id"], media["handle"],
                 r["gramps_id"], person_map, results, apply=apply):
-            if ev.kind == "item" and ev.action == "created":
+            if ev.kind != "item":
+                yield ev
+                continue
+            person = ev.title or "?"
+            row = dict(kind="item", entity="face", source_id=r["source_id"],
+                       gramps_id=r["gramps_id"], title=title)
+            if ev.action == "created":
                 counts["faces_linked"] += 1
-            elif ev.kind == "item" and ev.action == "updated":
+                yield SyncEvent(**row, action="created" if apply else "would_create",
+                                data={"cols": {person: "link"}})
+            elif ev.action == "updated":
                 counts["boxes_added"] += 1
-            elif ev.kind == "item" and ev.action == "failed":
+                yield SyncEvent(**row, action="updated" if apply else "would_update",
+                                data={"cols": {person: "face box"}})
+            elif ev.action == "failed":
                 counts["errors"] += 1
-            yield ev
-
+                yield SyncEvent(**row, action="failed",
+                                detail=f"{person}: {ev.detail}" if ev.title else ev.detail)
+            else:
+                yield ev
+    yield progress(len(rows))
     yield SyncEvent(kind="summary", data=counts)

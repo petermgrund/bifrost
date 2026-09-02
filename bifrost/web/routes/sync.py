@@ -196,7 +196,6 @@ async def immich_sync_asset(request: Request, body: ImmichAssetBody):
 
 
 class OcrBody(BaseModel):
-    force: bool = False
     single_doc_id: int | None = None
 
 
@@ -204,8 +203,7 @@ class OcrBody(BaseModel):
 async def ocr_preview(request: Request, body: OcrBody = OcrBody()):
     st = _state(request)
     gen = ocr.run(st.paperless, st.gemini, st.conn, st.cfg.sync_paperless,
-                  st.cfg.gemini, apply=False, force=body.force,
-                  single_doc_id=body.single_doc_id)
+                  st.cfg.gemini, apply=False, single_doc_id=body.single_doc_id)
     run_id, events = await record_run(st.conn, "ocr.gemini.preview", gen)
     return {"run_id": run_id, "apply": False, "events": [e.__dict__ for e in events]}
 
@@ -214,8 +212,7 @@ async def ocr_preview(request: Request, body: OcrBody = OcrBody()):
 async def ocr_apply(request: Request, body: OcrBody = OcrBody()):
     st = _state(request)
     gen = ocr.run(st.paperless, st.gemini, st.conn, st.cfg.sync_paperless,
-                  st.cfg.gemini, apply=True, force=body.force,
-                  single_doc_id=body.single_doc_id)
+                  st.cfg.gemini, apply=True, single_doc_id=body.single_doc_id)
     run_id, events = await record_run(st.conn, "ocr.gemini", gen)
     st.caches.clear()
     return {"run_id": run_id, "apply": True, "events": [e.__dict__ for e in events]}

@@ -1,10 +1,15 @@
-import { BifrostElement, html, nothing, api, post, btn, spinner, field, statusLine } from './core.js';
+import { BifrostElement, html, nothing, api, post, btn, spinner, field, statusLine, searchMenu } from './core.js';
+
+const ICON = { paperless: 'description', immich: 'image' };
 
 class CitationsPage extends BifrostElement {
   static properties = {
     step: { state: true },
     ctx: { state: true },
-    mediaId: { state: true },
+    query: { state: true },
+    hi: { state: true },
+    chosen: { state: true },
+    menuOpen: { state: true },
     pick: { state: true },
     draft: { state: true },
     busy: { state: true },
@@ -17,13 +22,18 @@ class CitationsPage extends BifrostElement {
     urls: { state: true },
     extra: { state: true },
     matched: { state: true },
+    recent: { state: true },
   };
 
   constructor() {
     super();
     this.step = 'describe';
     this.ctx = null;
-    this.mediaId = '';
+    this.query = '';
+    this.hi = -1;
+    this.chosen = null;
+    this.menuOpen = false;
+    this.media = null;
     this.pick = { media: null, source: null, repository: null };
     this.draft = null;
     this.busy = false;
@@ -37,6 +47,7 @@ class CitationsPage extends BifrostElement {
     this.extra = '';
     this.pl = null;
     this.matched = null;
+    this.recent = [];
   }
 
   connectedCallback() {
@@ -51,6 +62,50 @@ class CitationsPage extends BifrostElement {
     } catch (e) {
       this.loadError = e.message;
     }
+    this.loadRecent();
+    this.loadMedia();
+  }
+
+  async loadRecent() {
+    try { this.recent = await api('/citations/api/recent'); }
+    catch { this.recent = []; }
+  }
+
+  async loadMedia() {
+    if (this.media) return;
+    try { this.media = await api('/citations/api/media'); }
+    catch { this.media = []; }
+  }
+
+  get suggestions() {
+    const q = this.query.trim().toLowerCase();
+    const thumb = (handle) => (handle ? `/citations/api/thumbnail/${handle}` : null);
+    if (!q) {
+      return this.recent.filter((r) => r.in_gramps).map((r) => ({
+        id: r.gramps_id, label: r.title, sub: r.gramps_id, mono: true, icon: 'history',
+        thumb: thumb(r.handle) }));
+    }
+    const hit = (m) => m.gramps_id.toLowerCase().includes(q) || (m.title || '').toLowerCase().includes(q);
+    return (this.media || []).filter(hit).slice(0, 10).map((m) => ({
+      id: m.gramps_id, label: m.title, sub: m.gramps_id, mono: true, icon: ICON[m.origin] || 'attachment',
+      thumb: thumb(m.handle) }));
+  }
+
+  onQuery(e) {
+    this.query = e.target.value;
+    this.hi = -1;
+  }
+
+  pickMedia(item) {
+    this.chosen = item;
+    this.query = '';
+    this.hi = -1;
+    this.menuOpen = false;
+  }
+
+  onEnter() {
+    const items = this.suggestions;
+    if (this.hi >= 0 && this.hi < items.length) this.pickMedia(items[this.hi]);
   }
 
   reset() {
@@ -78,9 +133,9 @@ class CitationsPage extends BifrostElement {
     if (dlg && !dlg.open) dlg.showModal();
   }
 
-  async lookupMedia() {
+  async lookupMedia(explicit) {
     if (this.busy) return;
-    const id = this.mediaId.trim();
+    const id = (explicit || this.query).trim();
     if (!id) { this.error = 'Enter a Gramps media ID'; return; }
     this.busy = true;
     this.error = '';
@@ -156,6 +211,7 @@ class CitationsPage extends BifrostElement {
         repository_handle: this.pick.repository?.handle || null,
         source_handle: this.pick.source?.handle || null,
       });
+      this.loadRecent();  // the cited flag on the pick list just changed
     } catch (e) {
       this.error = e.message;
     } finally {
@@ -172,15 +228,28 @@ class CitationsPage extends BifrostElement {
     if (!this.ctx) return html`<progress class="circle"></progress>`;
     const lookingUp = this.busy && !this.pick.media;
     return html`
+      <h6 class="small">Generate a new citation from an existing Gramps media object</h6>
+      <div class="chosen-media">
+        ${this.chosen ? html`
+          ${this.chosen.thumb ? html`<img class="circle" src=${this.chosen.thumb} alt="">` : html`<i>${this.chosen.icon}</i>`}
+          <div>
+            <div>${this.chosen.label}</div>
+            <div class="small-text secondary-text mono">${this.chosen.sub}</div>
+          </div>` : nothing}
+      </div>
       <nav class="wrap">
-        ${field('Gramps media ID', this.mediaId, (e) => (this.mediaId = e.target.value),
-          { mono: true, upper: true, width: 'small', onEnter: () => this.lookupMedia() })}
-        ${btn(lookingUp ? 'Looking up...' : 'Look up', lookingUp, () => this.lookupMedia())}
+        ${searchMenu({
+    label: 'Select', icon: 'add_link',
+    value: this.query, items: this.suggestions, active: this.hi, open: this.menuOpen,
+    onToggle: () => { this.menuOpen = !this.menuOpen; }, onClose: () => { this.menuOpen = false; },
+    onInput: (e) => this.onQuery(e), onPick: (it) => this.pickMedia(it), onEnter: () => this.onEnter(),
+    onMove: (d) => { const n = this.suggestions.length; if (n) this.hi = (this.hi + d + n) % n; },
+    empty: this.query.trim() ? (this.media ? 'No matching media' : 'Searching...') : 'Nothing synced recently',
+  })}
+        ${this.chosen
+          ? btn(lookingUp ? 'Opening...' : 'Next', lookingUp, () => this.lookupMedia(this.chosen.id))
+          : nothing}
         ${lookingUp ? spinner : nothing}
-      </nav>
-      <div class="medium-space"></div>
-      <nav class="wrap left-align">
-        <a class="button" href="/style">Edit citation style</a>
       </nav>
       ${!this.pick.media && this.error ? html`<p>${statusLine('error', this.error)}</p>` : nothing}
       ${this.pick.media ? this.renderModal() : nothing}`;

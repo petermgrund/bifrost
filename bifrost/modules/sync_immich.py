@@ -1,4 +1,4 @@
-"""Immich → Gramps media sync"""
+"""Immich to Gramps media sync"""
 
 from __future__ import annotations
 
@@ -794,17 +794,24 @@ async def sync_assets(
                 detail=f"no trigger tag {cfg.sync_tag!r} in Immich account "
                        f"'{label}'; nothing scanned there")
 
-    # tags/EXIF live only on asset DETAIL responses
     detail_ids = list(dict.fromkeys(
         [a["id"] for a in tagged if a["id"] not in stack_children] + sorted(update_ids)
     ))
+    bands = ["details", "create", "update"]
+
+    def _progress(band: str, label: str, done: int, total: int) -> SyncEvent:
+        index = bands.index(band)
+        frac = (index + (done / total if total else 1)) / len(bands)
+        return SyncEvent(kind="progress", detail=label,
+                         data={"done": done, "total": total, "percent": round(100 * frac),
+                               "band_index": index, "band_count": len(bands)})
+
     detail_by_id: dict[str, dict | None] = {}
     for start in range(0, len(detail_ids), _DETAIL_BATCH):
-        yield SyncEvent(kind="progress", detail="Reading photo details",
-                        data={"done": start, "total": len(detail_ids),
-                              "percent": round(100 * start / max(len(detail_ids), 1)),
-                              "band_index": 0, "band_count": 1})
+        yield _progress("details", "Reading photo details", start, len(detail_ids))
         detail_by_id.update(await _merged_details(accounts, detail_ids[start:start + _DETAIL_BATCH]))
+    if detail_ids:
+        yield _progress("details", "Reading photo details", len(detail_ids), len(detail_ids))
 
     try:
         places_with_coords = await linkable_places(gramps, cfg)
@@ -815,7 +822,9 @@ async def sync_assets(
                         detail=f"could not list Gramps places: {str(exc)[:180]}; "
                                "place links skipped this run")
 
-    for asset in tagged:
+    create_label = "Syncing new photos" if apply else "Checking new photos"
+    for i, asset in enumerate(tagged):
+        yield _progress("create", create_label, i, len(tagged))
         asset_id = asset["id"]
         if asset_id in stack_children:
             primary = primary_of.get(asset_id)
@@ -874,6 +883,9 @@ async def sync_assets(
             yield SyncEvent(kind="item", entity="media", action="failed",
                             source_id=asset_id, title=title, detail=str(exc)[:200])
 
+    if tagged:
+        yield _progress("create", create_label, len(tagged), len(tagged))
+
     if apply and places_with_coords:
         try:
             places_with_coords = await linkable_places(gramps, cfg)
@@ -888,7 +900,9 @@ async def sync_assets(
     for _gid, aid in update_targets:
         effective_count[aid] = effective_count.get(aid, 0) + 1
 
-    for gid, asset_id in update_targets:
+    update_label = "Updating synced media" if apply else "Checking synced media"
+    for i, (gid, asset_id) in enumerate(update_targets):
+        yield _progress("update", update_label, i, len(update_targets))
         if effective_count[asset_id] > 1:
             counts["errors"] += 1
             yield SyncEvent(kind="item", entity="media", action="failed",
@@ -977,7 +991,6 @@ async def sync_assets(
             continue
         if selected is not None and f"media:{asset_id}" not in selected:
             continue
-        # an id-tag-only change is an Immich write: never PUT the media to Gramps
         if cols:
             if "title" in cols:
                 media["desc"] = wanted_update_title(asset)
@@ -1028,4 +1041,6 @@ async def sync_assets(
                             source_id=asset_id, gramps_id=gid,
                             title=media["desc"], data={"cols": landed})
 
+    if update_targets:
+        yield _progress("update", update_label, len(update_targets), len(update_targets))
     yield SyncEvent(kind="summary", data=counts)

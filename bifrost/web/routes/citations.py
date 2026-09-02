@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel
 
 from ...core.clients.anthropic import AnthropicError
+from ...core.clients.gramps import GrampsError
 from ...core.clients.paperless import PaperlessError
 from ...modules import citations, sync_paperless
 
@@ -62,8 +63,17 @@ async def get_recent(request: Request, limit: int = 10):
             if m.get("gramps_id")}
     cited = st.caches["citations_cited_set"]
     handles = st.caches["citations_media_handles"]
-    return [{**r, "in_gramps": r["gramps_id"] in handles,
+    return [{**r, "handle": handles.get(r["gramps_id"]), "in_gramps": r["gramps_id"] in handles,
              "cited": handles.get(r["gramps_id"]) in cited} for r in rows]
+
+
+@router.get("/api/thumbnail/{handle}")
+async def media_thumbnail(request: Request, handle: str, size: int = 64):
+    try:
+        content, mime = await _state(request).gramps.media_thumbnail(handle, size)
+    except GrampsError as exc:
+        raise HTTPException(404, str(exc)[:200]) from exc
+    return Response(content, media_type=mime, headers={"Cache-Control": "public, max-age=3600"})
 
 
 @router.get("/api/media/{gramps_id}")

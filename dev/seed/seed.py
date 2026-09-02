@@ -792,6 +792,7 @@ def write_config(gramps: dict, paperless: dict | None, immich: dict | None) -> N
                 "public_url": PUBLIC["immich"],
                 "path_mappings": [{"immich_prefix": immich["immich_prefix"] if immich else "/data/upload/",
                                    "gramps_prefix": "immich/"}],
+                "previews_prefix": "immich-previews/",
             },
             "paperless": {
                 "sync_tags": ["doc", "img"],

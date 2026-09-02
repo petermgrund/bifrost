@@ -88,6 +88,7 @@ class FakeImmich:
         self.list_stacks_calls = 0
         self.get_me_calls = 0
         self.extra_tags = {}          # value.lower() -> tag dict
+        self.previews = {}
         self.upserted = []
         self.tagged_assets = []
         self.untagged_assets = []
@@ -143,6 +144,9 @@ class FakeImmich:
     async def get_assets_many(self, asset_ids, concurrency=8):
         return {i: (None if i in self.fail_detail else self.assets.get(i))
                 for i in asset_ids}
+
+    async def preview_file(self, asset_id):
+        return self.previews.get(asset_id)
 
     async def get_faces(self, asset_id):
         self.faces_requested.append(asset_id)
@@ -206,6 +210,77 @@ def actions(events, action):
     return [e for e in events if e.kind == "item" and e.action == action]
 
 
+PREVIEW_CFG = SyncImmichConfig(path_mappings=(("/up/", "immich/"),), id_tag_prefix="",
+                               previews_prefix="immich-previews/")
+PREVIEW_PATH = "immich-previews/owner-1/a1/b2/a1b2c3_preview.jpeg"
+
+
+def heic(aid="a1b2c3", name="img.heic", owner="owner-1"):
+    return {**asset(aid, name), "originalMimeType": "image/heic", "ownerId": owner}
+
+
+def mint(conn, gid, source_id, title="t"):
+    conn.execute(
+        "INSERT INTO minted_media (gramps_id, source_system, source_id, title, minted_at) "
+        "VALUES (?, 'immich', ?, ?, '2026-01-01')", (gid, source_id, title))
+    conn.commit()
+
+
+class TestPreviews:
+
+    @pytest.fixture
+    def conn(self, tmp_path):
+        c = db.connect(tmp_path / "t.db")
+        yield c
+        c.close()
+
+    def test_web_images_keep_the_original(self):
+        a = {**asset("a1", "img.jpg"), "ownerId": "owner-1"}
+        assert sync_immich.gramps_file(a, PREVIEW_CFG) == ("immich/img.jpg", "image/jpeg")
+
+    def test_without_a_previews_prefix_the_original_is_linked(self):
+        assert sync_immich.gramps_file(heic(), CFG) == ("immich/img.heic", "image/heic")
+
+    def test_preview_path_follows_immich_layout(self):
+        assert sync_immich.gramps_file(heic(), PREVIEW_CFG, ("jpeg", "image/jpeg")) == (
+            PREVIEW_PATH, "image/jpeg")
+        assert sync_immich.gramps_file(heic(), PREVIEW_CFG, ("webp", "image/webp")) == (
+            "immich-previews/owner-1/a1/b2/a1b2c3_preview.webp", "image/webp")
+
+    def test_missing_preview_is_an_error(self):
+        with pytest.raises(SyncError, match="no preview"):
+            sync_immich.gramps_file(heic(), PREVIEW_CFG)
+
+    def test_create_links_the_preview(self, conn):
+        im = FakeImmich(assets={"a1b2c3": heic()}, tagged={"a1b2c3"})
+        im.previews["a1b2c3"] = ("jpeg", "image/jpeg")
+        gr = FakeGramps()
+        run_scan(im, gr, conn, apply=True, cfg=PREVIEW_CFG)
+        assert gr.created[0]["path"] == PREVIEW_PATH
+        assert gr.created[0]["mime"] == "image/jpeg"
+
+    def test_synced_heic_media_is_repointed_at_the_preview(self, conn):
+        mint(conn, "BBBBBB", "a1b2c3")
+        im = FakeImmich(assets={"a1b2c3": heic()})
+        im.previews["a1b2c3"] = ("jpeg", "image/jpeg")
+        media = {"gramps_id": "BBBBBB", "handle": "h1", "desc": "T", "path": "immich/img.heic",
+                 "mime": "image/heic", "attribute_list": [sync_immich._attr("Immich ID", "a1b2c3")]}
+        events = run_scan(im, FakeGramps({"BBBBBB": media}), conn, cfg=PREVIEW_CFG)
+        rows = actions(events, "would_update")
+        assert len(rows) == 1
+        assert rows[0].data["cols"] == {"file": f"immich/img.heic → {PREVIEW_PATH}"}
+        gr = FakeGramps({"BBBBBB": dict(media)})
+        run_scan(im, gr, conn, apply=True, cfg=PREVIEW_CFG)
+        assert (gr.updated[0]["path"], gr.updated[0]["mime"]) == (PREVIEW_PATH, "image/jpeg")
+
+    def test_preview_not_generated_yet_fails_the_row(self, conn):
+        im = FakeImmich(assets={"a1b2c3": heic()}, tagged={"a1b2c3"})
+        gr = FakeGramps()
+        events = run_scan(im, gr, conn, apply=True, cfg=PREVIEW_CFG)
+        assert gr.created == []
+        assert "no preview" in actions(events, "failed")[0].detail
+
+
 def summary_of(events):
     return [e for e in events if e.kind == "summary"][-1]
 
@@ -227,21 +302,20 @@ class TestSyncAssetsScan:
             "VALUES (?, 'immich', ?, ?, '2026-01-01')", (gid, source_id, title))
         conn.commit()
 
-    def test_progress_covers_every_band_and_closes_each(self, conn):
+    def test_progress_is_one_running_count_over_every_item(self, conn):
         self._mint(conn, "K1", "a2")
         im = FakeImmich(assets={"a1": asset("a1"), "a2": asset("a2")}, tagged={"a1"})
         gr = FakeGramps(media={"K1": {"gramps_id": "K1", "handle": "mh", "desc": "t",
                                       "path": "immich/img.jpg", "mime": "image/jpeg"}})
         events = run_scan(im, gr, conn)
-        progress = [e.data for e in events if e.kind == "progress"]
-        assert progress and {d["band_count"] for d in progress} == {3}
-        assert [d["band_index"] for d in progress] == sorted(d["band_index"] for d in progress)
-        for band in range(3):
-            steps = [d for d in progress if d["band_index"] == band]
-            assert steps, f"band {band} never reported"
-            assert steps[-1]["done"] == steps[-1]["total"] > 0
-        assert events.index(next(e for e in events if e.kind == "summary")) > \
-            events.index(next(e for e in reversed(events) if e.kind == "progress"))
+        progress = [e for e in events if e.kind == "progress"]
+        # 2 details + 1 tagged + 1 synced = 4 items, one total throughout
+        assert {p.data["total"] for p in progress} == {4}
+        dones = [p.data["done"] for p in progress]
+        assert dones == sorted(dones) and dones[0] == 0 and dones[-1] == 4
+        assert [p.detail for p in progress] == ["Reading photo details", "Checking new photos",
+                                                "Checking synced media", "Checking synced media"]
+        assert events.index(next(e for e in events if e.kind == "summary")) > events.index(progress[-1])
 
     def test_tagged_unsynced_is_a_create_candidate(self, conn):
         im = FakeImmich(assets={"a1": asset("a1", "img1.jpg")}, tagged={"a1"})

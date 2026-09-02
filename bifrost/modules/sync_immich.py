@@ -176,6 +176,43 @@ def translate_path(original_path: str, mappings: tuple[tuple[str, str], ...]) ->
     )
 
 
+WEB_IMAGE_MIMES = frozenset({"image/jpeg", "image/png", "image/gif", "image/webp", "image/avif"})
+
+
+def wants_preview(asset: dict, cfg: SyncImmichConfig) -> bool:
+    """Whether Gramps gets Immich's preview instead of the original"""
+    mime = asset.get("originalMimeType") or ""
+    return bool(cfg.previews_prefix) and mime.startswith("image/") and mime not in WEB_IMAGE_MIMES
+
+
+def gramps_file(asset: dict, cfg: SyncImmichConfig,
+                preview: tuple[str, str] | None = None) -> tuple[str, str]:
+    """(path, mime) Gramps should reference for the asset"""
+    if not wants_preview(asset, cfg):
+        return (translate_path(asset["originalPath"], cfg.path_mappings),
+                asset.get("originalMimeType") or "image/jpeg")
+    aid = asset["id"]
+    if preview is None:
+        raise SyncError(502, f"Immich has no preview of {asset.get('originalFileName') or aid} yet")
+    owner = asset.get("ownerId") or ""
+    if not owner:
+        raise SyncError(502, f"Immich returned no ownerId for {aid}")
+    ext, mime = preview
+    return f"{cfg.previews_prefix}{owner}/{aid[:2]}/{aid[2:4]}/{aid}_preview.{ext}", mime
+
+
+async def preview_of(accounts: list[ImmichClient], asset: dict,
+                     cfg: SyncImmichConfig) -> tuple[str, str] | None:
+    """The preview rendition Immich serves for an asset that needs one"""
+    if not wants_preview(asset, cfg):
+        return None
+    client, _err = await owner_client(accounts, asset)
+    try:
+        return await client.preview_file(asset["id"])
+    except ImmichError as exc:
+        raise SyncError(502, f"preview lookup failed: {exc.message}")
+
+
 def person_links_map(conn: sqlite3.Connection) -> dict[str, dict]:
     """{immich_person_id: {handle, label}} from the person_links register"""
     rows = conn.execute(
@@ -489,7 +526,7 @@ async def sync_one_asset(
         else:
             gid = ids.generate_gramps_id(live_ids | ids.unminted_reserved(conn))
 
-        gramps_path = translate_path(asset["originalPath"], cfg.path_mappings)
+        gramps_path, mime = gramps_file(asset, cfg, await preview_of(accounts, asset, cfg))
         title = wanted_title(asset) or gid
         media_handle = ids.generate_handle()
 
@@ -499,7 +536,7 @@ async def sync_one_asset(
             "gramps_id": gid,
             "desc": title,
             "path": gramps_path,
-            "mime": asset.get("originalMimeType") or "image/jpeg",
+            "mime": mime,
             "private": False,
             "change": int(datetime.now(timezone.utc).timestamp()),
             "attribute_list": [_attr("Immich ID", asset_id)]
@@ -687,7 +724,8 @@ async def write_id_tag(
     return None
 
 
-def update_plan(asset: dict, media: dict, cfg: SyncImmichConfig) -> dict:
+def update_plan(asset: dict, media: dict, cfg: SyncImmichConfig,
+                preview: tuple[str, str] | None = None) -> dict:
     """Pending-change cols for an already-synced asset ({} = in sync)"""
     cols: dict = {}
     title = wanted_update_title(asset)
@@ -697,7 +735,7 @@ def update_plan(asset: dict, media: dict, cfg: SyncImmichConfig) -> dict:
     if new_date and not dates_equal(media.get("date"), new_date):
         cols["date"] = f"{format_gramps_date(media.get('date'))} → {display}"
     if asset.get("originalPath"):
-        gramps_path = translate_path(asset["originalPath"], cfg.path_mappings)
+        gramps_path, _mime = gramps_file(asset, cfg, preview)
         if gramps_path != (media.get("path") or ""):
             cols["file"] = f"{media.get('path') or '(none)'} → {gramps_path}"
     aid = asset.get("id") or ""
@@ -797,21 +835,20 @@ async def sync_assets(
     detail_ids = list(dict.fromkeys(
         [a["id"] for a in tagged if a["id"] not in stack_children] + sorted(update_ids)
     ))
-    bands = ["details", "create", "update"]
+    total = len(detail_ids) + len(tagged) + len(update_targets)
+    done = 0
 
-    def _progress(band: str, label: str, done: int, total: int) -> SyncEvent:
-        index = bands.index(band)
-        frac = (index + (done / total if total else 1)) / len(bands)
+    def _progress(label: str) -> SyncEvent:
         return SyncEvent(kind="progress", detail=label,
-                         data={"done": done, "total": total, "percent": round(100 * frac),
-                               "band_index": index, "band_count": len(bands)})
+                         data={"done": done, "total": total,
+                               "percent": round(100 * done / total) if total else 100})
 
     detail_by_id: dict[str, dict | None] = {}
     for start in range(0, len(detail_ids), _DETAIL_BATCH):
-        yield _progress("details", "Reading photo details", start, len(detail_ids))
-        detail_by_id.update(await _merged_details(accounts, detail_ids[start:start + _DETAIL_BATCH]))
-    if detail_ids:
-        yield _progress("details", "Reading photo details", len(detail_ids), len(detail_ids))
+        yield _progress("Reading photo details")
+        batch = detail_ids[start:start + _DETAIL_BATCH]
+        detail_by_id.update(await _merged_details(accounts, batch))
+        done += len(batch)
 
     try:
         places_with_coords = await linkable_places(gramps, cfg)
@@ -823,8 +860,9 @@ async def sync_assets(
                                "place links skipped this run")
 
     create_label = "Syncing new photos" if apply else "Checking new photos"
-    for i, asset in enumerate(tagged):
-        yield _progress("create", create_label, i, len(tagged))
+    for asset in tagged:
+        yield _progress(create_label)
+        done += 1
         asset_id = asset["id"]
         if asset_id in stack_children:
             primary = primary_of.get(asset_id)
@@ -883,9 +921,6 @@ async def sync_assets(
             yield SyncEvent(kind="item", entity="media", action="failed",
                             source_id=asset_id, title=title, detail=str(exc)[:200])
 
-    if tagged:
-        yield _progress("create", create_label, len(tagged), len(tagged))
-
     if apply and places_with_coords:
         try:
             places_with_coords = await linkable_places(gramps, cfg)
@@ -901,8 +936,9 @@ async def sync_assets(
         effective_count[aid] = effective_count.get(aid, 0) + 1
 
     update_label = "Updating synced media" if apply else "Checking synced media"
-    for i, (gid, asset_id) in enumerate(update_targets):
-        yield _progress("update", update_label, i, len(update_targets))
+    for gid, asset_id in update_targets:
+        yield _progress(update_label)
+        done += 1
         if effective_count[asset_id] > 1:
             counts["errors"] += 1
             yield SyncEvent(kind="item", entity="media", action="failed",
@@ -970,7 +1006,8 @@ async def sync_assets(
                                             source_id=asset_id, title=place_name,
                                             detail=str(exc)[:200])
         try:
-            cols = update_plan(asset, media, cfg)
+            preview = await preview_of(accounts, asset, cfg)
+            cols = update_plan(asset, media, cfg, preview)
         except SyncError as exc:
             counts["errors"] += 1
             yield SyncEvent(kind="item", entity="media", action="failed",
@@ -997,8 +1034,7 @@ async def sync_assets(
             if "date" in cols:
                 media["date"] = wanted_date(asset)[0]
             if "file" in cols:
-                media["path"] = translate_path(asset["originalPath"], cfg.path_mappings)
-                media["mime"] = asset.get("originalMimeType") or media.get("mime")
+                media["path"], media["mime"] = gramps_file(asset, cfg, preview)
             if "link" in cols:
                 _set_attr(media, "Immich ID", asset_id)
                 if cfg.public_url:
@@ -1041,6 +1077,6 @@ async def sync_assets(
                             source_id=asset_id, gramps_id=gid,
                             title=media["desc"], data={"cols": landed})
 
-    if update_targets:
-        yield _progress("update", update_label, len(update_targets), len(update_targets))
+    if total:
+        yield _progress(update_label if update_targets else create_label)
     yield SyncEvent(kind="summary", data=counts)

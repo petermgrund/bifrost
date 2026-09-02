@@ -19,6 +19,7 @@ x-gramps-volumes: &gramps-volumes
   - ./data/gramps/media:/app/media
   - ./data/paperless/media/documents/originals:/app/media/paperless:ro
   - ./data/immich/library/upload:/app/media/immich:ro
+  - ./data/immich/library/thumbs:/app/media/immich-previews:ro
 
 x-bifrost: &bifrost
   build:

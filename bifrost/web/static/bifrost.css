@@ -343,3 +343,14 @@ menu.search-results > li > img.circle { inline-size: 2.5rem; block-size: 2.5rem;
 .chosen-media { display: flex; align-items: center; gap: 1rem; min-block-size: 3.5rem; margin-block: 0.875rem 1rem; }
 .chosen-media > img.circle { inline-size: 3.5rem; block-size: 3.5rem; object-fit: cover; flex: none; }
 .chosen-media > i { font-size: 2rem; }
+
+.chosen-media > button { margin-inline-start: 0.25rem; }
+.cite-list > li > img.circle { inline-size: 2.5rem; block-size: 2.5rem; object-fit: cover; flex: none; }
+.cite-list > li > i { font-size: 1.75rem; flex: none; }
+.cite-list > li > .max > div + div { margin-block-start: 0.125rem; }
+.cite-pick > li { cursor: pointer; }
+.cite-pick > li:hover, .cite-pick > li.active { background: var(--surface-container); }
+.cite-picker { block-size: auto; max-block-size: 85vh; }
+.cite-picker .cite-list { max-block-size: 55vh; overflow-y: auto; }
+.cite-card { margin-block: 0.5rem 1rem; }
+.cite-switch { display: inline-flex; align-items: center; gap: 0.75rem; }

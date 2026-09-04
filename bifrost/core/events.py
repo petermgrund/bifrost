@@ -5,7 +5,7 @@ from dataclasses import asdict, dataclass
 from typing import Literal
 
 Kind = Literal["started", "item", "summary", "error", "progress"]
-Entity = Literal["media", "face", "note", "place", "doc", "page"]
+Entity = Literal["media", "face", "note", "place", "doc", "page", "citation"]
 Action = Literal[
     "created", "updated", "replaced", "skipped", "failed",
     "would_create", "would_update", "would_replace",

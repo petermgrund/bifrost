@@ -171,9 +171,10 @@ const ACTION_WORDS = {
   uploaded: ['upload', 'uploaded', 'new version', 'new versions'],
   id_tags_written: ['write', 'wrote', 'ID tag', 'ID tags'],
   faces_linked: ['link', 'linked', 'face'],
+  citations_linked: ['attach', 'attached', 'citation'],
   boxes_added: ['add', 'added', 'face box', 'face boxes'],
 };
-const QUIET = new Set(['skipped', 'tx_skipped', 'baselined', 'errors', 'unreadable', 'unmatched']);
+const QUIET = new Set(['skipped', 'tx_skipped', 'baselined', 'errors', 'unreadable', 'unmatched', 'in_place', 'unsynced']);
 
 export function summarize(counts, applied) {
   if (!counts) return '';

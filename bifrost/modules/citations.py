@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -360,10 +361,57 @@ async def compose(
     return draft
 
 
+DATE_MODIFIERS = ["Regular", "Before", "After", "About", "Range", "Span"]
+DATE_QUALITIES = ["Regular", "Estimated", "Calculated"]
+MONTHS = ["January", "February", "March", "April", "May", "June", "July",
+          "August", "September", "October", "November", "December"]
+
+DATE_SCHEMA = {
+    "type": "object",
+    "description": (
+        "Date of the record entry itself (the census day, the baptism date, the "
+        "issue date), never the access date. Empty strings for any part the record "
+        "does not state."
+    ),
+    "properties": {
+        "modifier": {"type": "string", "enum": DATE_MODIFIERS},
+        "quality": {"type": "string", "enum": DATE_QUALITIES},
+        "year": {"type": "string"},
+        "month": {"type": "string", "description": "Month name in English, or empty."},
+        "day": {"type": "string"},
+    },
+    "required": ["modifier", "quality", "year", "month", "day"],
+}
+
 DUMP_SCHEMA = {
     **COMPOSE_SCHEMA,
     "properties": {
         **COMPOSE_SCHEMA["properties"],
+        "citation": {
+            **COMPOSE_SCHEMA["properties"]["citation"],
+            "properties": {**COMPOSE_SCHEMA["properties"]["citation"]["properties"],
+                           "date": DATE_SCHEMA},
+            "required": ["page", "confidence", "date"],
+        },
+        "suggested_sources": {
+            "type": "array",
+            "maxItems": 3,
+            "description": (
+                "Up to three EXISTING sources this record could belong to, best "
+                "first, each with a short reason. Empty when none plausibly fits. "
+                "When matched_source_gramps_id is set it must be the first entry."
+            ),
+            "items": {
+                "type": "object",
+                "properties": {
+                    "gramps_id": {"type": "string"},
+                    "reason": {"type": "string",
+                               "description": "One clause, e.g. 'same census county and year'."},
+                    "confidence": {"type": "string", "enum": ["high", "low"]},
+                },
+                "required": ["gramps_id", "reason", "confidence"],
+            },
+        },
         "matched_source_gramps_id": {
             "type": ["string", "null"],
             "description": "gramps_id of the EXISTING source this record belongs to, "
@@ -396,7 +444,11 @@ and return null for repository/source. If only the repository matches (new \
 source held by a known archive/platform), set matched_repository_gramps_id and \
 draft the new source. Match conservatively: a different county, volume, or year \
 range is a DIFFERENT source. When matched, compose the citation in that \
-source's established style."""
+source's established style. Also list up to three candidate existing sources in \
+suggested_sources, best first, each with the reason it could hold this record \
+and whether the match is high or low confidence; leave it empty when nothing \
+plausibly fits. Fill citation.date with the date the record itself bears, \
+leaving parts the record does not state empty."""
 
 # Back-compat alias
 DUMP_INSTRUCTIONS = DUMP_LEAD + "\n\n" + DUMP_MATCHING
@@ -555,6 +607,8 @@ async def compose_from_dump(
         revised = await _critique(anthropic, ctx, draft)
         revised["matched_source_gramps_id"] = draft.get("matched_source_gramps_id")
         revised["matched_repository_gramps_id"] = draft.get("matched_repository_gramps_id")
+        revised["suggested_sources"] = draft.get("suggested_sources")
+        revised.setdefault("citation", {})["date"] = (draft.get("citation") or {}).get("date")
         for k in ("source", "repository", "call_number"):
             if draft.get(k) is not None and revised.get(k) is None:
                 revised[k] = draft[k]
@@ -581,18 +635,84 @@ async def compose_from_dump(
                               or _from_existing(sid))
             if matched_source:
                 draft["matched_source_gramps_id"] = matched_source["gramps_id"]
+    suggested = []
+    raw = [s for s in (draft.get("suggested_sources") or [])
+           if isinstance(s, dict) and s.get("gramps_id")]
+    if matched_source and matched_source["gramps_id"] not in {s["gramps_id"] for s in raw}:
+        raw.insert(0, {"gramps_id": matched_source["gramps_id"],
+                       "reason": "matched by AI", "confidence": "high"})
+    for s in raw[:3]:
+        src = (next((x for x in sources if x["gramps_id"] == s["gramps_id"]), None)
+               or _from_existing(s["gramps_id"]))
+        if src and src["gramps_id"] not in {x["gramps_id"] for x in suggested}:
+            suggested.append({
+                **src, "reason": s.get("reason") or "matched by AI",
+                "confidence": "Low" if str(s.get("confidence", "")).lower() == "low" else "High"})
+    if not matched_source and suggested and not draft.get("source"):
+        matched_source = {k: v for k, v in suggested[0].items()
+                          if k not in ("reason", "confidence")}
+        draft["matched_source_gramps_id"] = matched_source["gramps_id"]
     if matched_source:
         draft["source"] = None
         draft["repository"] = None
     elif matched_repo:
         draft["repository"] = None
+    draft.pop("suggested_sources", None)
     return {"draft": draft, "matched_source": matched_source,
-            "matched_repository": matched_repo}
+            "matched_repository": matched_repo, "suggested": suggested}
 
 
 def _note_text(notes: dict) -> str:
     return (f"FIRST REFERENCE NOTE:\n{notes['first_reference'].strip()}\n\n"
             f"SHORT REFERENCE NOTE:\n{notes['short_reference'].strip()}")
+
+
+def _index(value, names: list[str]) -> int:
+    if isinstance(value, int):
+        return value
+    s = str(value or "").strip()
+    if s.isdigit():
+        return int(s)
+    return names.index(s) if s in names else 0
+
+
+def _month(value) -> int:
+    if isinstance(value, int):
+        return value
+    text = str(value or "").strip()
+    if text.isdigit():
+        return int(text)
+    return MONTHS.index(text) + 1 if text in MONTHS else 0
+
+
+def _sdn(year: int, month: int, day: int) -> int:
+    year += 4801 if year < 0 else 4800
+    if month > 2:
+        month -= 3
+    else:
+        month += 9
+        year -= 1
+    return (((year // 100) * 146097) // 4 + ((year % 100) * 1461) // 4
+            + (month * 153 + 2) // 5 + day - 32045)
+
+
+def gramps_date(parts: dict | None) -> dict | None:
+    """Gramps Date from {modifier, quality, year, month, day}; None when no part is set"""
+    if not parts:
+        return None
+    year = _index(parts.get("year"), [])
+    month = _month(parts.get("month"))
+    day = _index(parts.get("day"), [])
+    if not (year or month or day):
+        return None
+    modifier = _index(parts.get("modifier"), DATE_MODIFIERS)
+    quality = _index(parts.get("quality"), DATE_QUALITIES)
+    dateval = [day, month, year, False]
+    if modifier in (4, 5):
+        dateval += [0, 0, 0, False]
+    return {"_class": "Date", "dateval": dateval, "modifier": modifier, "quality": quality,
+            "calendar": 0, "text": "", "newyear": 0,
+            "sortval": _sdn(year, month or 1, day or 1) if year else 0}
 
 
 async def save(
@@ -604,8 +724,8 @@ async def save(
     source_handle: str | None,
     event_handle: str | None = None,
 ) -> dict:
-    """Create whatever is new (repository → source → note → citation) and return the ids"""
-    created: dict = {}
+    """Create whatever is new (repository → source → citation → notes) and list what was made"""
+    created: list[dict] = []
     now = int(datetime.utcnow().timestamp())
 
     async def mint(api_path: str, prefix: str) -> str:
@@ -625,7 +745,7 @@ async def save(
                        "private": False}] if r.get("url") else []),
         }
         await gramps.create_object(repo_obj)
-        created["repository"] = repo_gid
+        created.append({"type": "repository", "gramps_id": repo_gid, "title": r["name"]})
 
     if source_handle is None and draft.get("source"):
         s = draft["source"]
@@ -646,56 +766,65 @@ async def save(
             "tag_list": [], "private": False,
         }
         await gramps.create_object(src_obj)
-        created["source"] = src_gid
+        created.append({"type": "source", "gramps_id": src_gid, "title": s["title"]})
+        source_title = s["title"]
+    elif source_handle:
+        source_title = (await gramps.get_object("sources", source_handle)).get("title", "")
 
     if source_handle is None:
         raise ValueError("no source chosen and none drafted")
 
-    existing_notes = {i["gramps_id"] for i
-                      in await gramps._paged("/notes/", keys="gramps_id")
-                      if i.get("gramps_id")}
-    note_handle = generate_handle()
-    note_gid = next_sequential_id("N", existing_notes)
-    existing_notes.add(note_gid)
-    await gramps.create_object({
-        "_class": "Note", "handle": note_handle, "gramps_id": note_gid,
-        "text": {"_class": "StyledText", "string": _note_text(draft["notes"]), "tags": []},
-        "type": "Citation", "format": 0, "change": now,
-        "tag_list": [], "private": False,
-    })
-    created["note"] = note_gid
-
-    note_list = [note_handle]
-    abstract = (draft["notes"].get("abstract") or "").strip()
-    if abstract:
-        abstract_handle = generate_handle()
-        abstract_gid = next_sequential_id("N", existing_notes)
+    private = bool(draft.get("private"))
+    notes = draft.get("notes") or {}
+    note_list: list[str] = []
+    note_specs = []
+    if (notes.get("first_reference") or "").strip() or (notes.get("short_reference") or "").strip():
+        note_specs.append(("Citation", _note_text({
+            "first_reference": notes.get("first_reference") or "",
+            "short_reference": notes.get("short_reference") or ""}), "Reference notes"))
+    if (notes.get("abstract") or "").strip():
+        note_specs.append(("Abstract", notes["abstract"].strip(), "Abstract"))
+    existing_notes = set()
+    if note_specs:
+        existing_notes = {i["gramps_id"] for i
+                          in await gramps._paged("/notes/", keys="gramps_id")
+                          if i.get("gramps_id")}
+    pending_notes = []
+    for note_type, text, label in note_specs:
+        handle = generate_handle()
+        gid = next_sequential_id("N", existing_notes)
+        existing_notes.add(gid)
         await gramps.create_object({
-            "_class": "Note", "handle": abstract_handle, "gramps_id": abstract_gid,
-            "text": {"_class": "StyledText", "string": abstract, "tags": []},
-            "type": "Abstract", "format": 0, "change": now,
-            "tag_list": [], "private": False,
+            "_class": "Note", "handle": handle, "gramps_id": gid,
+            "text": {"_class": "StyledText", "string": text, "tags": []},
+            "type": note_type, "format": 0, "change": now,
+            "tag_list": [], "private": private,
         })
-        created["abstract_note"] = abstract_gid
-        note_list.append(abstract_handle)
+        note_list.append(handle)
+        pending_notes.append({"type": "note", "gramps_id": gid, "title": label})
 
     c = draft["citation"]
     citation_handle = generate_handle()
     cit_gid = await mint("citations", "C")
     cit_obj = {
         "_class": "Citation", "handle": citation_handle, "gramps_id": cit_gid,
-        "source_handle": source_handle, "page": c["page"],
-        "confidence": int(c["confidence"]), "change": now,
+        "source_handle": source_handle, "page": c.get("page") or "",
+        "confidence": int(c.get("confidence") or 0), "change": now,
         "note_list": note_list, "media_list": [], "attribute_list": [],
-        "tag_list": [], "private": False,
+        "tag_list": [], "private": private,
     }
+    date = gramps_date(c.get("date"))
+    if date:
+        cit_obj["date"] = date
     if media_handle:
         cit_obj["media_list"] = [{
             "_class": "MediaRef", "ref": media_handle, "rect": [],
             "attribute_list": [], "citation_list": [], "note_list": [], "private": False,
         }]
     await gramps.create_object(cit_obj)
-    created["citation"] = cit_gid
+    created.append({"type": "citation", "gramps_id": cit_gid, "title": cit_obj["page"],
+                    "source_title": source_title})
+    created.extend(pending_notes)
 
     if event_handle:
         ev = await gramps.get_object("events", event_handle)
@@ -704,7 +833,8 @@ async def save(
             cl.append(citation_handle)
             ev["citation_list"] = cl
             await gramps.update_object("events", event_handle, ev)
-        created["event"] = ev.get("gramps_id") or event_handle
+        created.append({"type": "event", "gramps_id": ev.get("gramps_id") or event_handle,
+                        "title": ev.get("description") or ""})
 
     with conn:
         conn.execute(
@@ -714,21 +844,24 @@ async def save(
              datetime.now().isoformat(timespec="seconds"),
              str(created)),
         )
-    return created
+    return {"created": created}
 
 
 async def context(gramps: GrampsClient) -> dict:
     """Everything the citations page needs to start: types, sources, repos"""
-    sources = await gramps._paged("/sources/")
-    repos = await gramps._paged("/repositories/")
+    sources = await gramps._paged(
+        "/sources/", keys="handle,gramps_id,title,author,pubinfo,abbrev,change")
+    repos = await gramps._paged("/repositories/", keys="handle,gramps_id,name,type,change")
     return {
         **load_citation_types(),
         "sources": [{"handle": s["handle"], "gramps_id": s["gramps_id"],
                      "title": s.get("title", ""), "author": s.get("author", ""),
-                     "pubinfo": s.get("pubinfo", ""), "abbrev": s.get("abbrev", "")}
+                     "pubinfo": s.get("pubinfo", ""), "abbrev": s.get("abbrev", ""),
+                     "change": s.get("change") or 0}
                     for s in sources],
         "repositories": [{"handle": r["handle"], "gramps_id": r["gramps_id"],
-                          "name": r.get("name", ""), "type": str(r.get("type", ""))}
+                          "name": r.get("name", ""), "type": str(r.get("type", "")),
+                          "change": r.get("change") or 0}
                          for r in repos],
     }
 
@@ -742,34 +875,75 @@ def recent_minted(conn: sqlite3.Connection, limit: int = 10,
     return [dict(r) for r in rows]
 
 
-async def cited_media_set(gramps: GrampsClient) -> set[str]:
-    cited: set[str] = set()
-    for c in await gramps._paged("/citations/"):
-        for mr in c.get("media_list", []):
-            if mr.get("ref"):
-                cited.add(mr["ref"])
-    return cited
+def media_origin(m: dict) -> str:
+    attrs = m.get("attribute_list") or []
+    if any(a.get("type") == "Paperless ID" for a in attrs):
+        return "paperless"
+    if any(a.get("type") == "Immich ID" for a in attrs):
+        return "immich"
+    return "other"
 
 
-async def media_listing(gramps: GrampsClient, uncited_only: bool) -> list[dict]:
-    cited = await cited_media_set(gramps)
-    out = []
-    for m in await gramps.list_media():
-        is_cited = m["handle"] in cited
-        if uncited_only and is_cited:
-            continue
-        src = next((a["value"] for a in m.get("attribute_list", [])
-                    if a.get("type") in ("Paperless ID", "Immich ID")), None)
-        out.append({
-            "handle": m["handle"], "gramps_id": m.get("gramps_id", ""),
+async def is_cited(gramps: GrampsClient, handle: str) -> int:
+    """How many citations reference the media object"""
+    try:
+        return len((await gramps.get_media_backlinks(handle)).get("citation") or [])
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def _media_row(m: dict, cited: int) -> dict:
+    return {"handle": m["handle"], "gramps_id": m.get("gramps_id", ""),
             "title": m.get("desc") or m.get("gramps_id", ""),
-            "cited": is_cited,
-            "origin": ("paperless" if any(a.get("type") == "Paperless ID"
-                                          for a in m.get("attribute_list", []))
-                       else "immich" if src else "other"),
-        })
-    out.sort(key=lambda r: (r["cited"], r["title"].lower()))
-    return out
+            "cited": cited, "origin": media_origin(m), "change": m.get("change") or 0}
+
+
+async def recently_changed_media(gramps: GrampsClient, limit: int = 30) -> list[dict]:
+    items = await gramps.recent_media(limit)
+    cited = await asyncio.gather(*(is_cited(gramps, m["handle"]) for m in items))
+    return [_media_row(m, c) for m, c in zip(items, cited)]
+
+
+async def bookmarks(gramps: GrampsClient) -> dict:
+    """The tree's bookmarked media, sources and repositories as picker rows"""
+    marks = await gramps.bookmarks()
+
+    async def media_rows(handles):
+        objs = await asyncio.gather(*(gramps.get_object("media", h) for h in handles))
+        cited = await asyncio.gather(*(is_cited(gramps, m["handle"]) for m in objs))
+        return [_media_row(m, c) for m, c in zip(objs, cited)]
+
+    async def rows(kind, handles, title_key):
+        objs = await asyncio.gather(*(gramps.get_object(kind, h) for h in handles))
+        return [{"handle": o["handle"], "gramps_id": o.get("gramps_id", ""),
+                 title_key: o.get(title_key, ""), "change": o.get("change") or 0}
+                for o in objs]
+
+    return {"media": await media_rows(marks.get("media") or []),
+            "sources": await rows("sources", marks.get("sources") or [], "title"),
+            "repositories": await rows("repositories", marks.get("repositories") or [], "name")}
+
+
+async def search_media(gramps: GrampsClient, query: str, limit: int = 10) -> list[dict]:
+    """Media matching a typed search, with origin and cited flags"""
+    if not query.strip():
+        return []
+    items = await gramps.search_media(query, limit)
+    cited = await asyncio.gather(*(is_cited(gramps, m["handle"]) for m in items))
+    return [_media_row(m, c) for m, c in zip(items, cited)]
+
+
+async def recent_details(gramps: GrampsClient, rows: list[dict]) -> list[dict]:
+    """Recent register rows with their current Gramps handle and cited flag"""
+    media = await asyncio.gather(*(gramps.get_media_by_gramps_id(r["gramps_id"]) for r in rows))
+    cited = await asyncio.gather(*(is_cited(gramps, m["handle"]) if m else _zero() for m in media))
+    return [{**r, "handle": m["handle"] if m else None, "in_gramps": m is not None, "cited": c,
+             "origin": media_origin(m) if m else "other"}
+            for r, m, c in zip(rows, media, cited)]
+
+
+async def _zero() -> int:
+    return 0
 
 
 def _event_date_text(ev: dict) -> str:
@@ -794,9 +968,7 @@ async def uncited_events(gramps: GrampsClient) -> list[dict]:
     return out
 
 
-async def event_detail(
-    gramps: GrampsClient, handle: str, cited: set[str]
-) -> dict:
+async def event_detail(gramps: GrampsClient, handle: str) -> dict:
     """One event in full plus the media worth citing it from (its own and its participants')"""
     e = await gramps.get_object("events", handle, profile="all", backlinks="true")
     prof = e.get("profile") or {}
@@ -837,7 +1009,7 @@ async def event_detail(
         media.append({
             "handle": ref, "gramps_id": m.get("gramps_id", ""),
             "title": m.get("desc") or m.get("gramps_id", ""),
-            "cited": ref in cited,
+            "cited": await is_cited(gramps, ref),
         })
 
     ctx = [f"Event: {prof.get('type') or e.get('type') or 'Event'}"

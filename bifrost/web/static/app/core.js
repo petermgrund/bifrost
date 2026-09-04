@@ -65,8 +65,9 @@ export function field(label, value, onInput, opts = {}) {
         @change=${(e) => { if (opts.onChange) opts.onChange(e); }}
         @keydown=${(e) => { if (e.key === 'Enter' && opts.onEnter) opts.onEnter(e); }}>`;
   const box = html`<div class="field ${opts.helper ? '' : 'label'} fill ${opts.rows ? 'textarea' : ''}
-      ${opts.small ? 'small no-margin' : ''} ${WIDTH[opts.width] || ''}">
-    ${input}${opts.helper ? nothing : html`<label>${label}</label>`}</div>`;
+      ${opts.small ? 'small no-margin' : ''} ${opts.error ? 'invalid' : ''} ${WIDTH[opts.width] || ''}">
+    ${input}${opts.helper ? nothing : html`<label>${label}</label>`}
+    ${opts.error ? html`<span class="error">${opts.error}</span>` : nothing}</div>`;
   return opts.helper
     ? html`${box}<p class="small-text secondary-text field-helper">${label}</p>`
     : box;
@@ -95,6 +96,15 @@ function searchRows({ items, active = -1, onPick, empty = 'No matches' }) {
         ${it.sub ? html`<div class="small-text secondary-text ${it.mono ? 'mono' : ''}">${it.sub}</div>` : nothing}
       </div>
     </li>`);
+}
+
+export function selectField(label, value, options, onChange, opts = {}) {
+  return html`<div class="field label suffix fill ${opts.small ? 'small no-margin' : ''} ${WIDTH[opts.width] || ''}">
+    <select @change=${onChange}>${options.map((o) => {
+    const [v, l] = Array.isArray(o) ? o : [o, o];
+    return html`<option value=${v} ?selected=${String(v) === String(value)}>${l}</option>`;
+  })}</select>
+    <label>${label}</label><i>arrow_drop_down</i></div>`;
 }
 
 export function searchField(opts) {

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import re
 
 import httpx
 
@@ -116,6 +118,33 @@ class GrampsClient:
 
     async def list_media(self) -> list[dict]:
         return await self._paged("/media/")
+
+    async def recent_media(self, limit: int = 30) -> list[dict]:
+        """Media objects most recently changed in Gramps"""
+        resp = await self._request(
+            "GET", "/media/",
+            params={"sort": "-change", "pagesize": limit, "page": 1,
+                    "keys": "handle,gramps_id,desc,attribute_list,change"})
+        items = resp.json()
+        return items if isinstance(items, list) else []
+
+    async def bookmarks(self) -> dict:
+        resp = await self._request("GET", "/bookmarks/")
+        data = resp.json()
+        return data if isinstance(data, dict) else {}
+
+    async def search_media(self, query: str, limit: int = 10) -> list[dict]:
+        """Media whose title or Gramps ID matches the query, via Gramps filter rules"""
+        pattern = re.escape(query.strip())
+        rules = {"function": "or", "rules": [
+            {"name": "HasMedia", "values": [pattern, "", "", ""], "regex": True},
+            {"name": "RegExpIdOf", "values": [pattern]}]}
+        resp = await self._request(
+            "GET", "/media/",
+            params={"rules": json.dumps(rules), "pagesize": limit, "page": 1,
+                    "keys": "handle,gramps_id,desc,attribute_list,change"})
+        items = resp.json()
+        return items if isinstance(items, list) else []
 
     async def count(self, path: str) -> int:
         """Total objects"""

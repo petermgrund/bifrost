@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import time
 from collections import defaultdict
 from typing import AsyncIterator
 
@@ -12,6 +13,9 @@ from ..core.config import SyncPaperlessConfig
 from ..core.events import SyncEvent
 
 APID_RE = re.compile(r"1,(\d+)::(\d+)")
+INDEX_CACHE_KEY = "ancestry_apid_index"
+INDEX_TTL_S = 600
+INDEX_PAGE = 1000
 DBID_RE = re.compile(r"[?&]dbid=(\d+)")
 H_RE = re.compile(r"[?&]h=(\d+)")
 
@@ -39,15 +43,18 @@ def configured(cfg: SyncPaperlessConfig) -> bool:
     return bool(cfg.source_url_field_id and cfg.gramps_id_field_id)
 
 
-async def apid_index(gramps: GrampsClient) -> dict[tuple[str, str], list[dict]]:
-    """Citations by Ancestry record key, from their _APID attributes"""
-    index: dict[tuple[str, str], list[dict]] = defaultdict(list)
-    for c in await gramps._paged("/citations/", page_size=1000,
-                                 keys="handle,gramps_id,media_list,attribute_list"):
+def _index_batch(index: dict, batch: list[dict]) -> None:
+    for c in batch:
         for a in c.get("attribute_list") or []:
             if a.get("type") == "_APID" and (key := apid_key(a.get("value"))):
                 index[key].append(c)
-    return index
+
+
+def cached_index(cache: dict | None) -> dict | None:
+    entry = (cache or {}).get(INDEX_CACHE_KEY)
+    if entry and time.time() - entry["at"] < INDEX_TTL_S:
+        return entry["index"]
+    return None
 
 
 async def candidates(paperless: PaperlessClient, cfg: SyncPaperlessConfig,
@@ -88,7 +95,7 @@ async def link(
     apply: bool,
     selected: set[str] | None = None,
     doc_ids: list[int] | None = None,
-    index: dict | None = None,
+    cache: dict | None = None,
 ) -> AsyncIterator[SyncEvent]:
     """Attach each Ancestry document's media object to the citations carrying its _APID"""
     rows, unsynced = await candidates(paperless, cfg, doc_ids)
@@ -96,15 +103,33 @@ async def link(
                     detail=f"{len(rows)} Ancestry document(s) with a Gramps media object")
     counts = {"citations_linked": 0, "in_place": 0, "unmatched": 0, "unsynced": len(unsynced),
               "errors": 0}
+    tag_name = cfg.sync_tags[0] if cfg.sync_tags else ""
+    tag_id = await paperless.resolve_tag_id(tag_name) if unsynced and tag_name else None
     for d in unsynced:
-        yield SyncEvent(**_doc_row(d), action="failed",
-                        detail="not synced to Gramps yet, run the Paperless sync first")
-    if rows:
-        yield _progress("Indexing citations", 0, len(rows) + 1)
-        if index is None:
-            index = await apid_index(gramps)
+        tagged = tag_id is not None and tag_id in (d.get("tags") or [])
+        yield SyncEvent(**_doc_row(d), action="failed", data={"reason": "unsynced"},
+                        detail=(f"tagged {tag_name} but not synced to Gramps yet, run the Paperless sync"
+                                if tagged else
+                                f"no {tag_name} tag, so the Paperless sync skips it; the ledger's "
+                                "Link citations button tags and syncs it"))
+    index = cached_index(cache) if rows else None
+    if rows and index is None:
+        index = defaultdict(list)
+        page, done, total = 1, 0, 0
+        yield _progress("Indexing citations", 0, 0)
+        while True:
+            batch, total = await gramps.page_of(
+                "/citations/", page, INDEX_PAGE, keys="handle,gramps_id,media_list,attribute_list")
+            _index_batch(index, batch)
+            done += len(batch)
+            yield _progress("Indexing citations", min(done, total), total)
+            if len(batch) < INDEX_PAGE:
+                break
+            page += 1
+        if cache is not None:
+            cache[INDEX_CACHE_KEY] = {"at": time.time(), "index": index}
     for i, row in enumerate(sorted(rows, key=lambda r: r["doc"]["id"])):
-        yield _progress("Matching records", i + 1, len(rows) + 1)
+        yield _progress("Matching records", i + 1, len(rows))
         doc, key, gid = row["doc"], row["key"], row["gramps_id"]
         media = await gramps.get_media_by_gramps_id(gid)
         if not media:
@@ -149,6 +174,4 @@ async def link(
             yield SyncEvent(kind="item", entity="citation", action="updated",
                             source_id=source_id, gramps_id=c["gramps_id"],
                             title=doc.get("title") or f"#{doc['id']}", data={"cols": cols})
-    if rows:
-        yield _progress("Matching records", len(rows) + 1, len(rows) + 1)
     yield SyncEvent(kind="summary", data=counts)

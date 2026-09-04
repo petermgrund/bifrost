@@ -465,7 +465,7 @@ class CitationsPage extends BifrostElement {
           : s.pl.error ? `Paperless document unavailable: ${s.pl.error}`
             : !this.draftable ? 'The Paperless document has no transcript, source URL or notes to draft from.'
               : s.drafted ? 'Fields below were filled by AI. Change anything before adding.'
-                : 'Drafts from the Paperless transcript, source URL and notes in your citation style. Fills Source, Page, Date, Confidence and Notes.';
+                : 'Requires a Paperless transcript';
     return html`<nav class="wrap">
       ${btn(html`<i>auto_awesome</i><span>${s.drafting ? 'Drafting...' : s.drafted ? 'Draft again' : 'Draft with AI'}</span>`,
     s.drafting || !this.draftable, () => this.draft(), 'border')}

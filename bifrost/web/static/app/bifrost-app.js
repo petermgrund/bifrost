@@ -7,6 +7,7 @@ import './citations-page.js';
 import './faces-page.js';
 import './faces-backfill-page.js';
 import './places-page.js';
+import './ancestry-links-page.js';
 
 const SECTIONS = [
   { id: 'sync', title: 'Sync',
@@ -15,7 +16,9 @@ const SECTIONS = [
       <div class="large-space"></div>
       <immich-sync-page></immich-sync-page>
       <div class="large-space"></div>
-      <faces-backfill-page></faces-backfill-page>` },
+      <faces-backfill-page></faces-backfill-page>
+      <div class="large-space"></div>
+      <ancestry-links-page></ancestry-links-page>` },
   { id: 'transcribe', title: 'Transcribe', desc: 'Manage OCR for Paperless docs',
     body: html`<transcribe-page></transcribe-page>` },
   { id: 'reprocess', title: 'Reprocess', desc: 'Rebuild a Paperless doc so all pages are the same width',

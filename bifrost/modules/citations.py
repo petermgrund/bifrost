@@ -475,8 +475,14 @@ def _type_guidance_digest() -> str:
 async def media_citations(gramps: GrampsClient, media_handle: str) -> list[dict]:
     """Citations already on a media object, with context to compose a sibling in the same style"""
     out = []
-    for c in await gramps._paged("/citations/"):
-        if not any(mr.get("ref") == media_handle for mr in c.get("media_list", [])):
+    try:
+        handles = (await gramps.get_media_backlinks(media_handle)).get("citation") or []
+    except Exception:  # noqa: BLE001
+        handles = []
+    for ch in handles:
+        try:
+            c = await gramps.get_object("citations", ch)
+        except Exception:  # noqa: BLE001
             continue
         src = None
         if c.get("source_handle"):

@@ -393,3 +393,35 @@ def test_save_skips_notes_when_all_empty_and_creates_the_new_source(tmp_path):
     assert "date" not in gr.created[1] and gr.created[1]["private"] is False
     assert [(c["type"], c["title"]) for c in r["created"]] == [("source", "New src"), ("citation", "")]
     conn.close()
+
+
+class _BacklinkGramps:
+    def __init__(self):
+        self.calls = []
+        self.objects = {
+            ("citations", "c1"): {"gramps_id": "C1", "page": "p. 3", "confidence": 3,
+                                  "source_handle": "s1", "note_list": ["n1"], "media_list": [{"ref": "m1"}]},
+            ("sources", "s1"): {"handle": "s1", "gramps_id": "S1", "title": "1930 census"},
+            ("notes", "n1"): {"type": "Citation", "text": {"string": " first ref "}},
+        }
+
+    async def get_media_backlinks(self, handle):
+        self.calls.append(("backlinks", handle))
+        return {"citation": ["c1"], "person": ["p9"]}
+
+    async def get_object(self, kind, handle, **params):
+        self.calls.append((kind, handle))
+        return self.objects[(kind, handle)]
+
+    async def _paged(self, *a, **kw):
+        raise AssertionError("media_citations must not list every citation")
+
+
+def test_media_citations_come_from_backlinks_not_a_full_scan():
+    from bifrost.modules.citations import media_citations
+    gr = _BacklinkGramps()
+    rows = asyncio.run(media_citations(gr, "m1"))
+    assert rows == [{"gramps_id": "C1", "page": "p. 3", "confidence": 3, "source_gramps_id": "S1",
+                     "source_handle": "s1", "source_title": "1930 census",
+                     "notes": [{"type": "Citation", "text": "first ref"}]}]
+    assert gr.calls[0] == ("backlinks", "m1")

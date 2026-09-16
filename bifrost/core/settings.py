@@ -38,6 +38,18 @@ def set_setting(conn: sqlite3.Connection, key: str, value: str) -> None:
             (key, value))
 
 
+DESCRIPTION_LINK_KEY = "photos.description_link"
+
+
+def get_description_link(conn: sqlite3.Connection) -> bool:
+    return get_setting(conn, DESCRIPTION_LINK_KEY, "0") == "1"
+
+
+def set_description_link(conn: sqlite3.Connection, on: bool) -> bool:
+    set_setting(conn, DESCRIPTION_LINK_KEY, "1" if on else "0")
+    return on
+
+
 def get_theme_seed(conn: sqlite3.Connection) -> str:
     return get_setting(conn, THEME_SEED_KEY, DEFAULT_THEME_SEED)
 

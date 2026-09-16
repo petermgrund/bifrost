@@ -72,6 +72,8 @@ class ImmichClient:
         filename: str | None = None,
         order: str = "desc",
         tag_id: str | None = None,
+        description: str | None = None,
+        order_by: str | None = None,
     ) -> dict:
         body: dict = {
             "page": page, "size": size, "order": order,
@@ -81,8 +83,12 @@ class ImmichClient:
             body["personIds"] = [_checked_id(person_id)]
         if filename:
             body["originalFileName"] = filename
+        if description:
+            body["description"] = description
         if tag_id:
             body["tagIds"] = [_checked_id(tag_id)]
+        if order_by:
+            body["orderBy"] = {"field": order_by, "direction": order}
         data = (await self._request("POST", "/search/metadata", json=body)).json()
         assets = data.get("assets") or {}
         #  v3.0.1 reports nextPage as a string
@@ -108,6 +114,28 @@ class ImmichClient:
                     return asset_id, None
 
         return dict(await asyncio.gather(*(one(a) for a in asset_ids)))
+
+    async def update_asset(self, asset_id: str, **fields) -> dict:
+        return (await self._request(
+            "PUT", f"/assets/{_checked_id(asset_id)}", json=fields)).json()
+
+    async def get_asset_metadata(self, asset_id: str) -> dict[str, dict]:
+        items = (await self._request(
+            "GET", f"/assets/{_checked_id(asset_id)}/metadata")).json()
+        return {i["key"]: i.get("value") or {} for i in items or [] if i.get("key")}
+
+    async def upsert_asset_metadata(self, asset_id: str, key: str, value: dict) -> None:
+        await self._request(
+            "PUT", f"/assets/{_checked_id(asset_id)}/metadata",
+            json={"items": [{"key": key, "value": value}]})
+
+    async def delete_asset_metadata(self, asset_id: str, key: str) -> None:
+        try:
+            await self._request(
+                "DELETE", f"/assets/{_checked_id(asset_id)}/metadata/{key}")
+        except ImmichError as exc:
+            if exc.status != 404:
+                raise
 
     async def get_faces(self, asset_id: str) -> list[dict]:
         return (await self._request("GET", "/faces", params={"id": _checked_id(asset_id)})).json()
@@ -147,8 +175,45 @@ class ImmichClient:
             "DELETE", f"/tags/{_checked_id(tag_id)}/assets",
             json={"ids": [_checked_id(asset_id)]})
 
+    async def tag_assets(self, tag_ids: list[str], asset_ids: list[str]) -> None:
+        await self._request(
+            "PUT", "/tags/assets",
+            json={"tagIds": [_checked_id(t) for t in tag_ids],
+                  "assetIds": [_checked_id(a) for a in asset_ids]})
+
     async def list_stacks(self) -> list[dict]:
         return (await self._request("GET", "/stacks")).json()
+
+    async def get_stack(self, stack_id: str) -> dict:
+        return (await self._request("GET", f"/stacks/{_checked_id(stack_id)}")).json()
+
+    async def create_stack(self, asset_ids: list[str]) -> dict:
+        """First id becomes the primary; stacks whose primary is listed are merged in"""
+        return (await self._request(
+            "POST", "/stacks", json={"assetIds": [_checked_id(a) for a in asset_ids]})).json()
+
+    async def update_stack(self, stack_id: str, primary_asset_id: str) -> dict:
+        return (await self._request(
+            "PUT", f"/stacks/{_checked_id(stack_id)}",
+            json={"primaryAssetId": _checked_id(primary_asset_id)})).json()
+
+    async def remove_stack_asset(self, stack_id: str, asset_id: str) -> None:
+        await self._request(
+            "DELETE", f"/stacks/{_checked_id(stack_id)}/assets/{_checked_id(asset_id)}")
+
+    async def list_duplicates(self) -> list[dict]:
+        return (await self._request("GET", "/duplicates")).json()
+
+    async def create_face(self, asset_id: str, person_id: str, image_width: int, image_height: int,
+                          x: int, y: int, width: int, height: int) -> None:
+        await self._request("POST", "/faces", json={
+            "assetId": _checked_id(asset_id), "personId": _checked_id(person_id),
+            "imageWidth": image_width, "imageHeight": image_height,
+            "x": x, "y": y, "width": width, "height": height})
+
+    async def reassign_face(self, person_id: str, face_id: str) -> None:
+        await self._request(
+            "PUT", f"/faces/{_checked_id(person_id)}", json={"id": _checked_id(face_id)})
 
     async def list_people(self, with_hidden: bool = True) -> list[dict]:
         people: list[dict] = []
@@ -174,10 +239,10 @@ class ImmichClient:
             "GET", f"/people/{_checked_id(person_id)}/thumbnail")
         return resp.content, resp.headers.get("Content-Type", "image/jpeg")
 
-    async def asset_thumbnail(self, asset_id: str) -> tuple[bytes, str]:
+    async def asset_thumbnail(self, asset_id: str, size: str = "thumbnail") -> tuple[bytes, str]:
         resp = await self._request(
             "GET", f"/assets/{_checked_id(asset_id)}/thumbnail",
-            params={"size": "thumbnail"})
+            params={"size": "preview" if size == "preview" else "thumbnail"})
         return resp.content, resp.headers.get("Content-Type", "image/jpeg")
 
     async def preview_file(self, asset_id: str) -> tuple[str, str] | None:

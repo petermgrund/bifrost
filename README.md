@@ -15,6 +15,7 @@ Your family-tree data itself always lives in Gramps and the source systems. Bifr
 # Features
 
 * Sync Immich photos into Gramps as media objects. Use Tags in Immich to mark a photo for sync and define a fuzzy date (like about 1920 or before June 1955).
+* Curate Immich photos for Gramps from one page: title, fuzzy date, Gramps place, people and notes, written back to Immich as the same tags. Keep rescans and restored copies together as versions that share one Gramps media object and one set of metadata, and arrange photos in collections with an order you choose.
 * Sync documents in Paperless-ngx to Gramps Web as media objects, and keep their versions, titles, dates, and transcription text up to date.
 * Link Immich's face recognition to Gramps people by pairing each recognized face with its Gramps person once. Then, every synced photo gets face boxes in Gramps.
 * Draft properly formatted genealogical source citations with the help of AI.

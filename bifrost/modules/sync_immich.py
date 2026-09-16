@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import math
+import re
 import sqlite3
 from datetime import datetime, timezone
 from typing import AsyncIterator
@@ -12,7 +14,8 @@ from ..core.clients import GrampsClient, ImmichClient
 from ..core.clients.immich import ImmichError
 from ..core.config import SyncImmichConfig
 from ..core.events import SyncEvent
-from .sync_paperless import format_gramps_date
+from .citations import next_sequential_id
+from .sync_paperless import build_note_obj, format_gramps_date
 
 _MODIFIERS = {"regular": 0, "before": 1, "after": 2, "about": 3, "range": 4, "span": 5, "textonly": 6}
 _QUALITIES = {"regular": 0, "estimated": 1, "calculated": 2}
@@ -28,6 +31,9 @@ TAG_DATE_ESTIMATED = "date/estimated"
 TAG_DATE_CALCULATED = "date/calculated"
 TAG_DATE_YEAR = "date/year"
 TAG_DATE_MONTH = "date/month"
+METADATA_KEY = "bifrost"
+NOTE_TYPE = "Media Note"
+_URL_LINE_RE = re.compile(r"^https?://\S+$")
 
 EARTH_RADIUS_KM = 6371.0
 MAX_PLACE_DISTANCE_KM = 0.25
@@ -246,8 +252,10 @@ def _merge_copies(copies: list[tuple[str, dict]]) -> dict:
     owner_tags = tag_values(base) if matched else set()
     other_tags = set().union(*(tag_values(c) for _, c in copies)) - owner_tags
     tags = merge_tag_values(owner_tags, other_tags)
+    spelling = {(t.get("value") or "").lower(): t["value"]
+                for _, c in copies for t in c.get("tags") or [] if t.get("value")}
     return {**base,
-            "tags": [{"value": t} for t in sorted(tags)],
+            "tags": [{"value": spelling.get(t, t)} for t in sorted(tags)],
             _OWNER_TAGS_KEY: sorted(owner_tags) if matched else None}
 
 
@@ -461,6 +469,8 @@ async def sync_one_asset(
     cfg: SyncImmichConfig,
     asset_id: str,
     gramps_id: str | None = None,
+    update: bool = False,
+    places: dict | None = None,
 ) -> AsyncIterator[SyncEvent]:
     """Create the Gramps media for one Immich asset; re-runs finish links idempotently"""
     yield SyncEvent(kind="started", detail=f"immich asset {asset_id}")
@@ -505,16 +515,28 @@ async def sync_one_asset(
             row = rows[0] if rows else None
     existing = await gramps.get_media_by_gramps_id(row[0]) if row else None
 
+    counts = new_counts()
+    updated_cols: dict = {}
+    refreshed = existing is not None and update
     if existing is not None:
         gid = existing["gramps_id"]
         media_handle = existing["handle"]
         title = existing.get("desc") or ""
         gramps_path = existing.get("path") or ""
+        media_obj = existing
         created = False
         yield SyncEvent(
             kind="item", entity="media", action="skipped", source_id=asset_id,
             gramps_id=gid, title=title, detail="already in Gramps",
         )
+        if update:
+            async for ev in update_synced(gramps, accounts, conn, cfg, gid, asset, existing,
+                                          places, True, None, counts):
+                if ev.kind == "item" and ev.entity == "media" and ev.action == "updated":
+                    updated_cols.update((ev.data or {}).get("cols") or {})
+                yield ev
+            title = existing.get("desc") or title
+            gramps_path = existing.get("path") or gramps_path
     else:
         live_ids = await gramps.list_media_gramps_ids()
         if gramps_id:
@@ -562,17 +584,24 @@ async def sync_one_asset(
             gramps_id=gid, title=title, detail=gramps_path,
         )
 
-    tag_cols = id_tag_plan(asset, gid, cfg)
-    if tag_cols:
-        tag_error = await write_id_tag(accounts, asset, gid, cfg)
-        if tag_error:
-            yield SyncEvent(
-                kind="item", entity="tag", action="failed", source_id=asset_id,
-                gramps_id=gid, title=title, detail=tag_error)
-        else:
-            yield SyncEvent(
-                kind="item", entity="tag", action="created", source_id=asset_id,
-                gramps_id=gid, title=title, detail=id_tag_path(cfg, gid))
+    if not refreshed:
+        tag_cols = id_tag_plan(asset, gid, cfg)
+        if tag_cols:
+            tag_error = await write_id_tag(accounts, asset, gid, cfg)
+            if tag_error:
+                yield SyncEvent(
+                    kind="item", entity="tag", action="failed", source_id=asset_id,
+                    gramps_id=gid, title=title, detail=tag_error)
+            else:
+                yield SyncEvent(
+                    kind="item", entity="tag", action="created", source_id=asset_id,
+                    gramps_id=gid, title=title, detail=id_tag_path(cfg, gid))
+        if created or tag_cols:
+            record_error = await write_link_record(accounts, conn, asset, gid, cfg)
+            if record_error:
+                yield SyncEvent(
+                    kind="item", entity="tag", action="failed", source_id=asset_id,
+                    gramps_id=gid, title=title, detail=record_error)
 
     person_map = person_links_map(conn)
     face_results = new_face_results()
@@ -591,35 +620,44 @@ async def sync_one_asset(
     people_failed = face_results["people_failed"]
 
     place_linked = None
-    if cfg.place_tag_handle and TAG_SYNC_LOCATION in tag_values(asset):
-        coords = asset_coords(asset)
-        if coords:
+    if not refreshed:
+        try:
+            found = await resolve_place(gramps, asset, cfg, places)
+        except SyncError as exc:
+            found = None
+            yield SyncEvent(kind="item", entity="place", action="failed",
+                            source_id=asset_id, detail=exc.detail)
+        except Exception as exc:
+            found = None
+            yield SyncEvent(kind="item", entity="place", action="failed",
+                            source_id=asset_id,
+                            detail=f"could not list Gramps places: {str(exc)[:180]}")
+        if found:
+            place, how = found
+            place_name = place_label(place)
             try:
-                places = await linkable_places(gramps, cfg)
+                linked = await _link_place(gramps, place, media_handle)
+                place_linked = place_name
+                if linked:
+                    yield SyncEvent(kind="item", entity="place", action="created",
+                                    source_id=asset_id, gramps_id=place.get("gramps_id"),
+                                    title=place_name, detail=_PLACE_DETAIL[how])
             except Exception as exc:
-                places = []
                 yield SyncEvent(kind="item", entity="place", action="failed",
-                                source_id=asset_id,
-                                detail=f"could not list Gramps places: {str(exc)[:180]}")
-            result = closest_place(coords[0], coords[1], places)
-            if result:
-                place = result[0]
-                place_name = (place.get("name") or {}).get("value") or place.get("gramps_id") or "?"
-                refs = place.setdefault("media_list", [])
-                if any(r.get("ref") == media_handle for r in refs):
-                    place_linked = place_name
-                else:
-                    refs.append(_media_ref(media_handle))
-                    try:
-                        await gramps.update_place(place["handle"], place)
-                        place_linked = place_name
-                        yield SyncEvent(kind="item", entity="place", action="created",
-                                        source_id=asset_id, gramps_id=place.get("gramps_id"),
-                                        title=place_name, detail="media↔place link (GPS)")
-                    except Exception as exc:
-                        yield SyncEvent(kind="item", entity="place", action="failed",
-                                        source_id=asset_id, title=place_name,
-                                        detail=str(exc)[:200])
+                                source_id=asset_id, title=place_name,
+                                detail=str(exc)[:200])
+
+    note_synced = None
+    if not refreshed and cfg.note_sync_tag.lower() in tag_values(asset):
+        try:
+            ev = await sync_note(gramps, conn, asset_id, gid, media_obj, apply=True)
+        except Exception as exc:
+            yield SyncEvent(kind="item", entity="note", action="failed", source_id=asset_id,
+                            gramps_id=gid, title=title, detail=str(exc)[:200])
+        else:
+            if ev:
+                note_synced = ev.action
+                yield ev
 
     yield SyncEvent(
         kind="summary", entity="media", gramps_id=gid, title=title,
@@ -634,17 +672,35 @@ async def sync_one_asset(
             "people_linked": people_linked,
             "people_unmatched": people_unmatched,
             "people_failed": people_failed,
+            "updated": updated_cols,
+            "note": note_synced,
+            "errors": counts["errors"],
         },
     )
 
 
 _TAG_ASSET_CAP = 5000
 _DETAIL_BATCH = 40
+_PLACE_DETAIL = {"gps": "media↔place link (GPS)", "tag": "media↔place link"}
+
+
+def new_counts() -> dict:
+    return {"created": 0, "titles_updated": 0, "dates_updated": 0,
+            "versions_updated": 0, "links_updated": 0, "places_linked": 0,
+            "id_tags_written": 0, "notes_synced": 0, "skipped": 0, "errors": 0}
+
+
+def split_description(text: str) -> tuple[str, str | None]:
+    """(title, trailing URL line or None)"""
+    lines = [line.strip() for line in (text or "").strip().splitlines()]
+    if len(lines) >= 2 and _URL_LINE_RE.match(lines[-1]):
+        return "\n".join(lines[:-1]).strip(), lines[-1]
+    return "\n".join(lines).strip(), None
 
 
 def wanted_title(asset: dict) -> str:
     if TAG_SYNC_DESCRIPTION in tag_values(asset):
-        desc = ((asset.get("exifInfo") or {}).get("description") or "").strip()
+        desc = split_description((asset.get("exifInfo") or {}).get("description") or "")[0]
         if desc:
             return desc
     return asset.get("originalFileName") or ""
@@ -653,7 +709,7 @@ def wanted_title(asset: dict) -> str:
 def wanted_update_title(asset: dict) -> str | None:
     """None = hands off"""
     if TAG_SYNC_DESCRIPTION in tag_values(asset):
-        return ((asset.get("exifInfo") or {}).get("description") or "").strip() or None
+        return split_description((asset.get("exifInfo") or {}).get("description") or "")[0] or None
     return None
 
 
@@ -724,6 +780,144 @@ async def write_id_tag(
     return None
 
 
+def link_record(gramps_id: str | None, cfg: SyncImmichConfig, notes: str = "") -> dict:
+    """The bifrost metadata record an asset carries in Immich"""
+    rec: dict = {}
+    if gramps_id:
+        rec["gramps_id"] = gramps_id
+        if cfg.gramps_public_url:
+            rec["gramps_url"] = f"{cfg.gramps_public_url}/media/{gramps_id}"
+    if (notes or "").strip():
+        rec["notes"] = notes.strip()
+    return rec
+
+
+async def write_link_record(
+    accounts: list[ImmichClient], conn: sqlite3.Connection, asset: dict,
+    gramps_id: str, cfg: SyncImmichConfig,
+) -> str | None:
+    client, _probe_error = await owner_client(accounts, asset)
+    row = note_for(conn, asset["id"], gramps_id)
+    try:
+        await client.upsert_asset_metadata(
+            asset["id"], METADATA_KEY, link_record(gramps_id, cfg, row["text"] if row else ""))
+    except ImmichError as exc:
+        return f"link record write failed: {exc.message}"
+    return None
+
+
+def note_for(conn: sqlite3.Connection, asset_id: str, gramps_id: str | None) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT * FROM photo_notes WHERE asset_id=? OR (gramps_id IS NOT NULL AND gramps_id=?) "
+        "ORDER BY asset_id=? DESC LIMIT 1",
+        (asset_id, gramps_id or "", asset_id)).fetchone()
+
+
+async def sync_note(
+    gramps: GrampsClient, conn: sqlite3.Connection, asset_id: str, gramps_id: str,
+    media: dict, apply: bool = True,
+) -> SyncEvent | None:
+    """Mirror the photo's note into a Gramps note on its media object"""
+    row = note_for(conn, asset_id, gramps_id)
+    text = (row["text"] if row else "").strip()
+    if not text:
+        return None
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    if row["note_handle"] and row["synced_hash"] == digest:
+        return None
+    is_update = bool(row["note_handle"])
+    word = "updated" if is_update else "created"
+    if not apply:
+        return SyncEvent(kind="item", entity="note", action="would_update", source_id=asset_id,
+                         gramps_id=gramps_id, title=media.get("desc"),
+                         data={"cols": {"note": f"{len(text)} chars"}})
+    if is_update:
+        handle, nid = row["note_handle"], row["note_gramps_id"]
+        await gramps.update_note(handle, build_note_obj(handle, nid, text, NOTE_TYPE))
+    else:
+        handle = ids.generate_handle()
+        items = await gramps._paged("/notes/", keys="gramps_id")
+        nid = next_sequential_id("N", {i["gramps_id"] for i in items if i.get("gramps_id")})
+        await gramps.create_note(build_note_obj(handle, nid, text, NOTE_TYPE))
+        notes = media.setdefault("note_list", [])
+        if handle not in notes:
+            notes.append(handle)
+            await gramps.update_media(media["handle"], media)
+    with conn:
+        conn.execute(
+            "UPDATE photo_notes SET gramps_id=?, note_handle=?, note_gramps_id=?, "
+            "synced_hash=?, updated_at=? WHERE asset_id=?",
+            (gramps_id, handle, nid, digest, _now(), row["asset_id"]))
+    return SyncEvent(kind="item", entity="note", action=word, source_id=asset_id,
+                     gramps_id=gramps_id, title=media.get("desc"),
+                     data={"cols": {"note": f"{len(text)} chars"}})
+
+
+def place_tag_value(asset: dict, cfg: SyncImmichConfig) -> str | None:
+    """The Gramps place id named by the asset's Place/{id} tag"""
+    if not cfg.place_tag_prefix:
+        return None
+    prefix = cfg.place_tag_prefix.lower() + "/"
+    for tag in sorted((t.get("value") or "") for t in asset.get("tags") or []):
+        if tag.lower().startswith(prefix) and len(tag) > len(prefix):
+            return tag[len(prefix):]
+    return None
+
+
+def place_label(place: dict) -> str:
+    return (place.get("name") or {}).get("value") or place.get("gramps_id") or "?"
+
+
+def place_index(places: list[dict], cfg: SyncImmichConfig, failed: bool = False) -> dict:
+    """Places by gramps_id plus the coordinate-bearing subset the GPS match uses"""
+    return {
+        "by_gid": {p["gramps_id"]: p for p in places if p.get("gramps_id")},
+        "with_coords": [p for p in places
+                        if cfg.place_tag_handle and cfg.place_tag_handle in (p.get("tag_list") or [])
+                        and p.get("lat") and p.get("long")],
+        "failed": failed,
+    }
+
+
+async def resolve_place(
+    gramps: GrampsClient, asset: dict, cfg: SyncImmichConfig, index: dict | None,
+) -> tuple[dict, str] | None:
+    """(place, 'tag' | 'gps') for an asset, its Place tag first"""
+    if index is not None and index.get("failed"):
+        return None
+    gid = place_tag_value(asset, cfg)
+    if gid:
+        if index is not None:
+            place = index["by_gid"].get(gid)
+        else:
+            place = await gramps.get_place_by_gramps_id(gid)
+        if place is None:
+            raise SyncError(400, f"{cfg.place_tag_prefix}/{gid} names no Gramps place")
+        return place, "tag"
+    if TAG_SYNC_LOCATION not in tag_values(asset):
+        return None
+    coords = asset_coords(asset)
+    if not coords:
+        return None
+    places = index["with_coords"] if index is not None else await linkable_places(gramps, cfg)
+    result = closest_place(coords[0], coords[1], places)
+    return (result[0], "gps") if result else None
+
+
+async def _link_place(gramps: GrampsClient, place: dict, media_handle: str) -> bool:
+    """Add the media to the place's gallery; False when it already was there"""
+    refs = place.setdefault("media_list", [])
+    if any(r.get("ref") == media_handle for r in refs):
+        return False
+    refs.append(_media_ref(media_handle))
+    try:
+        await gramps.update_place(place["handle"], place)
+    except Exception:
+        refs.pop()
+        raise
+    return True
+
+
 def update_plan(asset: dict, media: dict, cfg: SyncImmichConfig,
                 preview: tuple[str, str] | None = None) -> dict:
     """Pending-change cols for an already-synced asset ({} = in sync)"""
@@ -764,6 +958,187 @@ async def _tagged_scope(immich: ImmichClient, tag_id: str) -> tuple[list[dict], 
     return items, bool(page)
 
 
+async def update_synced(
+    gramps: GrampsClient,
+    accounts: list[ImmichClient],
+    conn: sqlite3.Connection,
+    cfg: SyncImmichConfig,
+    gid: str,
+    asset: dict,
+    media: dict | None,
+    places: dict | None,
+    apply: bool,
+    selected: set[str] | None,
+    counts: dict,
+) -> AsyncIterator[SyncEvent]:
+    """Bring one registered media object up to date with its Immich asset"""
+    asset_id = asset["id"]
+    if media is None:
+        try:
+            media = await gramps.get_media_by_gramps_id(gid)
+        except Exception as exc:
+            counts["errors"] += 1
+            yield SyncEvent(kind="item", entity="media", action="failed",
+                            source_id=asset_id, gramps_id=gid,
+                            title=wanted_title(asset),
+                            detail=f"Gramps lookup failed: {str(exc)[:200]}")
+            return
+        if media is None:
+            counts["errors"] += 1
+            yield SyncEvent(kind="item", entity="media", action="failed",
+                            source_id=asset_id, gramps_id=gid,
+                            title=wanted_title(asset),
+                            detail=f"the register points at {gid}, which is not in Gramps")
+            return
+    if apply:
+        with conn:
+            conn.execute(
+                "UPDATE minted_media SET source_id=? WHERE gramps_id=? AND source_system='immich' "
+                "AND source_id<>?", (asset_id, gid, asset_id))
+
+    try:
+        found = await resolve_place(gramps, asset, cfg, places)
+    except SyncError as exc:
+        found = None
+        counts["errors"] += 1
+        yield SyncEvent(kind="item", entity="place", action="failed",
+                        source_id=asset_id, gramps_id=gid, detail=exc.detail)
+    except Exception as exc:
+        found = None
+        counts["errors"] += 1
+        yield SyncEvent(kind="item", entity="place", action="failed",
+                        source_id=asset_id, gramps_id=gid,
+                        detail=f"could not list Gramps places: {str(exc)[:180]}")
+    if found:
+        place, _how = found
+        refs = place.setdefault("media_list", [])
+        if not any(r.get("ref") == media["handle"] for r in refs):
+            place_name = place_label(place)
+            if not apply:
+                yield SyncEvent(kind="item", entity="place", action="would_update",
+                                source_id=asset_id, gramps_id=place.get("gramps_id"),
+                                title=place_name, data={"cols": {"place": place_name}})
+            # place-only rows select as "place:<id>"
+            elif selected is None or {f"media:{asset_id}", f"place:{asset_id}"} & selected:
+                try:
+                    await _link_place(gramps, place, media["handle"])
+                    counts["places_linked"] += 1
+                    yield SyncEvent(kind="item", entity="place", action="updated",
+                                    source_id=asset_id, gramps_id=place.get("gramps_id"),
+                                    title=place_name, data={"cols": {"place": place_name}})
+                except Exception as exc:
+                    counts["errors"] += 1
+                    yield SyncEvent(kind="item", entity="place", action="failed",
+                                    source_id=asset_id, title=place_name,
+                                    detail=str(exc)[:200])
+
+    try:
+        preview = await preview_of(accounts, asset, cfg)
+        cols = update_plan(asset, media, cfg, preview)
+    except SyncError as exc:
+        counts["errors"] += 1
+        yield SyncEvent(kind="item", entity="media", action="failed",
+                        source_id=asset_id, gramps_id=gid,
+                        title=wanted_title(asset),
+                        detail=str(exc)[:200])
+        return
+    tag_cols = id_tag_plan(asset, gid, cfg)
+    pending = {**cols, **tag_cols}
+
+    note_probe = None
+    if cfg.note_sync_tag.lower() in tag_values(asset):
+        try:
+            note_probe = await sync_note(gramps, conn, asset_id, gid, media, apply=False)
+        except Exception as exc:
+            counts["errors"] += 1
+            yield SyncEvent(kind="item", entity="note", action="failed",
+                            source_id=asset_id, gramps_id=gid, title=media.get("desc"),
+                            detail=str(exc)[:200])
+
+    if not pending and note_probe is None:
+        counts["skipped"] += 1
+        return
+    if not apply:
+        if pending:
+            yield SyncEvent(kind="item", entity="media", action="would_update",
+                            source_id=asset_id, gramps_id=gid,
+                            title=wanted_title(asset),
+                            data={"cols": pending})
+        if note_probe:
+            yield note_probe
+        return
+
+    if pending and (selected is None or f"media:{asset_id}" in selected):
+        if cols:
+            if "title" in cols:
+                media["desc"] = wanted_update_title(asset)
+            if "date" in cols:
+                media["date"] = wanted_date(asset)[0]
+            if "file" in cols:
+                media["path"], media["mime"] = gramps_file(asset, cfg, preview)
+            if "link" in cols:
+                _set_attr(media, "Immich ID", asset_id)
+                if cfg.public_url:
+                    _set_attr(media, "Immich URL", f"{cfg.public_url}/photos/{asset_id}")
+            try:
+                await gramps.update_media(media["handle"], media)
+            except Exception as exc:
+                counts["errors"] += 1
+                yield SyncEvent(kind="item", entity="media", action="failed",
+                                source_id=asset_id, gramps_id=gid,
+                                title=media.get("desc"), detail=str(exc)[:200])
+                return
+            if "file" in cols:
+                counts["versions_updated"] += 1
+                with conn:
+                    conn.execute(
+                        "UPDATE minted_media SET source_id=? "
+                        "WHERE gramps_id=? AND source_system='immich'",
+                        (asset_id, gid),
+                    )
+            elif "link" in cols:
+                counts["links_updated"] += 1
+            if "title" in cols:
+                counts["titles_updated"] += 1
+            if "date" in cols:
+                counts["dates_updated"] += 1
+        landed = dict(cols)
+        if tag_cols:
+            tag_error = await write_id_tag(accounts, asset, gid, cfg)
+            if tag_error:
+                counts["errors"] += 1
+                yield SyncEvent(kind="item", entity="tag", action="failed",
+                                source_id=asset_id, gramps_id=gid,
+                                title=media.get("desc"), detail=tag_error)
+            else:
+                counts["id_tags_written"] += 1
+                landed.update(tag_cols)
+                record_error = await write_link_record(accounts, conn, asset, gid, cfg)
+                if record_error:
+                    counts["errors"] += 1
+                    yield SyncEvent(kind="item", entity="tag", action="failed",
+                                    source_id=asset_id, gramps_id=gid,
+                                    title=media.get("desc"), detail=record_error)
+        if landed:
+            yield SyncEvent(kind="item", entity="media", action="updated",
+                            source_id=asset_id, gramps_id=gid,
+                            title=media["desc"], data={"cols": landed})
+
+    # note-only rows select as "note:<id>"
+    if note_probe and (selected is None or {f"media:{asset_id}", f"note:{asset_id}"} & selected):
+        try:
+            ev = await sync_note(gramps, conn, asset_id, gid, media, apply=True)
+        except Exception as exc:
+            counts["errors"] += 1
+            yield SyncEvent(kind="item", entity="note", action="failed",
+                            source_id=asset_id, gramps_id=gid, title=media.get("desc"),
+                            detail=str(exc)[:200])
+        else:
+            if ev:
+                counts["notes_synced"] += 1
+                yield ev
+
+
 async def sync_assets(
     gramps: GrampsClient,
     accounts: list[ImmichClient],
@@ -773,9 +1148,7 @@ async def sync_assets(
     selected: set[str] | None = None,
 ) -> AsyncIterator[SyncEvent]:
     """The Sync section's scan: create tagged unsynced assets, update registered media"""
-    counts = {"created": 0, "titles_updated": 0, "dates_updated": 0,
-              "versions_updated": 0, "links_updated": 0, "places_linked": 0,
-              "id_tags_written": 0, "skipped": 0, "errors": 0}
+    counts = new_counts()
 
     account_tags = []
     for client in accounts:
@@ -851,9 +1224,9 @@ async def sync_assets(
         done += len(batch)
 
     try:
-        places_with_coords = await linkable_places(gramps, cfg)
+        places = place_index(await gramps.list_places_full(), cfg)
     except Exception as exc:
-        places_with_coords = []
+        places = place_index([], cfg, failed=True)
         counts["errors"] += 1
         yield SyncEvent(kind="item", entity="place", action="failed",
                         detail=f"could not list Gramps places: {str(exc)[:180]}; "
@@ -887,12 +1260,13 @@ async def sync_assets(
         title = wanted_title(asset)
         date_obj, date_display = wanted_date(asset)
         cols = {"title": title, **({"date": date_display} if date_obj else {})}
-        if places_with_coords and TAG_SYNC_LOCATION in tag_values(asset):
-            coords = asset_coords(asset)
-            result = (closest_place(coords[0], coords[1], places_with_coords)
-                      if coords else None)
-            if result:
-                cols["place"] = (result[0].get("name") or {}).get("value") or "?"
+        try:
+            found = await resolve_place(gramps, asset, cfg, places)
+        except SyncError as exc:
+            found = None
+            cols["place"] = exc.detail
+        if found:
+            cols["place"] = place_label(found[0])
         if not apply:
             yield SyncEvent(kind="item", entity="media", action="would_create",
                             source_id=asset_id, title=title, data={"cols": cols})
@@ -900,7 +1274,7 @@ async def sync_assets(
         if selected is not None and f"media:{asset_id}" not in selected:
             continue
         try:
-            async for ev in sync_one_asset(gramps, accounts, conn, cfg, asset_id):
+            async for ev in sync_one_asset(gramps, accounts, conn, cfg, asset_id, places=places):
                 if ev.kind == "item":
                     if ev.action == "failed":
                         counts["errors"] += 1
@@ -908,6 +1282,8 @@ async def sync_assets(
                         counts["places_linked"] += 1
                     elif ev.entity == "tag" and ev.action == "created":
                         counts["id_tags_written"] += 1
+                    elif ev.entity == "note" and ev.action in ("created", "updated"):
+                        counts["notes_synced"] += 1
                     yield ev
                 elif ev.kind == "summary":
                     if (ev.data or {}).get("created"):
@@ -920,16 +1296,6 @@ async def sync_assets(
             counts["errors"] += 1
             yield SyncEvent(kind="item", entity="media", action="failed",
                             source_id=asset_id, title=title, detail=str(exc)[:200])
-
-    if apply and places_with_coords:
-        try:
-            places_with_coords = await linkable_places(gramps, cfg)
-        except Exception as exc:
-            places_with_coords = []
-            counts["errors"] += 1
-            yield SyncEvent(kind="item", entity="place", action="failed",
-                            detail=f"could not refresh Gramps places: {str(exc)[:180]}; "
-                                   "place links skipped this run")
 
     effective_count: dict[str, int] = {}
     for _gid, aid in update_targets:
@@ -960,122 +1326,9 @@ async def sync_assets(
                             title=asset.get("originalFileName"),
                             detail="asset is in the Immich trash")
             continue
-
-        try:
-            media = await gramps.get_media_by_gramps_id(gid)
-        except Exception as exc:
-            counts["errors"] += 1
-            yield SyncEvent(kind="item", entity="media", action="failed",
-                            source_id=asset_id, gramps_id=gid,
-                            title=wanted_title(asset),
-                            detail=f"Gramps lookup failed: {str(exc)[:200]}")
-            continue
-        if media is None:
-            counts["errors"] += 1
-            yield SyncEvent(kind="item", entity="media", action="failed",
-                            source_id=asset_id, gramps_id=gid,
-                            title=wanted_title(asset),
-                            detail=f"the register points at {gid}, which is not in Gramps")
-            continue
-        if places_with_coords and TAG_SYNC_LOCATION in tag_values(asset):
-            coords = asset_coords(asset)
-            result = (closest_place(coords[0], coords[1], places_with_coords)
-                      if coords else None)
-            if result:
-                place, _dist = result
-                refs = place.setdefault("media_list", [])
-                if not any(r.get("ref") == media["handle"] for r in refs):
-                    place_name = (place.get("name") or {}).get("value") or "?"
-                    if not apply:
-                        yield SyncEvent(kind="item", entity="place", action="would_update",
-                                        source_id=asset_id, gramps_id=place.get("gramps_id"),
-                                        title=place_name, data={"cols": {"place": place_name}})
-                    # place-only rows select as "place:<id>"
-                    elif selected is None or {f"media:{asset_id}", f"place:{asset_id}"} & selected:
-                        refs.append(_media_ref(media["handle"]))
-                        try:
-                            await gramps.update_place(place["handle"], place)
-                            counts["places_linked"] += 1
-                            yield SyncEvent(kind="item", entity="place", action="updated",
-                                            source_id=asset_id, gramps_id=place.get("gramps_id"),
-                                            title=place_name, data={"cols": {"place": place_name}})
-                        except Exception as exc:
-                            refs.pop()  # keep the shared places list truthful
-                            counts["errors"] += 1
-                            yield SyncEvent(kind="item", entity="place", action="failed",
-                                            source_id=asset_id, title=place_name,
-                                            detail=str(exc)[:200])
-        try:
-            preview = await preview_of(accounts, asset, cfg)
-            cols = update_plan(asset, media, cfg, preview)
-        except SyncError as exc:
-            counts["errors"] += 1
-            yield SyncEvent(kind="item", entity="media", action="failed",
-                            source_id=asset_id, gramps_id=gid,
-                            title=wanted_title(asset),
-                            detail=str(exc)[:200])
-            continue
-        tag_cols = id_tag_plan(asset, gid, cfg)
-        pending = {**cols, **tag_cols}
-        if not pending:
-            counts["skipped"] += 1
-            continue
-        if not apply:
-            yield SyncEvent(kind="item", entity="media", action="would_update",
-                            source_id=asset_id, gramps_id=gid,
-                            title=wanted_title(asset),
-                            data={"cols": pending})
-            continue
-        if selected is not None and f"media:{asset_id}" not in selected:
-            continue
-        if cols:
-            if "title" in cols:
-                media["desc"] = wanted_update_title(asset)
-            if "date" in cols:
-                media["date"] = wanted_date(asset)[0]
-            if "file" in cols:
-                media["path"], media["mime"] = gramps_file(asset, cfg, preview)
-            if "link" in cols:
-                _set_attr(media, "Immich ID", asset_id)
-                if cfg.public_url:
-                    _set_attr(media, "Immich URL", f"{cfg.public_url}/photos/{asset_id}")
-            try:
-                await gramps.update_media(media["handle"], media)
-            except Exception as exc:
-                counts["errors"] += 1
-                yield SyncEvent(kind="item", entity="media", action="failed",
-                                source_id=asset_id, gramps_id=gid,
-                                title=media.get("desc"), detail=str(exc)[:200])
-                continue
-            if "file" in cols:
-                counts["versions_updated"] += 1
-                with conn:
-                    conn.execute(
-                        "UPDATE minted_media SET source_id=? "
-                        "WHERE gramps_id=? AND source_system='immich'",
-                        (asset_id, gid),
-                    )
-            elif "link" in cols:
-                counts["links_updated"] += 1
-            if "title" in cols:
-                counts["titles_updated"] += 1
-            if "date" in cols:
-                counts["dates_updated"] += 1
-        landed = dict(cols)
-        if tag_cols:
-            tag_error = await write_id_tag(accounts, asset, gid, cfg)
-            if tag_error:
-                counts["errors"] += 1
-                yield SyncEvent(kind="item", entity="tag", action="failed",
-                                source_id=asset_id, gramps_id=gid,
-                                title=media.get("desc"), detail=tag_error)
-            else:
-                counts["id_tags_written"] += 1
-                landed.update(tag_cols)
-        if landed:
-            yield SyncEvent(kind="item", entity="media", action="updated",
-                            source_id=asset_id, gramps_id=gid,
-                            title=media["desc"], data={"cols": landed})
+        async for ev in update_synced(gramps, accounts, conn, cfg, gid, asset, None,
+                                      places, apply, selected, counts):
+            yield ev
 
     if total:
         yield _progress(update_label if update_targets else create_label)

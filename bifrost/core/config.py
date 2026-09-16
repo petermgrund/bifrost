@@ -48,6 +48,9 @@ class SyncImmichConfig:
     place_tag_handle: str = ""
     # parent tag for the ID/{gramps_id} write-back; empty disables it
     id_tag_prefix: str = "ID"
+    place_tag_prefix: str = "Place"
+    note_sync_tag: str = "Sync/Note"
+    gramps_public_url: str = ""
 
 
 @dataclass(frozen=True)
@@ -174,6 +177,10 @@ def load_config(path: str | Path | None = None) -> Config:
         person_map_path=Path(p) if (p := si_raw.get("person_map_path")) else None,
         place_tag_handle=(si_raw.get("place_tag_handle") or "").strip(),
         id_tag_prefix=str(si_raw.get("id_tag_prefix", "ID") or "").strip().strip("/"),
+        place_tag_prefix=str(si_raw.get("place_tag_prefix", "Place") or "").strip().strip("/"),
+        note_sync_tag=(si_raw.get("note_sync_tag") or "Sync/Note").strip(),
+        gramps_public_url=(si_raw.get("gramps_public_url")
+                           or sp_raw.get("gramps_public_url") or "").rstrip("/"),
     )
     accounts_raw = im_raw.get("accounts")
     legacy_keys = [k for k in ("api_key", "partner_api_key") if im_raw.get(k)]

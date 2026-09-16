@@ -8,6 +8,7 @@ import './faces-page.js';
 import './faces-backfill-page.js';
 import './places-page.js';
 import './ancestry-links-page.js';
+import './photos-page.js';
 
 const SECTIONS = [
   { id: 'sync', title: 'Sync',
@@ -19,6 +20,8 @@ const SECTIONS = [
       <faces-backfill-page></faces-backfill-page>
       <div class="large-space"></div>
       <ancestry-links-page></ancestry-links-page>` },
+  { id: 'photos', title: 'Photos', desc: 'Curate Immich photos for Gramps: titles, dates, places, people and notes',
+    body: html`<photos-page></photos-page>` },
   { id: 'transcribe', title: 'Transcribe', desc: 'Manage OCR for Paperless docs',
     body: html`<transcribe-page></transcribe-page>` },
   { id: 'reprocess', title: 'Reprocess', desc: 'Rebuild a Paperless doc so all pages are the same width',

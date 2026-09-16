@@ -132,6 +132,36 @@ MIGRATIONS: list[str] = [
     """
     ALTER TABLE person_links ADD COLUMN owner_user_id TEXT;
     """,
+    # 10 photo notes
+    """
+    CREATE TABLE photo_notes (
+        asset_id       TEXT PRIMARY KEY,
+        gramps_id      TEXT,
+        text           TEXT NOT NULL,
+        note_handle    TEXT,
+        note_gramps_id TEXT,
+        synced_hash    TEXT,
+        updated_at     TEXT NOT NULL
+    );
+    """,
+    # 11 photo collections with a manual order
+    """
+    CREATE TABLE collections (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        name        TEXT NOT NULL,
+        description TEXT,
+        created_at  TEXT NOT NULL,
+        updated_at  TEXT NOT NULL
+    );
+
+    CREATE TABLE collection_items (
+        collection_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+        asset_id      TEXT NOT NULL,
+        seq           INTEGER NOT NULL,
+        added_at      TEXT NOT NULL,
+        PRIMARY KEY (collection_id, asset_id)
+    );
+    """,
 ]
 
 

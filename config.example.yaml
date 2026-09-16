@@ -18,6 +18,8 @@ sync:
     sync_tag: "Sync/Gramps"
     place_tag_handle: ""
     id_tag_prefix: "ID"
+    place_tag_prefix: "Place"
+    note_sync_tag: "Sync/Note"
     public_url: "https://your-immich-public-url"
     path_mappings:
       - immich_prefix: "/usr/src/app/upload/upload/"

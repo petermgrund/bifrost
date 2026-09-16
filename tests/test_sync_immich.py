@@ -93,6 +93,9 @@ class FakeImmich:
         self.tagged_assets = []
         self.untagged_assets = []
         self.fail_tag_write = False
+        self.metadata = {}
+        self.updated_assets = []
+        self.bulk_tagged = []
 
     async def get_me(self):
         self.get_me_calls += 1
@@ -119,8 +122,71 @@ class FakeImmich:
             raise ImmichError(500, "tag write boom")
         self.tagged_assets.append((tag_id, asset_id))
 
+    def _tag_value(self, tag_id):
+        for t in [self.tag] + list(self.extra_tags.values()):
+            if t["id"] == tag_id:
+                return t["value"]
+        return None
+
     async def untag_asset(self, tag_id, asset_id):
         self.untagged_assets.append((tag_id, asset_id))
+        value = self._tag_value(tag_id)
+        a = self.assets.get(asset_id)
+        if a is not None and value:
+            a["tags"] = [t for t in a.get("tags") or [] if t.get("value", "").lower() != value.lower()]
+
+    def _known(self, value):
+        tag = self.extra_tags.get(value.lower())
+        if tag is None and value.lower() != self.tag["value"].lower():
+            tag = {"id": f"tag-{len(self.extra_tags) + 2}", "name": value.split("/")[-1], "value": value}
+            self.extra_tags[value.lower()] = tag
+        return tag
+
+    async def list_tags(self):
+        for a in self.assets.values():
+            for t in a.get("tags") or []:
+                if t.get("value"):
+                    self._known(t["value"])
+        return [self.tag] + list(self.extra_tags.values())
+
+    async def tag_assets(self, tag_ids, asset_ids):
+        self.bulk_tagged.append((list(tag_ids), list(asset_ids)))
+        for asset_id in asset_ids:
+            a = self.assets.get(asset_id)
+            if a is None:
+                continue
+            have = {t.get("value", "").lower() for t in a.get("tags") or []}
+            for tag_id in tag_ids:
+                value = self._tag_value(tag_id)
+                if value and value.lower() not in have:
+                    a.setdefault("tags", []).append({"value": value})
+
+    async def update_asset(self, asset_id, **fields):
+        self.updated_assets.append((asset_id, fields))
+        a = self.assets[asset_id]
+        if "description" in fields:
+            a.setdefault("exifInfo", {})["description"] = fields["description"]
+        if "dateTimeOriginal" in fields:
+            a["localDateTime"] = fields["dateTimeOriginal"]
+        for key in ("latitude", "longitude"):
+            if key in fields:
+                a.setdefault("exifInfo", {})[key] = fields[key]
+        return a
+
+    async def get_asset_metadata(self, asset_id):
+        return dict(self.metadata.get(asset_id, {}))
+
+    async def upsert_asset_metadata(self, asset_id, key, value):
+        self.metadata.setdefault(asset_id, {})[key] = value
+
+    async def delete_asset_metadata(self, asset_id, key):
+        self.metadata.get(asset_id, {}).pop(key, None)
+
+    async def get_stack(self, stack_id):
+        for s in self.stacks:
+            if s["id"] == stack_id:
+                return s
+        raise ImmichError(400, "no such stack")
 
     async def list_stacks(self):
         self.list_stacks_calls += 1
@@ -162,9 +228,25 @@ class FakeGramps:
         self.updated_places = []
         self.people = people or {}
         self.updated_people = []
+        self.notes = {}
+        self.updated_notes = []
 
     async def get_media_by_gramps_id(self, gid):
         return self.media.get(gid)
+
+    async def get_place_by_gramps_id(self, gid):
+        return next((p for p in self.places if p.get("gramps_id") == gid), None)
+
+    async def _paged(self, path, page_size=200, **params):
+        assert path == "/notes/"
+        return [{"gramps_id": n["gramps_id"]} for n in self.notes.values()]
+
+    async def create_note(self, obj):
+        self.notes[obj["handle"]] = obj
+
+    async def update_note(self, handle, obj):
+        self.notes[handle] = obj
+        self.updated_notes.append(obj)
 
     async def list_media_gramps_ids(self):
         return set(self.media)
@@ -184,6 +266,10 @@ class FakeGramps:
 
     async def get_person(self, handle):
         return self.people[handle]
+
+    async def get_media_backlinks(self, handle):
+        return {"person": [h for h, p in self.people.items()
+                           if any(r.get("ref") == handle for r in p.get("media_list") or [])]}
 
     async def update_person(self, handle, person_obj):
         self.updated_people.append(person_obj)
@@ -624,9 +710,11 @@ def test_sync_counts_are_all_initialized():
     import inspect
     import re
 
-    src = inspect.getsource(sync_immich.sync_assets)
-    init = re.search(r"counts\s*=\s*\{(.*?)\}", src, re.S).group(1)
+    init = inspect.getsource(sync_immich.new_counts)
     declared = set(re.findall(r"\"(\w+)\"\s*:", init))
+    src = (inspect.getsource(sync_immich.sync_assets)
+           + inspect.getsource(sync_immich.update_synced)
+           + inspect.getsource(sync_immich.sync_one_asset))
     used = set(re.findall(r"counts\[\"(\w+)\"\]", src))
     assert used <= declared, f"uninitialized counts keys: {used - declared}"
 

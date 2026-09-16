@@ -1,5 +1,6 @@
 import asyncio
 import copy
+import logging
 
 from bifrost.core.clients.anthropic import AnthropicClient
 
@@ -42,3 +43,23 @@ def test_forced_tool_use_rejection_falls_back_to_auto():
     assert calls[1]["tool_choice"] == {"type": "auto"}
     assert calls[1]["messages"][0]["content"].endswith(
         "Respond ONLY by calling the emit_result tool.")
+
+
+
+def test_structured_call_caches_the_system_block_for_an_hour(caplog):
+    client = AnthropicClient("key", "m")
+    calls = []
+
+    async def fake_post(url, json=None):
+        calls.append(copy.deepcopy(json))
+        return _Resp(200, payload={
+            "content": [{"type": "tool_use", "input": {"ok": True}}],
+            "usage": {"input_tokens": 3, "cache_read_input_tokens": 70000}})
+
+    client._client.post = fake_post
+    with caplog.at_level(logging.INFO, logger="bifrost.anthropic"):
+        asyncio.run(client.complete_structured("sys", "user", SCHEMA))
+    asyncio.run(client.close())
+    assert calls[0]["system"] == [{"type": "text", "text": "sys",
+                                   "cache_control": {"type": "ephemeral", "ttl": "1h"}}]
+    assert "cache_read=70000" in caplog.text

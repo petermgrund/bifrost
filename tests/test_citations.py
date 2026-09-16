@@ -425,3 +425,22 @@ def test_media_citations_come_from_backlinks_not_a_full_scan():
                      "source_handle": "s1", "source_title": "1930 census",
                      "notes": [{"type": "Citation", "text": "first ref"}]}]
     assert gr.calls[0] == ("backlinks", "m1")
+
+
+@_NEEDS_TYPES
+def test_dump_critique_reuses_the_draft_schema_so_the_prompt_cache_hits():
+    from bifrost.modules.citations import DUMP_SCHEMA, compose_from_dump
+
+    class Recording(_StubAnthropic):
+        def __init__(self, *drafts):
+            super().__init__(*drafts)
+            self.schemas = []
+
+        async def complete_structured(self, system, user, schema, max_tokens=0):
+            self.schemas.append(schema)
+            return await super().complete_structured(system, user, schema, max_tokens)
+
+    d = _draft()
+    stub = Recording(d, dict(d))
+    asyncio.run(compose_from_dump(stub, "", None, sources=[], repos=[], subject="x"))
+    assert [s is DUMP_SCHEMA for s in stub.schemas] == [True, True]

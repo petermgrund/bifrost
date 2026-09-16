@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -25,6 +26,8 @@ templates = Jinja2Templates(directory=WEB_DIR / "templates")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    logging.basicConfig(format="%(levelname)s: %(name)s: %(message)s")
+    logging.getLogger("bifrost").setLevel(logging.INFO)
     cfg = load_config()
     app.state.cfg = cfg
     citations_mod.configure_house_style(cfg.citations.house_style_path)

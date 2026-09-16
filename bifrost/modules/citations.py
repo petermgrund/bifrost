@@ -327,7 +327,7 @@ already-correct field verbatim."""
 
 
 async def _critique(anthropic: AnthropicClient, record_context: str,
-                    draft: dict) -> dict:
+                    draft: dict, schema: dict = COMPOSE_SCHEMA) -> dict:
     """ second pass. matched_* keys are stripped and re-attached by the caller"""
     review = {k: v for k, v in draft.items() if not k.startswith("matched_")}
     user = (CRITIQUE_LEAD
@@ -335,7 +335,7 @@ async def _critique(anthropic: AnthropicClient, record_context: str,
             + "\n\n===== DRAFT TO REVIEW (JSON) =====\n"
             + json.dumps(review, ensure_ascii=False, indent=2))
     return await anthropic.complete_structured(
-        system_prompt(), user, COMPOSE_SCHEMA, max_tokens=8000)
+        system_prompt(), user, schema, max_tokens=8000)
 
 
 async def compose(
@@ -604,7 +604,7 @@ async def compose_from_dump(
                     f"  author: {matched_now.get('author')}\n"
                     f"  pubinfo: {matched_now.get('pubinfo')}\n"
                     f"  abbrev: {matched_now.get('abbrev')}")
-        revised = await _critique(anthropic, ctx, draft)
+        revised = await _critique(anthropic, ctx, draft, DUMP_SCHEMA)
         revised["matched_source_gramps_id"] = draft.get("matched_source_gramps_id")
         revised["matched_repository_gramps_id"] = draft.get("matched_repository_gramps_id")
         revised["suggested_sources"] = draft.get("suggested_sources")

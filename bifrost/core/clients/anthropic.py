@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import logging
+
 import httpx
 
 API_URL = "https://api.anthropic.com/v1/messages"
 API_VERSION = "2023-06-01"
+
+log = logging.getLogger("bifrost.anthropic")
 
 
 class AnthropicError(Exception):
@@ -29,9 +33,18 @@ class AnthropicClient:
     async def close(self) -> None:
         await self._client.aclose()
 
+    async def _post(self, body: dict) -> httpx.Response:
+        resp = await self._client.post(API_URL, json=body)
+        if resp.status_code < 400:
+            u = resp.json().get("usage") or {}
+            log.info("%s in=%s cache_read=%s cache_write=%s out=%s", body["model"],
+                     u.get("input_tokens"), u.get("cache_read_input_tokens"),
+                     u.get("cache_creation_input_tokens"), u.get("output_tokens"))
+        return resp
+
     async def complete_text(self, system: str, user: str, max_tokens: int = 1000) -> str:
         """plain-text completion"""
-        resp = await self._client.post(API_URL, json={
+        resp = await self._post({
             "model": self._model,
             "max_tokens": max_tokens,
             "system": system,
@@ -50,7 +63,7 @@ class AnthropicClient:
             "model": self._model,
             "max_tokens": max_tokens,
             "system": [{"type": "text", "text": system,
-                        "cache_control": {"type": "ephemeral"}}],
+                        "cache_control": {"type": "ephemeral", "ttl": "1h"}}],
             "messages": [{"role": "user", "content": user}],
             "tools": [{
                 "name": "emit_result",
@@ -59,12 +72,12 @@ class AnthropicClient:
             }],
             "tool_choice": {"type": "tool", "name": "emit_result"},
         }
-        resp = await self._client.post(API_URL, json=body)
+        resp = await self._post(body)
         if resp.status_code == 400 and "forces tool use is not compatible" in resp.text:
             body["tool_choice"] = {"type": "auto"}
             body["messages"][0]["content"] += (
                 "\n\nRespond ONLY by calling the emit_result tool.")
-            resp = await self._client.post(API_URL, json=body)
+            resp = await self._post(body)
         if resp.status_code >= 400:
             raise AnthropicError(f"{resp.status_code}: {resp.text[:500]}")
         data = resp.json()

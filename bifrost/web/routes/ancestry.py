@@ -38,7 +38,7 @@ async def links_config(request: Request) -> dict:
 async def links_preview(request: Request, body: LinksBody = LinksBody()):
     st = _require(request)
     gen = ancestry_links.link(st.gramps, st.paperless, st.cfg.sync_paperless,
-                              apply=False, doc_ids=body.doc_ids)
+                              apply=False, doc_ids=body.doc_ids, cache=st.caches)
     run_id, events = await record_run(st.conn, "ancestry.links.preview", gen)
     return {"run_id": run_id, "apply": False, "events": [e.__dict__ for e in events]}
 
@@ -49,9 +49,12 @@ async def links_apply(request: Request, body: LinksBody = LinksBody()):
     gen = ancestry_links.link(
         st.gramps, st.paperless, st.cfg.sync_paperless, apply=True,
         selected=set(body.selected) if body.selected is not None else None,
-        doc_ids=body.doc_ids)
+        doc_ids=body.doc_ids, cache=st.caches)
     run_id, events = await record_run(st.conn, "ancestry.links", gen)
+    index = st.caches.get(ancestry_links.INDEX_CACHE_KEY)
     st.caches.clear()
+    if index:
+        st.caches[ancestry_links.INDEX_CACHE_KEY] = index
     return {"run_id": run_id, "apply": True, "events": [e.__dict__ for e in events]}
 
 
@@ -90,7 +93,7 @@ async def ingest(request: Request, body: IngestBody):
                                   single_doc_id=doc_id)
         _run_id, events = await record_run(st.conn, "sync.paperless", gen)
         for e in events:
-            if e.kind == "item" and e.entity == "media" and e.action == "created":
+            if e.kind == "item" and e.action == "created":
                 synced["created"] += 1
                 lines.append(f"#{doc_id}: media {e.gramps_id} created")
             elif e.kind == "item" and e.action == "failed":
@@ -98,9 +101,13 @@ async def ingest(request: Request, body: IngestBody):
                 lines.append(f"#{doc_id}: sync failed: {e.detail}")
     st.caches.clear()
 
-    gen = ancestry_links.link(st.gramps, st.paperless, cfg, apply=True, doc_ids=body.doc_ids)
+    gen = ancestry_links.link(st.gramps, st.paperless, cfg, apply=True, doc_ids=body.doc_ids,
+                              cache=st.caches)
     _run_id, events = await record_run(st.conn, "ancestry.links", gen)
+    index = st.caches.get(ancestry_links.INDEX_CACHE_KEY)
     st.caches.clear()
+    if index:
+        st.caches[ancestry_links.INDEX_CACHE_KEY] = index
     summary = next((e.data for e in events if e.kind == "summary"), {})
     for e in events:
         if e.kind != "item":

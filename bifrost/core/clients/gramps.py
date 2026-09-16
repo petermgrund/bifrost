@@ -78,6 +78,15 @@ class GrampsClient:
             raise GrampsError(f"{method} {path} → {resp.status_code}: {resp.text[:500]}")
         return resp
 
+    async def page_of(self, path: str, page: int, page_size: int = 200,
+                      **params) -> tuple[list[dict], int]:
+        """One page of a listing plus the total count"""
+        resp = await self._request(
+            "GET", path, params={"pagesize": page_size, "page": page, **params})
+        items = resp.json()
+        items = items if isinstance(items, list) else []
+        return items, int(resp.headers.get("X-Total-Count") or len(items))
+
     async def _paged(self, path: str, page_size: int = 200, **params) -> list[dict]:
         items: list[dict] = []
         page = 1

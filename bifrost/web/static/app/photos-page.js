@@ -862,7 +862,7 @@ class PhotosPage extends BifrostElement {
 
   renderPeople(r) {
     if (!r.people.length) {
-      return html`<p class="small-text secondary-text">No one recognised in this photo yet.</p>`;
+      return html`<p class="small-text secondary-text">No faces.</p>`;
     }
     return html`<ul class="list photos-people-list">${r.people.map((p) => html`<li>
         <div class="max">
@@ -940,7 +940,6 @@ class PhotosPage extends BifrostElement {
           @change=${(e) => { this.redraw = e.target.checked; }}><span class="small-text">Redraw face boxes when the main image changes</span></label>` : nothing}
         ${this.renderStatus()}
       </nav>
-      <p class="small-text secondary-text photos-versions-hint">Versions share the main image's title, date, place and sync tags. One that has drifted says what differs and offers Match.</p>
       ${v?.error ? html`<p class="error-text small-text">${v.error}</p>` : nothing}
       <div class="photos-versions-scroll">
       ${members.length ? html`<ul class="list">${members.map((m) => this.versionRow(m))}</ul>` : nothing}
@@ -989,8 +988,8 @@ class PhotosPage extends BifrostElement {
           onMove: (d) => { if (albums.length) this.hiAlbum = (this.hiAlbum + d + albums.length) % albums.length; },
           empty: this.albums === null ? 'Loading albums...' : 'No album matches',
         })}
+        ${this.renderColStatus()}
       </nav>
-      ${this.colStatus ? html`<p>${statusLine(this.colStatus.kind, this.colStatus.msg)}</p>` : nothing}
       ${this.collections.length ? html`<div class="photos-grid">${this.collections.map((c) => html`
         <article class="photo-card no-margin" @click=${() => this.openCollection(c.id)}>
           <div class="photo-thumb">
@@ -1001,8 +1000,7 @@ class PhotosPage extends BifrostElement {
             <div class="photo-title">${c.name}</div>
             <div class="photo-sub secondary-text"><span>${c.description || ' '}</span></div>
           </div>
-        </article>`)}</div>`
-        : html`<div class="faces-empty"><i>collections_bookmark</i><span>No collections yet. Name one above, then add photos from the editor or from the collection page.</span></div>`}`;
+        </article>`)}</div>` : nothing}`;
   }
 
   renderCollection() {
@@ -1029,13 +1027,9 @@ class PhotosPage extends BifrostElement {
         <button class="border small ${this.confirmDelete ? 'error' : ''}" ?disabled=${!!this.colBusy}
           @click=${() => this.deleteCollection()}>
           <i>delete</i><span>${this.confirmDelete ? 'Click again to delete' : 'Delete'}</span></button>
+        ${this.renderColStatus()}
       </nav>
-      <p class="small-text secondary-text photos-col-hint">
-        ${c.items.length} photo${c.items.length === 1 ? '' : 's'} in your order. Drag a photo to move it, or use the arrows. Click one to open it.
-        ${this.colStatus ? html` ${statusLine(this.colStatus.kind, this.colStatus.msg)}` : nothing}
-      </p>
-      ${c.items.length ? html`<div class="photos-grid">${c.items.map((it, i) => this.colCard(it, i, c.items.length))}</div>`
-        : html`<div class="faces-empty"><i>add_photo_alternate</i><span>Empty. Use Add photos, or Add to collection inside a photo.</span></div>`}`;
+      ${c.items.length ? html`<div class="photos-grid">${c.items.map((it, i) => this.colCard(it, i, c.items.length))}</div>` : nothing}`;
   }
 
   renderCollectionsTab(r) {
@@ -1059,7 +1053,7 @@ class PhotosPage extends BifrostElement {
         <div class="max">${c.name}</div>
         <button class="circle transparent small" title="Remove from ${c.name}" ?disabled=${!!this.busy}
           @click=${() => this.removeRecFromCollection(c)}><i>close</i></button>
-      </li>`)}</ul>` : html`<p class="small-text secondary-text">Not in any collection.</p>`}`;
+      </li>`)}</ul>` : html``}`;
   }
 
   renderStatus() {
@@ -1070,7 +1064,14 @@ class PhotosPage extends BifrostElement {
   }
 
   tabLink(id, label) {
-    return html`<a class=${this.tab === id ? 'active' : ''} @click=${() => { this.tab = id; }}>${label}</a>`;
+    return html`<a class=${this.tab === id ? 'active' : ''} @click=${() => { this.tab = id; this.status = null; }}>${label}</a>`;
+  }
+
+  renderColStatus() {
+    if (!this.colStatus) return nothing;
+    if (this.colStatus.kind === 'ok') return html`<span class="photos-status">${iconYes}</span>`;
+    if (this.colStatus.kind === 'busy') return html`<span class="photos-status">${spinner}</span>`;
+    return html`<span class="photos-status">${statusLine(this.colStatus.kind, this.colStatus.msg)}</span>`;
   }
 
   renderDetails(r, f) {

@@ -406,7 +406,6 @@ dialog.photos-editor > nav { flex: none; }
 .photos-sync label.checkbox { margin: 0; }
 .photos-actions .photos-status { margin-inline-start: 0.25rem; }
 .photos-versions { display: flex; flex-direction: column; min-block-size: 0; flex: 1; }
-.photos-versions-hint { margin-block: 0.25rem 0.5rem; }
 .photos-versions-scroll { flex: 1; min-block-size: 0; overflow-y: auto; }
 .photos-people-list { margin-block: 0; }
 .photos-versions > ul { margin-block: 0.25rem 0.5rem; }
@@ -427,7 +426,7 @@ dialog.photos-editor > nav { flex: none; }
 .photos-col-new, .photos-col-head { gap: 0.5rem; align-items: center; margin-block-end: 0.5rem; }
 .photos-col-head > .field { margin-block: 0.5rem 0; }
 .photos-col-head .search-menu > menu { inline-size: 22rem; }
-.photos-col-hint { margin-block: 0.25rem 0.75rem; }
+.photos-col-head { margin-block-end: 0.75rem; }
 .photo-card.dragging { opacity: 0.4; }
 .photo-card[draggable="true"] { cursor: grab; }
 .photo-tools {

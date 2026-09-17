@@ -161,6 +161,17 @@ class TestSave:
         assert im.metadata["a1"] == {}
         assert conn.execute("SELECT COUNT(*) FROM photo_notes").fetchone()[0] == 0
 
+    def test_field_flags_need_a_media_object(self, conn):
+        im = FakeImmich(assets={"a1": tagged("a1", "Sync/Date", "Sync/Description", desc="T")})
+        form = {"title": "T", "notes": "n", "date": {"value": "1923"},
+                "sync": {"media": False, "title": True, "date": True, "note": True}}
+        rec = run(photos.save([im], conn, CFG, "a1", form, link_on=False))
+        assert rec["sync"] == {"media": False, "title": False, "date": False, "note": False, "location": False}
+        assert sorted(t["value"] for t in im.assets["a1"]["tags"]) == ["Date/Year"]
+        mint(conn, "ABC123", "a1")
+        rec = run(photos.save([im], conn, CFG, "a1", form, link_on=False))
+        assert (rec["sync"]["title"], rec["sync"]["date"], rec["sync"]["note"]) == (True, True, True)
+
     def test_stack_variant_is_refused(self, conn):
         a = tagged("c1")
         a["stack"] = {"id": "s1", "primaryAssetId": "p1"}

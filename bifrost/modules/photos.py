@@ -615,6 +615,8 @@ async def save(accounts: list[ImmichClient], conn: sqlite3.Connection, cfg: Sync
         raise SyncError(400, "cannot tell which Immich account owns this asset, so its tags cannot be edited")
     _versions, member_ids = await _stack_members(client, asset)
     gid = registered_gid(conn, asset_id, member_ids)
+    if not gid and not form["sync"]["media"]:
+        form["sync"] = {k: False for k in form["sync"]}
 
     wanted: dict[str, str] = {}
 

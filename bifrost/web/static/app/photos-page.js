@@ -132,6 +132,7 @@ class PhotosPage extends BifrostElement {
     albumQ: { state: true },
     albumOpen: { state: true },
     hiAlbum: { state: true },
+    tab: { state: true },
   };
 
   constructor() {
@@ -189,6 +190,7 @@ class PhotosPage extends BifrostElement {
     this.albumQ = '';
     this.albumOpen = false;
     this.hiAlbum = -1;
+    this.tab = 'details';
   }
 
   flip(name, e) { this.up = { ...this.up, [name]: menuUp(e) }; }
@@ -498,6 +500,7 @@ class PhotosPage extends BifrostElement {
     this.verItems = [];
     this.lightbox = null;
     this.editLabel = null;
+    this.tab = 'details';
     try {
       const rec = await api(`/photos/api/photo/${id}`);
       if (this.openId !== id) return;
@@ -822,23 +825,30 @@ class PhotosPage extends BifrostElement {
       </nav>`;
   }
 
-  syncBox(key, label) {
-    return html`<label class="checkbox"><input type="checkbox" .checked=${this.form.sync[key]}
+  syncBox(key, label, disabled = false) {
+    return html`<label class="checkbox"><input type="checkbox" .checked=${this.form.sync[key]} ?disabled=${disabled}
       @change=${(e) => this.setSync(key, e.target.checked)}><span>${label}</span></label>`;
+  }
+
+  renderSync(r, f) {
+    const inGramps = !!r.gramps;
+    const off = !inGramps && !f.sync.media;
+    return html`<div class="photos-sync">
+      ${inGramps
+        ? html`<span class="small-text secondary-text">In Gramps as <span class="mono">${r.gramps.gramps_id}</span>, keeping its</span>`
+        : html`<label class="checkbox"><input type="checkbox" .checked=${f.sync.media}
+            @change=${(e) => this.setSync('media', e.target.checked)}><span>Create a Gramps media object</span></label>
+          <span class="small-text secondary-text">with its</span>`}
+      ${this.syncBox('title', 'title', off)}
+      ${this.syncBox('date', 'date', off)}
+      ${this.syncBox('note', 'note', off)}
+      ${inGramps ? html`<span class="small-text secondary-text">in sync</span>` : nothing}
+    </div>`;
   }
 
   renderPlace(f) {
     const items = this.placeMatches();
-    return html`<div class="photos-place">
-      <div class="chosen-media">
-        ${f.place ? html`<i>${f.place.icon}</i>
-          <div>
-            <div>${f.place.label}</div>
-            <div class="small-text secondary-text mono">${f.place.sub}</div>
-          </div>
-          <button class="circle transparent small" aria-label="Clear place" @click=${() => this.setForm({ place: null })}><i>close</i></button>`
-        : html`<span class="secondary-text small-text">No Gramps place</span>`}
-      </div>
+    return html`<nav class="photos-place-line">
       ${searchMenu({
         label: f.place ? 'Change place' : 'Choose place', icon: 'add_location',
         value: this.placeQ, items, active: this.hiPlace, open: this.placeOpen, up: this.up.place,
@@ -850,23 +860,24 @@ class PhotosPage extends BifrostElement {
         onMove: (d) => { if (items.length) this.hiPlace = (this.hiPlace + d + items.length) % items.length; },
         empty: !this.placeQ.trim() ? '' : this.places ? 'No Gramps place matches' : 'Loading places...',
       })}
-    </div>`;
+      ${f.place ? html`<span class="photos-place-text"><i>${f.place.icon}</i><span>${f.place.label}</span>
+          <span class="mono small-text secondary-text">${f.place.sub}</span></span>
+        <button class="circle transparent small" aria-label="Clear place" title="Clear place"
+          @click=${() => this.setForm({ place: null })}><i>close</i></button>` : nothing}
+    </nav>`;
   }
 
   renderPeople(r) {
-    if (!r.people.length) return nothing;
-    const linked = r.people.filter((p) => p.linked).length;
-    return html`<details class="photos-people">
-      <summary class="none">
-        <i class="chev">chevron_right</i>
-        <span class="small-text secondary-text">People (${r.people.length}${linked < r.people.length ? `, ${linked} linked` : ''})</span>
-      </summary>
-      <div class="photos-people-list">
+    if (!r.people.length) {
+      return html`<p class="small-text secondary-text">Immich has not recognised anyone in this photo.</p>`;
+    }
+    const unlinked = r.people.filter((p) => !p.linked).length;
+    return html`<div class="photos-people-list">
         ${r.people.map((p) => html`<span class="chip small ${p.linked ? 'fill' : 'border'}"
           title=${p.linked ? 'Linked to a Gramps person' : 'Not linked in Faces'}>
           <i>${p.linked ? 'link' : 'link_off'}</i><span>${p.name || '(unnamed)'}</span></span>`)}
       </div>
-    </details>`;
+      <p class="small-text secondary-text">Names come from Immich's face recognition. A linked person gets a face box in Gramps when the photo syncs${unlinked ? `; ${unlinked} here ${unlinked === 1 ? 'is' : 'are'} not linked yet, which the Faces section fixes` : ''}.</p>`;
   }
 
   renderLightbox() {
@@ -905,8 +916,7 @@ class PhotosPage extends BifrostElement {
         <div><span class="photos-version-open" @click=${() => { this.lightbox = m; }}>${m.filename}</span>${m.is_primary ? html` <span class="chip tiny fill">main</span>` : nothing}</div>
         <div class="small-text secondary-text mono">${sizeText(m)}</div>
         ${this.versionLabel(m)}
-        ${m.is_primary ? nothing : html`<div class="small-text ${drift.length ? 'error-text' : 'secondary-text'}">
-          ${drift.length ? `differs: ${drift.join(', ')}` : 'matches the main image'}</div>`}
+        ${!m.is_primary && drift.length ? html`<div class="small-text error-text" title="Compared with the main image">differs: ${drift.join(', ')}</div>` : nothing}
       </div>
       ${m.is_primary ? nothing : html`<nav class="photos-version-actions">
         ${drift.length ? btn('Match', !!this.busy, () => this.matchVersion(m), 'border small') : nothing}
@@ -923,7 +933,6 @@ class PhotosPage extends BifrostElement {
     const items = this.verItems;
     return html`<div class="photos-versions">
       <nav class="wrap photos-versions-bar">
-        <span class="small-text secondary-text">Versions${members.length ? ` (${members.length})` : ''}</span>
         ${searchMenu({
           label: 'Add version', icon: 'library_add', value: this.verQ, items, active: this.hiVer, open: this.verOpen,
           cls: 'border small', placeholder: 'Search titles and file names', up: this.up.version,
@@ -938,9 +947,10 @@ class PhotosPage extends BifrostElement {
         ${members.length > 1 ? html`<label class="checkbox"><input type="checkbox" .checked=${this.redraw}
           @change=${(e) => { this.redraw = e.target.checked; }}><span class="small-text">Redraw face boxes when the main image changes</span></label>` : nothing}
       </nav>
+      <p class="small-text secondary-text photos-versions-hint">Versions share the main image's title, date, place and sync tags. One that has drifted says what differs and offers Match.</p>
       ${v?.error ? html`<p class="error-text small-text">${v.error}</p>` : nothing}
-      ${members.length ? html`<ul class="list">${members.map((m) => this.versionRow(m))}</ul>`
-        : html`<p class="small-text secondary-text photos-versions-empty">No other versions yet. Add a rescan or a restored copy and they stay together with the same metadata.</p>`}
+      <div class="photos-versions-scroll">
+      ${members.length ? html`<ul class="list">${members.map((m) => this.versionRow(m))}</ul>` : nothing}
       ${r.suggestions?.length ? html`<span class="small-text secondary-text">Suggested versions</span>
         <ul class="list">${r.suggestions.map((sg) => html`<li>
           <img class="small-round" src=${sg.thumb} alt="">
@@ -950,6 +960,7 @@ class PhotosPage extends BifrostElement {
           </div>
           ${sg.in_stack ? nothing : btn('Add', !!this.busy, () => this.addVersion({ id: sg.asset_id }), 'border small')}
         </li>`)}</ul>` : nothing}
+      </div>
     </div>`;
   }
 
@@ -1054,45 +1065,60 @@ class PhotosPage extends BifrostElement {
     </div>`;
   }
 
+  tabLink(id, label) {
+    return html`<a class=${this.tab === id ? 'active' : ''} @click=${() => { this.tab = id; }}>${label}</a>`;
+  }
+
+  renderDetails(r, f) {
+    return html`${field('Title', f.title, (e) => this.setForm({ title: e.target.value }), { small: true })}
+      <div class="photos-date-grid">
+        ${field('Date', f.dateText, (e) => this.setDate(e.target.value),
+          { small: true, mono: true, placeholder: 'YYYY, YYYY-MM or YYYY-MM-DD',
+            error: f.dateText.trim() && !f.date ? 'Unreadable' : '' })}
+        ${selectField('Precision', f.date?.precision || 'exact', PRECISION, (e) => this.setDateField('precision', e.target.value), { small: true })}
+        ${selectField('Modifier', f.date?.modifier || 'regular', MODIFIER, (e) => this.setDateField('modifier', e.target.value), { small: true })}
+        ${selectField('Quality', f.date?.quality || 'regular', QUALITY, (e) => this.setDateField('quality', e.target.value), { small: true })}
+      </div>
+      <p class="small-text secondary-text photos-hint">Gramps date: <span class="mono">${grampsDate(f.date) || '(none)'}</span></p>
+      ${this.renderPlace(f)}
+      ${field('Notes', f.notes, (e) => this.setForm({ notes: e.target.value }), { rows: 3, small: true })}
+      ${this.renderSync(r, f)}
+      <nav class="wrap photos-actions">
+        ${btn(this.busy === 'save' ? 'Saving...' : 'Save', !!this.busy, () => this.save(false), 'border')}
+        ${btn(this.busy === 'sync' ? 'Syncing...' : 'Save and sync', !!this.busy, () => this.save(true))}
+        ${this.busy ? spinner : nothing}
+        ${this.status ? html`<span class="photos-status">${statusLine(this.status.kind, this.status.msg)}</span>` : nothing}
+      </nav>`;
+  }
+
+  mainAsVersion(r) {
+    const main = (r.versions?.members || []).find((m) => m.is_primary);
+    return main || { asset_id: r.asset_id, filename: r.filename, width: r.width, height: r.height, label: r.label };
+  }
+
   renderRecord(r, f) {
+    const versions = r.versions?.members?.length || 0;
     return html`<div class="photos-editor-body">
       <div class="photos-preview">
-        <img src=${r.preview} alt="">
+        <img src=${r.preview} alt="" class="photos-version-open" title="View larger" @click=${() => { this.lightbox = this.mainAsVersion(r); }}>
         <div class="photos-links small-text">
           ${r.immich_url ? html`<a class="photos-app-link" href=${r.immich_url} target="_blank" rel="noopener" title="Open in Immich"><img src="/static/vendor/icons/immich.svg" alt="Immich"></a>` : nothing}
           ${r.gramps?.url ? html`<a class="photos-app-link" href=${r.gramps.url} target="_blank" rel="noopener" title="Open in Gramps"><img src="/static/vendor/icons/gramps-web.svg" alt="Gramps"></a>` : nothing}
           <span class="mono secondary-text">${r.gramps ? r.gramps.gramps_id : 'not in Gramps'}</span>
         </div>
-        ${this.renderPeople(r)}
         ${this.renderEditorCollections(r)}
       </div>
       <div class="photos-form">
-        ${field('Title', f.title, (e) => this.setForm({ title: e.target.value }))}
-        <nav class="wrap photos-row">
-          ${field('Date', f.dateText, (e) => this.setDate(e.target.value),
-            { width: 'small', mono: true, placeholder: 'YYYY, YYYY-MM or YYYY-MM-DD',
-              error: f.dateText.trim() && !f.date ? 'Unreadable' : '' })}
-          ${selectField('Precision', f.date?.precision || 'exact', PRECISION, (e) => this.setDateField('precision', e.target.value), { width: 'small' })}
-          ${selectField('Modifier', f.date?.modifier || 'regular', MODIFIER, (e) => this.setDateField('modifier', e.target.value), { width: 'small' })}
-          ${selectField('Quality', f.date?.quality || 'regular', QUALITY, (e) => this.setDateField('quality', e.target.value), { width: 'small' })}
-        </nav>
-        <p class="small-text secondary-text photos-hint">Gramps date: <span class="mono">${grampsDate(f.date) || '(none)'}</span></p>
-        ${this.renderPlace(f)}
-        ${field('Notes', f.notes, (e) => this.setForm({ notes: e.target.value }), { rows: 4 })}
-        <div class="photos-sync-row">
-          <span class="small-text secondary-text">Sync to Gramps</span>
-          ${this.syncBox('media', 'media object')}
-          ${this.syncBox('title', 'title')}
-          ${this.syncBox('date', 'date')}
-          ${this.syncBox('note', 'note')}
+        <div class="tabs small photos-tabs">
+          ${this.tabLink('details', 'Details')}
+          ${this.tabLink('versions', versions > 1 ? `Versions (${versions})` : 'Versions')}
+          ${this.tabLink('people', r.people.length ? `People (${r.people.length})` : 'People')}
         </div>
-        <nav class="wrap photos-actions">
-          ${btn(this.busy === 'save' ? 'Saving...' : 'Save', !!this.busy, () => this.save(false), 'border')}
-          ${btn(this.busy === 'sync' ? 'Syncing...' : 'Save and sync', !!this.busy, () => this.save(true))}
-          ${this.busy ? spinner : nothing}
-        </nav>
-        ${this.status ? html`<p class="photos-status">${statusLine(this.status.kind, this.status.msg)}</p>` : nothing}
-        ${this.renderVersions(r)}
+        <div class="photos-tab">
+          ${this.tab === 'versions' ? this.renderVersions(r)
+            : this.tab === 'people' ? this.renderPeople(r)
+              : this.renderDetails(r, f)}
+        </div>
       </div>
     </div>`;
   }

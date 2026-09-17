@@ -31,7 +31,8 @@ function grampsDate(d) {
 }
 
 function placeItem(p) {
-  return { id: p.gramps_id, label: p.hierarchy.join(', ') || p.name, sub: p.gramps_id, mono: true,
+  const parents = (p.hierarchy || []).slice(1).join(', ');
+  return { id: p.gramps_id, label: p.name || p.gramps_id, sub: [parents, p.gramps_id].filter(Boolean).join(' · '),
     icon: p.known === false ? 'location_off' : p.tagged ? 'location_on' : 'map' };
 }
 
@@ -472,7 +473,7 @@ class PhotosPage extends BifrostElement {
 
   placeMatches() {
     const q = this.placeQ.trim().toLowerCase();
-    if (!q) return [];
+    if (!q) return this.form?.place ? [{ id: null, label: 'No place', icon: 'location_off' }] : [];
     const rank = (p) => {
       const name = p.name.toLowerCase();
       let r = -1;
@@ -608,7 +609,7 @@ class PhotosPage extends BifrostElement {
   setSync(key, on) { this.setForm({ sync: { ...this.form.sync, [key]: on } }); }
 
   pickPlace(it) {
-    this.setForm({ place: it });
+    this.setForm({ place: it.id ? it : null });
     this.placeQ = '';
     this.hiPlace = -1;
     this.placeOpen = false;
@@ -850,7 +851,7 @@ class PhotosPage extends BifrostElement {
     const items = this.placeMatches();
     return html`<nav class="photos-place-line">
       ${searchMenu({
-        label: f.place ? 'Change place' : 'Choose place', icon: 'add_location',
+        label: f.place ? f.place.label : 'Choose place', icon: f.place ? f.place.icon : 'add_location',
         value: this.placeQ, items, active: this.hiPlace, open: this.placeOpen, up: this.up.place,
         onToggle: (e) => { this.placeOpen = !this.placeOpen; this.flip('place', e); },
         onClose: () => { this.placeOpen = false; },
@@ -860,24 +861,19 @@ class PhotosPage extends BifrostElement {
         onMove: (d) => { if (items.length) this.hiPlace = (this.hiPlace + d + items.length) % items.length; },
         empty: !this.placeQ.trim() ? '' : this.places ? 'No Gramps place matches' : 'Loading places...',
       })}
-      ${f.place ? html`<span class="photos-place-text"><i>${f.place.icon}</i><span>${f.place.label}</span>
-          <span class="mono small-text secondary-text">${f.place.sub}</span></span>
-        <button class="circle transparent small" aria-label="Clear place" title="Clear place"
-          @click=${() => this.setForm({ place: null })}><i>close</i></button>` : nothing}
     </nav>`;
   }
 
   renderPeople(r) {
     if (!r.people.length) {
-      return html`<p class="small-text secondary-text">Immich has not recognised anyone in this photo.</p>`;
+      return html`<p class="small-text secondary-text">No one recognised in this photo yet.</p>`;
     }
-    const unlinked = r.people.filter((p) => !p.linked).length;
-    return html`<div class="photos-people-list">
-        ${r.people.map((p) => html`<span class="chip small ${p.linked ? 'fill' : 'border'}"
-          title=${p.linked ? 'Linked to a Gramps person' : 'Not linked in Faces'}>
-          <i>${p.linked ? 'link' : 'link_off'}</i><span>${p.name || '(unnamed)'}</span></span>`)}
-      </div>
-      <p class="small-text secondary-text">Names come from Immich's face recognition. A linked person gets a face box in Gramps when the photo syncs${unlinked ? `; ${unlinked} here ${unlinked === 1 ? 'is' : 'are'} not linked yet, which the Faces section fixes` : ''}.</p>`;
+    return html`<ul class="list photos-people-list">${r.people.map((p) => html`<li>
+        <div class="max">
+          <div>${p.name || '(unnamed)'}</div>
+          ${p.linked ? nothing : html`<div class="small-text secondary-text">Not linked to a Gramps person yet</div>`}
+        </div>
+      </li>`)}</ul>`;
   }
 
   renderLightbox() {
@@ -1045,12 +1041,10 @@ class PhotosPage extends BifrostElement {
         : html`<div class="faces-empty"><i>add_photo_alternate</i><span>Empty. Use Add photos, or Add to collection inside a photo.</span></div>`}`;
   }
 
-  renderEditorCollections(r) {
+  renderCollectionsTab(r) {
     const items = this.editorCollectionMatches();
-    return html`<div class="photos-editor-cols">
-      <span class="small-text secondary-text">Collections</span>
-      ${(r.collections || []).map((c) => html`<button class="chip small fill" title="Remove from ${c.name}"
-        ?disabled=${!!this.busy} @click=${() => this.removeRecFromCollection(c)}><span>${c.name}</span><i>close</i></button>`)}
+    const mine = r.collections || [];
+    return html`<nav class="wrap photos-versions-bar">
       ${searchMenu({
         label: 'Add to collection', icon: 'collections_bookmark', value: this.ecQ, items, active: this.hiEc, open: this.ecOpen,
         cls: 'border small', placeholder: 'Find or name a collection', up: this.up.collection,
@@ -1062,7 +1056,12 @@ class PhotosPage extends BifrostElement {
         onMove: (d) => { if (items.length) this.hiEc = (this.hiEc + d + items.length) % items.length; },
         empty: this.collections === null ? 'Loading collections...' : 'Type a name to create one',
       })}
-    </div>`;
+    </nav>
+    ${mine.length ? html`<ul class="list">${mine.map((c) => html`<li>
+        <div class="max">${c.name}</div>
+        <button class="circle transparent small" title="Remove from ${c.name}" ?disabled=${!!this.busy}
+          @click=${() => this.removeRecFromCollection(c)}><i>close</i></button>
+      </li>`)}</ul>` : html`<p class="small-text secondary-text">Not in any collection.</p>`}`;
   }
 
   tabLink(id, label) {
@@ -1098,26 +1097,23 @@ class PhotosPage extends BifrostElement {
 
   renderRecord(r, f) {
     const versions = r.versions?.members?.length || 0;
+    const cols = r.collections?.length || 0;
     return html`<div class="photos-editor-body">
       <div class="photos-preview">
         <img src=${r.preview} alt="" class="photos-version-open" title="View larger" @click=${() => { this.lightbox = this.mainAsVersion(r); }}>
-        <div class="photos-links small-text">
-          ${r.immich_url ? html`<a class="photos-app-link" href=${r.immich_url} target="_blank" rel="noopener" title="Open in Immich"><img src="/static/vendor/icons/immich.svg" alt="Immich"></a>` : nothing}
-          ${r.gramps?.url ? html`<a class="photos-app-link" href=${r.gramps.url} target="_blank" rel="noopener" title="Open in Gramps"><img src="/static/vendor/icons/gramps-web.svg" alt="Gramps"></a>` : nothing}
-          <span class="mono secondary-text">${r.gramps ? r.gramps.gramps_id : 'not in Gramps'}</span>
-        </div>
-        ${this.renderEditorCollections(r)}
       </div>
       <div class="photos-form">
         <div class="tabs small photos-tabs">
           ${this.tabLink('details', 'Details')}
           ${this.tabLink('versions', versions > 1 ? `Versions (${versions})` : 'Versions')}
           ${this.tabLink('people', r.people.length ? `People (${r.people.length})` : 'People')}
+          ${this.tabLink('collections', cols ? `Collections (${cols})` : 'Collections')}
         </div>
         <div class="photos-tab">
           ${this.tab === 'versions' ? this.renderVersions(r)
             : this.tab === 'people' ? this.renderPeople(r)
-              : this.renderDetails(r, f)}
+              : this.tab === 'collections' ? this.renderCollectionsTab(r)
+                : this.renderDetails(r, f)}
         </div>
       </div>
     </div>`;
@@ -1127,8 +1123,13 @@ class PhotosPage extends BifrostElement {
     if (!this.openId) return nothing;
     const r = this.rec;
     return html`<dialog class="photos-editor" @close=${() => this.closeEditor()} @click=${(e) => this.scrimClick(e)}>
-      <nav>
+      <nav class="photos-editor-head">
         <h5 class="max small">${r ? (r.title || r.filename) : 'Loading...'}</h5>
+        ${r?.immich_url ? html`<a class="photos-app-link" href=${r.immich_url} target="_blank" rel="noopener" title="Open in Immich">
+          <span class="photos-app-icon" style="--icon: url('/static/vendor/icons/immich.svg')"></span></a>` : nothing}
+        ${r?.gramps?.url ? html`<a class="photos-app-link" href=${r.gramps.url} target="_blank" rel="noopener" title="Open in Gramps">
+          <span class="photos-app-icon" style="--icon: url('/static/vendor/icons/gramps-web.svg')"></span>
+          <span class="mono small-text">${r.gramps.gramps_id}</span></a>` : nothing}
         <button class="circle transparent" aria-label="Close" @click=${(e) => e.currentTarget.closest('dialog').close()}><i>close</i></button>
       </nav>
       ${this.recError ? html`<p>${statusLine('error', this.recError)}</p>`

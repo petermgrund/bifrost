@@ -426,3 +426,31 @@ dialog.photos-editor { inline-size: min(76rem, 96vw); max-inline-size: none; max
 .photo-seq { font-size: 0.75rem; margin-inline-end: 0.25rem; }
 .photos-editor-cols { display: flex; flex-wrap: wrap; gap: 0.375rem; align-items: center; margin-block-start: 0.75rem; }
 .photos-editor-cols .search-menu > menu { inline-size: 20rem; }
+.photos-app-link { display: inline-flex; align-items: center; }
+.photos-app-link > img { inline-size: 1.5rem; block-size: 1.5rem; }
+.photos-people > summary { display: inline-flex; align-items: center; gap: 0.25rem; cursor: pointer; list-style: none; }
+.photos-people > summary::-webkit-details-marker { display: none; }
+.photos-people > summary i.chev { font-size: 1.125rem; transition: transform var(--speed2); }
+.photos-people[open] > summary i.chev { transform: rotate(90deg); }
+.photos-people-list { display: flex; flex-wrap: wrap; gap: 0.375rem; margin-block: 0.375rem 0; }
+.photos-form .photos-versions { margin-block-start: 1.25rem; }
+.photos-version-open { cursor: zoom-in; }
+.photos-version-note {
+  display: inline-flex; align-items: center; gap: 0.25rem; margin: 0.125rem 0 0; padding: 0;
+  block-size: auto; min-block-size: 0; border: 0; background: none; box-shadow: none;
+  font-size: 0.8125rem; font-style: italic; color: var(--on-surface); text-transform: none;
+}
+.photos-version-note > i { font-size: 0.875rem; }
+.photos-version-note:hover { color: var(--primary); }
+.photos-version-label { inline-size: 100%; max-inline-size: 24rem; margin-block: 0.25rem 0; }
+dialog.photos-lightbox {
+  inline-size: min(96vw, 120rem); max-inline-size: none; max-block-size: calc(100vh - 2rem);
+  inset-block-start: 50%; transform: translate(-50%, -50%);
+  padding: 0.75rem; background: #101010; color: #eee; border-radius: 1rem;
+}
+dialog.photos-lightbox[open], dialog.photos-lightbox.active { transform: translate(-50%, -50%); }
+dialog.photos-lightbox > img {
+  display: block; margin-inline: auto; max-inline-size: 100%; max-block-size: calc(100vh - 7.5rem); object-fit: contain;
+}
+.photos-lightbox-caption { display: flex; align-items: center; gap: 0.75rem; padding-block-start: 0.5rem; }
+.photos-lightbox-caption .secondary-text { color: #aaa; }

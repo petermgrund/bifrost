@@ -119,10 +119,10 @@ export function searchField(opts) {
 
 export function searchMenu(opts) {
   const { label, icon, value, onInput, open = false, onToggle, onClose,
-    placeholder = 'Search', cls = 'border' } = opts;
+    placeholder = 'Search', cls = 'border', up = false } = opts;
   const toggle = (e) => {
     const opening = !open;
-    onToggle?.();
+    onToggle?.(e);
     if (!opening) return;
     const el = e.currentTarget.parentElement;
     const focusInput = () => {
@@ -134,7 +134,7 @@ export function searchMenu(opts) {
   };
   return html`<div class="search-menu">
     <button class=${cls} @click=${toggle}><i>${icon}</i><span>${label}</span></button>
-    <menu class="search-results ${open ? 'active' : ''}">
+    <menu class="search-results ${open ? 'active' : ''} ${up ? 'top' : ''}">
       <li class="transparent">
         <div class="field prefix small no-margin">
           <i class="front">search</i>

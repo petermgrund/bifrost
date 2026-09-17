@@ -49,6 +49,18 @@ function formFrom(rec) {
   };
 }
 
+function menuUp(e) {
+  const r = e?.currentTarget?.getBoundingClientRect?.();
+  if (!r) return false;
+  return window.innerHeight - r.bottom < 24 * 16 && r.top > window.innerHeight / 2;
+}
+
+function sizeText(m) {
+  const dims = m.width ? `${m.width}×${m.height}` : '';
+  const mb = m.size ? `${(m.size / 1048576).toFixed(1)} MB` : '';
+  return [dims, mb].filter(Boolean).join(' · ');
+}
+
 function cardFrom(rec) {
   return { asset_id: rec.asset_id, filename: rec.filename, title: rec.title, date: rec.date?.value || '',
     type: rec.type, thumb: rec.thumb, gramps_id: rec.gramps?.gramps_id || null,
@@ -112,6 +124,14 @@ class PhotosPage extends BifrostElement {
     ecQ: { state: true },
     ecOpen: { state: true },
     hiEc: { state: true },
+    up: { state: true },
+    lightbox: { state: true },
+    editLabel: { state: true },
+    labelDraft: { state: true },
+    albums: { state: true },
+    albumQ: { state: true },
+    albumOpen: { state: true },
+    hiAlbum: { state: true },
   };
 
   constructor() {
@@ -161,7 +181,17 @@ class PhotosPage extends BifrostElement {
     this.ecQ = '';
     this.ecOpen = false;
     this.hiEc = -1;
+    this.up = {};
+    this.lightbox = null;
+    this.editLabel = null;
+    this.labelDraft = '';
+    this.albums = null;
+    this.albumQ = '';
+    this.albumOpen = false;
+    this.hiAlbum = -1;
   }
+
+  flip(name, e) { this.up = { ...this.up, [name]: menuUp(e) }; }
 
   connectedCallback() {
     super.connectedCallback();
@@ -466,6 +496,8 @@ class PhotosPage extends BifrostElement {
     this.verOpen = false;
     this.hiVer = -1;
     this.verItems = [];
+    this.lightbox = null;
+    this.editLabel = null;
     try {
       const rec = await api(`/photos/api/photo/${id}`);
       if (this.openId !== id) return;
@@ -487,6 +519,67 @@ class PhotosPage extends BifrostElement {
   updated() {
     const dlg = this.renderRoot.querySelector('dialog.photos-editor');
     if (dlg && this.openId && !dlg.open) dlg.showModal();
+    const box = this.renderRoot.querySelector('dialog.photos-lightbox');
+    if (box && this.lightbox && !box.open) box.showModal();
+    if (this.editLabel) {
+      const input = this.renderRoot.querySelector('.photos-version-label input');
+      if (input && document.activeElement !== input) input.focus();
+    }
+  }
+
+  startLabel(m) {
+    this.editLabel = m.asset_id;
+    this.labelDraft = m.label || '';
+  }
+
+  async saveLabel(m) {
+    if (this.editLabel !== m.asset_id) return;
+    const label = this.labelDraft.trim();
+    this.editLabel = null;
+    if (label === (m.label || '')) return;
+    this.busy = 'label';
+    try {
+      const rec = await api(`/photos/api/photo/${this.rec.asset_id}/versions/${m.asset_id}/label`,
+        { method: 'PUT', body: JSON.stringify({ label }) });
+      this.applyRecord(rec);
+      this.status = { kind: 'ok', msg: label ? 'Version note saved' : 'Version note removed' };
+    } catch (e) {
+      this.status = { kind: 'error', msg: e.message };
+    } finally {
+      this.busy = '';
+    }
+  }
+
+  async loadAlbums() {
+    if (this.albums !== null) return;
+    try { this.albums = await api('/photos/api/immich-albums'); } catch (e) { this.albums = []; this.colStatus = { kind: 'error', msg: e.message }; }
+  }
+
+  albumMatches() {
+    const q = this.albumQ.trim().toLowerCase();
+    return (this.albums || []).filter((a) => !q || a.name.toLowerCase().includes(q)).slice(0, 8)
+      .map((a) => ({ id: a.id, label: a.name || '(unnamed album)', thumb: a.thumb, icon: 'photo_album',
+        sub: `${a.count} photo${a.count === 1 ? '' : 's'} · ${a.account}` }));
+  }
+
+  async importAlbum(it) {
+    this.albumOpen = false;
+    this.albumQ = '';
+    if (this.colBusy) return;
+    this.colBusy = 'import';
+    this.colStatus = { kind: 'busy', msg: `Importing ${it.label}` };
+    try {
+      const c = await post('/photos/api/collections/import', { album_id: it.id });
+      await this.loadCollections();
+      this.colOpen = c;
+      this.colName = c.name;
+      this.colDesc = c.description || '';
+      this.colStatus = { kind: 'ok', msg: `Imported ${c.added} photo${c.added === 1 ? '' : 's'} from the Immich album` };
+    } catch (e) {
+      this.colStatus = { kind: 'error', msg: e.message };
+    } finally {
+      this.colBusy = '';
+    }
   }
 
   scrimClick(e) {
@@ -681,8 +774,8 @@ class PhotosPage extends BifrostElement {
         ? html`<button class="chip fill" @click=${() => this.clearPerson()}><i>face</i><span>${this.person.label}</span><i>close</i></button>`
         : searchMenu({
           label: 'Person', icon: 'face', value: this.personQ, items, active: this.hiPerson, open: this.personOpen,
-          cls: 'chip',
-          onToggle: () => { this.personOpen = !this.personOpen; },
+          cls: 'chip', up: this.up.person,
+          onToggle: (e) => { this.personOpen = !this.personOpen; this.flip('person', e); },
           onClose: () => { this.personOpen = false; },
           onInput: (e) => { this.personQ = e.target.value; this.hiPerson = -1; },
           onPick: (it) => this.pickPerson(it),
@@ -748,8 +841,8 @@ class PhotosPage extends BifrostElement {
       </div>
       ${searchMenu({
         label: f.place ? 'Change place' : 'Choose place', icon: 'add_location',
-        value: this.placeQ, items, active: this.hiPlace, open: this.placeOpen,
-        onToggle: () => { this.placeOpen = !this.placeOpen; },
+        value: this.placeQ, items, active: this.hiPlace, open: this.placeOpen, up: this.up.place,
+        onToggle: (e) => { this.placeOpen = !this.placeOpen; this.flip('place', e); },
         onClose: () => { this.placeOpen = false; },
         onInput: (e) => { this.placeQ = e.target.value; this.hiPlace = -1; },
         onPick: (it) => this.pickPlace(it),
@@ -762,21 +855,56 @@ class PhotosPage extends BifrostElement {
 
   renderPeople(r) {
     if (!r.people.length) return nothing;
-    return html`<div class="photos-people">
-      <span class="small-text secondary-text">People</span>
-      ${r.people.map((p) => html`<span class="chip small ${p.linked ? 'fill' : 'border'}"
-        title=${p.linked ? 'Linked to a Gramps person' : 'Not linked in Faces'}>
-        <i>${p.linked ? 'link' : 'link_off'}</i><span>${p.name || '(unnamed)'}</span></span>`)}
-    </div>`;
+    const linked = r.people.filter((p) => p.linked).length;
+    return html`<details class="photos-people">
+      <summary class="none">
+        <i class="chev">chevron_right</i>
+        <span class="small-text secondary-text">People (${r.people.length}${linked < r.people.length ? `, ${linked} linked` : ''})</span>
+      </summary>
+      <div class="photos-people-list">
+        ${r.people.map((p) => html`<span class="chip small ${p.linked ? 'fill' : 'border'}"
+          title=${p.linked ? 'Linked to a Gramps person' : 'Not linked in Faces'}>
+          <i>${p.linked ? 'link' : 'link_off'}</i><span>${p.name || '(unnamed)'}</span></span>`)}
+      </div>
+    </details>`;
+  }
+
+  renderLightbox() {
+    const m = this.lightbox;
+    if (!m) return nothing;
+    return html`<dialog class="photos-lightbox" @close=${() => { this.lightbox = null; }}
+        @keydown=${(e) => { if (e.key === 'Escape') { e.stopPropagation(); e.currentTarget.close(); } }}
+        @click=${(e) => { if (e.target === e.currentTarget) e.currentTarget.close(); }}>
+      <img src=${`/photos/api/thumb/${m.asset_id}?size=preview`} alt="">
+      <div class="photos-lightbox-caption">
+        <span class="max">${m.label ? html`${m.label} <span class="secondary-text">·</span> ` : nothing}<span class="mono">${m.filename}</span>
+          <span class="mono secondary-text"> ${sizeText(m)}</span></span>
+        <button class="circle transparent" aria-label="Close" @click=${(e) => e.currentTarget.closest('dialog').close()}><i>close</i></button>
+      </div>
+    </dialog>`;
+  }
+
+  versionLabel(m) {
+    if (this.editLabel === m.asset_id) {
+      return html`<div class="field small no-margin photos-version-label">
+        <input type="text" placeholder="Note about this version" .value=${this.labelDraft}
+          @input=${(e) => { this.labelDraft = e.target.value; }}
+          @keydown=${(e) => { if (e.key === 'Enter') this.saveLabel(m); else if (e.key === 'Escape') { this.editLabel = null; } }}
+          @blur=${() => this.saveLabel(m)}></div>`;
+    }
+    return html`<button class="photos-version-note ${m.label ? '' : 'secondary-text'}" title="Edit the note about this version"
+      @click=${() => this.startLabel(m)}><i class="tiny">edit</i><span>${m.label || 'Add a note about this version'}</span></button>`;
   }
 
   versionRow(m) {
     const drift = m.drift || [];
     return html`<li>
-      <img class="small-round" src=${m.thumb} alt="">
+      <img class="small-round photos-version-open" src=${m.thumb} alt="" title="View larger"
+        @click=${() => { this.lightbox = m; }}>
       <div class="max">
-        <div>${m.filename}${m.is_primary ? html` <span class="chip tiny fill">main</span>` : nothing}</div>
-        <div class="small-text secondary-text mono">${m.width ? `${m.width}×${m.height}` : ''}${m.size ? ` · ${(m.size / 1048576).toFixed(1)} MB` : ''}</div>
+        <div><span class="photos-version-open" @click=${() => { this.lightbox = m; }}>${m.filename}</span>${m.is_primary ? html` <span class="chip tiny fill">main</span>` : nothing}</div>
+        <div class="small-text secondary-text mono">${sizeText(m)}</div>
+        ${this.versionLabel(m)}
         ${m.is_primary ? nothing : html`<div class="small-text ${drift.length ? 'error-text' : 'secondary-text'}">
           ${drift.length ? `differs: ${drift.join(', ')}` : 'matches the main image'}</div>`}
       </div>
@@ -798,8 +926,8 @@ class PhotosPage extends BifrostElement {
         <span class="small-text secondary-text">Versions${members.length ? ` (${members.length})` : ''}</span>
         ${searchMenu({
           label: 'Add version', icon: 'library_add', value: this.verQ, items, active: this.hiVer, open: this.verOpen,
-          cls: 'border small', placeholder: 'Search titles and file names',
-          onToggle: () => { this.verOpen = !this.verOpen; },
+          cls: 'border small', placeholder: 'Search titles and file names', up: this.up.version,
+          onToggle: (e) => { this.verOpen = !this.verOpen; this.flip('version', e); },
           onClose: () => { this.verOpen = false; },
           onInput: (e) => this.onVersionQuery(e.target.value),
           onPick: (it) => this.addVersion(it),
@@ -841,10 +969,22 @@ class PhotosPage extends BifrostElement {
 
   renderCollectionList() {
     if (this.collections === null) return html`<p>${spinner}</p>`;
+    const albums = this.albumMatches();
     return html`<nav class="wrap photos-col-new">
         ${field('New collection', this.newColName, (e) => { this.newColName = e.target.value; },
           { width: 'medium', onEnter: () => this.createCollection() })}
         ${btn('Create', !this.newColName.trim() || !!this.colBusy, () => this.createCollection(), 'border')}
+        ${searchMenu({
+          label: 'Import Immich album', icon: 'photo_album', value: this.albumQ, items: albums, active: this.hiAlbum,
+          open: this.albumOpen, cls: 'border', placeholder: 'Search albums',
+          onToggle: (e) => { this.albumOpen = !this.albumOpen; this.flip('album', e); if (this.albumOpen) this.loadAlbums(); },
+          onClose: () => { this.albumOpen = false; },
+          onInput: (e) => { this.albumQ = e.target.value; this.hiAlbum = -1; },
+          onPick: (it) => this.importAlbum(it),
+          onEnter: () => { if (this.hiAlbum >= 0 && this.hiAlbum < albums.length) this.importAlbum(albums[this.hiAlbum]); },
+          onMove: (d) => { if (albums.length) this.hiAlbum = (this.hiAlbum + d + albums.length) % albums.length; },
+          empty: this.albums === null ? 'Loading albums...' : 'No album matches',
+        })}
       </nav>
       ${this.colStatus ? html`<p>${statusLine(this.colStatus.kind, this.colStatus.msg)}</p>` : nothing}
       ${this.collections.length ? html`<div class="photos-grid">${this.collections.map((c) => html`
@@ -872,8 +1012,8 @@ class PhotosPage extends BifrostElement {
         ${btn('Save', !dirty || !!this.colBusy, () => this.saveCollection(), 'border')}
         ${searchMenu({
           label: 'Add photos', icon: 'add_photo_alternate', value: this.colQ, items, active: this.hiCol, open: this.colMenuOpen,
-          cls: 'border', placeholder: 'Search titles and file names',
-          onToggle: () => { this.colMenuOpen = !this.colMenuOpen; },
+          cls: 'border', placeholder: 'Search titles and file names', up: this.up.album_add,
+          onToggle: (e) => { this.colMenuOpen = !this.colMenuOpen; this.flip('album_add', e); },
           onClose: () => { this.colMenuOpen = false; },
           onInput: (e) => this.onCollectionQuery(e.target.value),
           onPick: (it) => this.addToOpenCollection(it),
@@ -902,8 +1042,8 @@ class PhotosPage extends BifrostElement {
         ?disabled=${!!this.busy} @click=${() => this.removeRecFromCollection(c)}><span>${c.name}</span><i>close</i></button>`)}
       ${searchMenu({
         label: 'Add to collection', icon: 'collections_bookmark', value: this.ecQ, items, active: this.hiEc, open: this.ecOpen,
-        cls: 'border small', placeholder: 'Find or name a collection',
-        onToggle: () => { this.ecOpen = !this.ecOpen; },
+        cls: 'border small', placeholder: 'Find or name a collection', up: this.up.collection,
+        onToggle: (e) => { this.ecOpen = !this.ecOpen; this.flip('collection', e); },
         onClose: () => { this.ecOpen = false; },
         onInput: (e) => { this.ecQ = e.target.value; this.hiEc = -1; },
         onPick: (it) => this.addRecToCollection(it),
@@ -919,14 +1059,12 @@ class PhotosPage extends BifrostElement {
       <div class="photos-preview">
         <img src=${r.preview} alt="">
         <div class="photos-links small-text">
-          ${r.immich_url ? html`<a class="link" href=${r.immich_url} target="_blank" rel="noopener">Open in Immich</a>` : nothing}
-          ${r.gramps?.url ? html`<a class="link" href=${r.gramps.url} target="_blank" rel="noopener">Open in Gramps</a>` : nothing}
+          ${r.immich_url ? html`<a class="photos-app-link" href=${r.immich_url} target="_blank" rel="noopener" title="Open in Immich"><img src="/static/vendor/icons/immich.svg" alt="Immich"></a>` : nothing}
+          ${r.gramps?.url ? html`<a class="photos-app-link" href=${r.gramps.url} target="_blank" rel="noopener" title="Open in Gramps"><img src="/static/vendor/icons/gramps-web.svg" alt="Gramps"></a>` : nothing}
           <span class="mono secondary-text">${r.gramps ? r.gramps.gramps_id : 'not in Gramps'}</span>
-          <span class="mono secondary-text photos-file">${r.filename}${r.width ? ` · ${r.width}×${r.height}` : ''}</span>
         </div>
         ${this.renderPeople(r)}
         ${this.renderEditorCollections(r)}
-        ${this.renderVersions(r)}
       </div>
       <div class="photos-form">
         ${field('Title', f.title, (e) => this.setForm({ title: e.target.value }))}
@@ -954,6 +1092,7 @@ class PhotosPage extends BifrostElement {
           ${this.busy ? spinner : nothing}
         </nav>
         ${this.status ? html`<p class="photos-status">${statusLine(this.status.kind, this.status.msg)}</p>` : nothing}
+        ${this.renderVersions(r)}
       </div>
     </div>`;
   }
@@ -981,7 +1120,8 @@ class PhotosPage extends BifrostElement {
       : html`${this.error ? html`<p>${statusLine('error', this.error)}</p>` : nothing}${this.renderGrid()}`;
     return html`${this.renderBar()}
       ${body}
-      ${this.renderEditor()}`;
+      ${this.renderEditor()}
+      ${this.renderLightbox()}`;
   }
 }
 customElements.define('photos-page', PhotosPage);

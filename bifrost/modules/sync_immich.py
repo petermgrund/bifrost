@@ -780,7 +780,8 @@ async def write_id_tag(
     return None
 
 
-def link_record(gramps_id: str | None, cfg: SyncImmichConfig, notes: str = "") -> dict:
+def link_record(gramps_id: str | None, cfg: SyncImmichConfig, notes: str = "",
+                version_label: str | None = None) -> dict:
     """The bifrost metadata record an asset carries in Immich"""
     rec: dict = {}
     if gramps_id:
@@ -789,7 +790,14 @@ def link_record(gramps_id: str | None, cfg: SyncImmichConfig, notes: str = "") -
             rec["gramps_url"] = f"{cfg.gramps_public_url}/media/{gramps_id}"
     if (notes or "").strip():
         rec["notes"] = notes.strip()
+    if (version_label or "").strip():
+        rec["version_label"] = version_label.strip()
     return rec
+
+
+def version_label(conn: sqlite3.Connection, asset_id: str) -> str | None:
+    row = conn.execute("SELECT label FROM version_labels WHERE asset_id=?", (asset_id,)).fetchone()
+    return row["label"] if row else None
 
 
 async def write_link_record(
@@ -800,7 +808,8 @@ async def write_link_record(
     row = note_for(conn, asset["id"], gramps_id)
     try:
         await client.upsert_asset_metadata(
-            asset["id"], METADATA_KEY, link_record(gramps_id, cfg, row["text"] if row else ""))
+            asset["id"], METADATA_KEY,
+            link_record(gramps_id, cfg, row["text"] if row else "", version_label(conn, asset["id"])))
     except ImmichError as exc:
         return f"link record write failed: {exc.message}"
     return None

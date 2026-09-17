@@ -835,15 +835,11 @@ class PhotosPage extends BifrostElement {
     const inGramps = !!r.gramps;
     const off = !inGramps && !f.sync.media;
     return html`<div class="photos-sync">
-      ${inGramps
-        ? html`<span class="small-text secondary-text">In Gramps as <span class="mono">${r.gramps.gramps_id}</span>, keeping its</span>`
-        : html`<label class="checkbox"><input type="checkbox" .checked=${f.sync.media}
-            @change=${(e) => this.setSync('media', e.target.checked)}><span>Create a Gramps media object</span></label>
-          <span class="small-text secondary-text">with its</span>`}
-      ${this.syncBox('title', 'title', off)}
-      ${this.syncBox('date', 'date', off)}
-      ${this.syncBox('note', 'note', off)}
-      ${inGramps ? html`<span class="small-text secondary-text">in sync</span>` : nothing}
+      <span class="small-text secondary-text">Sync to Gramps</span>
+      ${inGramps ? nothing : this.syncBox('media', 'Media object')}
+      ${this.syncBox('title', 'Title', off)}
+      ${this.syncBox('date', 'Date', off)}
+      ${this.syncBox('note', 'Note', off)}
     </div>`;
   }
 
@@ -1137,7 +1133,7 @@ class PhotosPage extends BifrostElement {
           <span class="photos-app-icon" style="--icon: url('/static/vendor/icons/immich.svg')"></span></a>` : nothing}
         ${r?.gramps?.url ? html`<a class="photos-app-link" href=${r.gramps.url} target="_blank" rel="noopener" title="Open in Gramps">
           <span class="photos-app-icon" style="--icon: url('/static/vendor/icons/gramps-web.svg')"></span>
-          <span class="mono small-text">${r.gramps.gramps_id}</span></a>` : nothing}
+          </a>` : nothing}
         <button class="circle transparent" aria-label="Close" @click=${(e) => e.currentTarget.closest('dialog').close()}><i>close</i></button>
       </nav>
       ${this.recError ? html`<p>${statusLine('error', this.recError)}</p>`

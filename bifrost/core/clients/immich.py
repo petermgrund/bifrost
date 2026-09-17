@@ -74,6 +74,7 @@ class ImmichClient:
         tag_id: str | None = None,
         description: str | None = None,
         order_by: str | None = None,
+        album_id: str | None = None,
     ) -> dict:
         body: dict = {
             "page": page, "size": size, "order": order,
@@ -81,6 +82,8 @@ class ImmichClient:
         }
         if person_id:
             body["personIds"] = [_checked_id(person_id)]
+        if album_id:
+            body["albumIds"] = [_checked_id(album_id)]
         if filename:
             body["originalFileName"] = filename
         if description:
@@ -214,6 +217,9 @@ class ImmichClient:
     async def reassign_face(self, person_id: str, face_id: str) -> None:
         await self._request(
             "PUT", f"/faces/{_checked_id(person_id)}", json={"id": _checked_id(face_id)})
+
+    async def list_albums(self) -> list[dict]:
+        return (await self._request("GET", "/albums")).json()
 
     async def list_people(self, with_hidden: bool = True) -> list[dict]:
         people: list[dict] = []

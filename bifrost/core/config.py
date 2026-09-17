@@ -51,6 +51,8 @@ class SyncImmichConfig:
     place_tag_prefix: str = "Place"
     note_sync_tag: str = "Sync/Note"
     gramps_public_url: str = ""
+    # account labels the Photos section browses; empty means every account
+    photos_accounts: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -181,6 +183,11 @@ def load_config(path: str | Path | None = None) -> Config:
         note_sync_tag=(si_raw.get("note_sync_tag") or "Sync/Note").strip(),
         gramps_public_url=(si_raw.get("gramps_public_url")
                            or sp_raw.get("gramps_public_url") or "").rstrip("/"),
+        photos_accounts=tuple(
+            str(x).strip() for x in (
+                [si_raw["photos_accounts"]] if isinstance(si_raw.get("photos_accounts"), str)
+                else si_raw.get("photos_accounts") or [])
+            if str(x).strip()),
     )
     accounts_raw = im_raw.get("accounts")
     legacy_keys = [k for k in ("api_key", "partner_api_key") if im_raw.get(k)]

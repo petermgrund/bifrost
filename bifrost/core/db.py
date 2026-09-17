@@ -162,6 +162,14 @@ MIGRATIONS: list[str] = [
         PRIMARY KEY (collection_id, asset_id)
     );
     """,
+    # 12 per-version labels
+    """
+    CREATE TABLE version_labels (
+        asset_id   TEXT PRIMARY KEY,
+        label      TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    """,
 ]
 
 

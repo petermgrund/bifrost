@@ -38,7 +38,16 @@ def _config(st) -> dict:
         "note_tag": cfg.note_sync_tag,
         "place_prefix": cfg.place_tag_prefix,
         "accounts": [getattr(c, "label", "") for c in accounts],
+        "browse_accounts": list(cfg.photos_accounts),
     }
+
+
+def _browse(request: Request) -> list:
+    st = _state(request)
+    try:
+        return photos.browse_accounts(_accounts_or_503(request), st.cfg.sync_immich)
+    except SyncError as exc:
+        raise HTTPException(exc.status, exc.detail)
 
 
 @router.get("/api/config")
@@ -65,7 +74,7 @@ async def search(request: Request, q: str = "", mode: str = "recent", person: st
     if mode not in ("recent", "tagged", "synced"):
         raise HTTPException(400, "mode must be recent, tagged or synced")
     return await photos.search(accounts, st.conn, st.cfg.sync_immich, mode=mode, q=q.strip(),
-                               person=person.strip(), page=max(1, page))
+                               person=person.strip(), page=max(1, page), browse=_browse(request))
 
 
 @router.get("/api/thumb/{asset_id}")
@@ -85,7 +94,7 @@ async def thumb(request: Request, asset_id: str, size: str = "thumbnail"):
 
 @router.get("/api/people")
 async def people(request: Request) -> list[dict]:
-    rows = await faces.merged_people(_accounts_or_503(request))
+    rows = await faces.merged_people(_browse(request))
     return [{"id": p["id"], "name": p["name"], "account_label": p["account_label"],
              "thumb": f"/faces/api/person-thumbnail/{p['id']}"}
             for p in rows if p["name"] and not p["is_hidden"]]
@@ -225,6 +234,26 @@ async def promote_version(request: Request, asset_id: str, member_id: str,
     return await _run_sync(request, new_main)
 
 
+class LabelBody(BaseModel):
+    label: str = ""
+
+
+@router.put("/api/photo/{asset_id}/versions/{member_id}/label")
+async def set_version_label(request: Request, asset_id: str, member_id: str, body: LabelBody) -> dict:
+    st = _state(request)
+    accounts = _accounts_or_503(request)
+    try:
+        primary, client = await photos._primary_and_client(accounts, asset_id)
+        _versions, member_ids = await photos._stack_members(client, primary)
+        if member_id != asset_id and member_id not in member_ids:
+            raise SyncError(404, "that asset is not a version of this photo")
+        await photos.set_version_label(accounts, st.conn, st.cfg.sync_immich, member_id, body.label)
+        return await photos.load(accounts, st.conn, st.cfg.sync_immich, asset_id,
+                                 await _place_rows(request))
+    except SyncError as exc:
+        raise HTTPException(exc.status, exc.detail)
+
+
 @router.delete("/api/photo/{asset_id}/versions/{member_id}")
 async def remove_version(request: Request, asset_id: str, member_id: str) -> dict:
     st = _state(request)
@@ -327,3 +356,25 @@ async def reorder_collection(request: Request, cid: int, body: ItemsBody) -> dic
     _collection_or_404(st, cid)
     order = photo_collections.reorder(st.conn, cid, body.asset_ids)
     return {"id": cid, "asset_ids": order}
+
+
+@router.get("/api/immich-albums")
+async def immich_albums(request: Request) -> list[dict]:
+    return await photos.list_albums(_browse(request))
+
+
+class ImportBody(BaseModel):
+    album_id: str
+
+
+@router.post("/api/collections/import")
+async def import_album(request: Request, body: ImportBody) -> dict:
+    st = _state(request)
+    accounts = _accounts_or_503(request)
+    try:
+        cid, added = await photos.import_album(accounts, _browse(request), st.conn, body.album_id.strip())
+    except SyncError as exc:
+        raise HTTPException(exc.status, exc.detail)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return {**(await _detail(request, cid)), "added": added}

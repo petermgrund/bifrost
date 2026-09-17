@@ -197,6 +197,52 @@ def registered_gid(conn: sqlite3.Connection, asset_id: str,
     return rows[0]["gramps_id"] if rows else None
 
 
+def browse_accounts(accounts: list[ImmichClient], cfg: SyncImmichConfig) -> list[ImmichClient]:
+    """The accounts the Photos section browses (sync.immich.photos_accounts), else all"""
+    if not cfg.photos_accounts:
+        return list(accounts)
+    wanted = {label.lower() for label in cfg.photos_accounts}
+    chosen = [c for c in accounts if (getattr(c, "label", "") or "").lower() in wanted]
+    if not chosen:
+        labels = ", ".join(getattr(c, "label", "") or "?" for c in accounts) or "none"
+        raise SyncError(400, "sync.immich.photos_accounts names no configured Immich account "
+                             f"(configured labels: {labels})")
+    return chosen
+
+
+def labels_for(conn: sqlite3.Connection, asset_ids: list[str]) -> dict[str, str]:
+    if not asset_ids:
+        return {}
+    rows = conn.execute(
+        f"SELECT asset_id, label FROM version_labels WHERE asset_id IN ({','.join('?' * len(asset_ids))})",
+        list(asset_ids)).fetchall()
+    return {r["asset_id"]: r["label"] for r in rows}
+
+
+async def set_version_label(accounts: list[ImmichClient], conn: sqlite3.Connection,
+                            cfg: SyncImmichConfig, asset_id: str, label: str) -> None:
+    """Keep a version's note in Bifrost and mirror it into its Immich record"""
+    label = (label or "").strip()
+    with conn:
+        if label:
+            conn.execute(
+                "INSERT INTO version_labels (asset_id, label, updated_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(asset_id) DO UPDATE SET label=excluded.label, updated_at=excluded.updated_at",
+                (asset_id, label, _now()))
+        else:
+            conn.execute("DELETE FROM version_labels WHERE asset_id=?", (asset_id,))
+    asset = await si._merged_one(accounts, asset_id)
+    client, _err = await si.owner_client(accounts, asset)
+    record = dict((await client.get_asset_metadata(asset_id)).get(si.METADATA_KEY) or {})
+    record.pop("version_label", None)
+    if label:
+        record["version_label"] = label
+    if record:
+        await client.upsert_asset_metadata(asset_id, si.METADATA_KEY, record)
+    else:
+        await client.delete_asset_metadata(asset_id, si.METADATA_KEY)
+
+
 def _member(m: dict, primary: str | None) -> dict:
     return {"asset_id": m["id"], "filename": m.get("originalFileName") or "",
             "is_primary": m["id"] == primary, "width": m.get("width"), "height": m.get("height"),
@@ -310,7 +356,7 @@ async def copy_faces(client: ImmichClient, source: dict, target: dict) -> int:
 
 
 async def match_version(client: ImmichClient, cfg: SyncImmichConfig, source: dict,
-                        target: dict) -> list[str]:
+                        target: dict, conn: sqlite3.Connection | None = None) -> list[str]:
     """Copy the shared metadata from source to target; returns what changed"""
     before = drift(version_fields(source, cfg), version_fields(target, cfg))
     src, dst = version_fields(source, cfg), version_fields(target, cfg)
@@ -328,7 +374,11 @@ async def match_version(client: ImmichClient, cfg: SyncImmichConfig, source: dic
     add = {k: v for k, v in src["tags"].items() if k not in dst["tags"]}
     remove = {k for k in dst["tags"] if k not in src["tags"]}
     await apply_tags(client, target["id"], add, remove)
-    record = (await client.get_asset_metadata(source["id"])).get(si.METADATA_KEY)
+    record = dict((await client.get_asset_metadata(source["id"])).get(si.METADATA_KEY) or {})
+    record.pop("version_label", None)
+    own_label = si.version_label(conn, target["id"]) if conn is not None else None
+    if own_label:
+        record["version_label"] = own_label
     if record:
         await client.upsert_asset_metadata(target["id"], si.METADATA_KEY, record)
     if await copy_faces(client, source, target):
@@ -358,7 +408,7 @@ async def add_version(accounts: list[ImmichClient], conn: sqlite3.Connection, cf
         raise SyncError(400, "versions must belong to the same Immich account as the main image")
     _versions, member_ids = await _stack_members(client, primary)
     await client.create_stack([asset_id] + [m for m in member_ids if m != asset_id] + [new_id])
-    await match_version(client, cfg, primary, new)
+    await match_version(client, cfg, primary, new, conn)
     return await load(accounts, conn, cfg, asset_id, place_rows)
 
 
@@ -369,7 +419,7 @@ async def match_member(accounts: list[ImmichClient], conn: sqlite3.Connection, c
     if member_id not in member_ids or member_id == asset_id:
         raise SyncError(404, "that asset is not a version of this photo")
     member = await si._merged_one(accounts, member_id)
-    await match_version(client, cfg, primary, member)
+    await match_version(client, cfg, primary, member, conn)
     return await load(accounts, conn, cfg, asset_id, place_rows)
 
 
@@ -419,7 +469,7 @@ async def promote(accounts: list[ImmichClient], conn: sqlite3.Connection, cfg: S
     if member_id not in member_ids or member_id == asset_id:
         raise SyncError(404, "that asset is not a version of this photo")
     member = await si._merged_one(accounts, member_id)
-    await match_version(client, cfg, primary, member)
+    await match_version(client, cfg, primary, member, conn)
     await client.update_stack(primary["stack"]["id"], member_id)
     with conn:
         conn.execute("DELETE FROM photo_notes WHERE asset_id=?", (member_id,))
@@ -488,6 +538,7 @@ async def load(accounts: list[ImmichClient], conn: sqlite3.Connection, cfg: Sync
     title, link_line = si.split_description(exif.get("description") or "")
     versions, member_ids = await _stack_members(client, asset)
     gid = registered_gid(conn, asset_id, member_ids)
+    labels = labels_for(conn, [asset_id, *member_ids])
     if versions is not None:
         details = await client.get_assets_many([m for m in member_ids if m != asset_id])
         mine = version_fields(asset, cfg)
@@ -500,6 +551,7 @@ async def load(accounts: list[ImmichClient], conn: sqlite3.Connection, cfg: Sync
             else:
                 member.update(_member(detail, asset_id))
                 member["drift"] = drift(mine, version_fields(detail, cfg))
+            member["label"] = labels.get(member["asset_id"], "")
     suggestions = await _suggestions(client, cfg, asset, member_ids, gid)
     row = si.note_for(conn, asset_id, gid)
     notes = row["text"] if row else ""
@@ -527,6 +579,7 @@ async def load(accounts: list[ImmichClient], conn: sqlite3.Connection, cfg: Sync
         "preview": f"/photos/api/thumb/{asset_id}?size=preview",
         "title": title,
         "link_line": link_line,
+        "label": labels.get(asset_id, ""),
         "date": date_form(asset),
         "place": place,
         "tags": sorted(tags),
@@ -562,6 +615,8 @@ async def save(accounts: list[ImmichClient], conn: sqlite3.Connection, cfg: Sync
         raise SyncError(400, "cannot tell which Immich account owns this asset, so its tags cannot be edited")
     _versions, member_ids = await _stack_members(client, asset)
     gid = registered_gid(conn, asset_id, member_ids)
+    if not gid and not form["sync"]["media"]:
+        form["sync"] = {k: False for k in form["sync"]}
 
     wanted: dict[str, str] = {}
 
@@ -602,7 +657,7 @@ async def save(accounts: list[ImmichClient], conn: sqlite3.Connection, cfg: Sync
             await _wait_for_date(client, asset_id, form["date"]["value"])
     await apply_tags(client, asset_id, add, remove)
     set_note(conn, asset_id, gid, form["notes"])
-    record = si.link_record(gid, cfg, form["notes"])
+    record = si.link_record(gid, cfg, form["notes"], si.version_label(conn, asset_id))
     if record:
         await client.upsert_asset_metadata(asset_id, si.METADATA_KEY, record)
     else:
@@ -695,9 +750,13 @@ async def cards_for(accounts: list[ImmichClient], conn: sqlite3.Connection,
 
 
 async def search(accounts: list[ImmichClient], conn: sqlite3.Connection, cfg: SyncImmichConfig,
-                 mode: str = "recent", q: str = "", person: str = "", page: int = 1) -> dict:
+                 mode: str = "recent", q: str = "", person: str = "", page: int = 1,
+                 browse: list[ImmichClient] | None = None) -> dict:
     """One page of photo cards, stack variants folded into their main image"""
     stacks, card = await _card_context(accounts, conn)
+    owners: set[str] | None = None
+    if browse is not None and len(browse) < len(accounts):
+        owners = {await si._user_id(c) for c in browse}
     items: list[dict] = []
     next_page: int | None = None
     seen: set[str] = set()
@@ -716,9 +775,11 @@ async def search(accounts: list[ImmichClient], conn: sqlite3.Connection, cfg: Sy
                 continue
             seen.add(aid)
             a = details.get(aid) or {"id": aid, "originalFileName": r["title"] or "", "_missing": True}
+            if owners is not None and a.get("ownerId") and a["ownerId"] not in owners:
+                continue
             items.append(card(a))
     else:
-        for client in accounts:
+        for client in (browse if browse is not None else accounts):
             try:
                 if mode == "tagged":
                     tag = await client.find_tag(cfg.sync_tag)
@@ -776,3 +837,44 @@ async def places(gramps: GrampsClient, cfg: SyncImmichConfig) -> list[dict]:
         })
     out.sort(key=lambda r: (not r["tagged"], r["name"].lower()))
     return out
+
+
+async def list_albums(browse: list[ImmichClient]) -> list[dict]:
+    """Immich albums of the browsed accounts, by name"""
+    out = []
+    for client in browse:
+        for a in await client.list_albums():
+            out.append({"id": a["id"], "name": a.get("albumName") or "", "count": a.get("assetCount") or 0,
+                        "description": a.get("description") or "", "order": a.get("order") or "desc",
+                        "account": getattr(client, "label", ""),
+                        "thumb": f"/photos/api/thumb/{a['albumThumbnailAssetId']}" if a.get("albumThumbnailAssetId") else None})
+    out.sort(key=lambda a: (a["name"].lower(), a["account"]))
+    return out
+
+
+async def album_assets(browse: list[ImmichClient], album_id: str) -> tuple[dict, list[str]]:
+    """The album and its asset ids in the album's own order"""
+    for client in browse:
+        album = next((a for a in await client.list_albums() if a["id"] == album_id), None)
+        if album is None:
+            continue
+        ids: list[str] = []
+        page: int | None = 1
+        while page and len(ids) < photo_collections.MAX_ITEMS:
+            r = await client.search_assets(page=page, size=200, album_id=album_id,
+                                           order=album.get("order") or "desc")
+            ids.extend(a["id"] for a in r["items"])
+            page = r["nextPage"]
+        return album, ids
+    raise SyncError(404, "no such Immich album in the browsed accounts")
+
+
+async def import_album(accounts: list[ImmichClient], browse: list[ImmichClient],
+                       conn: sqlite3.Connection, album_id: str) -> tuple[int, int]:
+    """A new collection with the album's name, description and order; returns (id, added)"""
+    album, ids = await album_assets(browse, album_id)
+    ids = await primaries_of(accounts, ids)
+    collection = photo_collections.create(conn, album.get("albumName") or "Immich album",
+                                          album.get("description") or "")
+    added = photo_collections.add_items(conn, collection["id"], ids[:photo_collections.MAX_ITEMS])
+    return collection["id"], added

@@ -161,6 +161,17 @@ class TestSave:
         assert im.metadata["a1"] == {}
         assert conn.execute("SELECT COUNT(*) FROM photo_notes").fetchone()[0] == 0
 
+    def test_field_flags_need_a_media_object(self, conn):
+        im = FakeImmich(assets={"a1": tagged("a1", "Sync/Date", "Sync/Description", desc="T")})
+        form = {"title": "T", "notes": "n", "date": {"value": "1923"},
+                "sync": {"media": False, "title": True, "date": True, "note": True}}
+        rec = run(photos.save([im], conn, CFG, "a1", form, link_on=False))
+        assert rec["sync"] == {"media": False, "title": False, "date": False, "note": False, "location": False}
+        assert sorted(t["value"] for t in im.assets["a1"]["tags"]) == ["Date/Year"]
+        mint(conn, "ABC123", "a1")
+        rec = run(photos.save([im], conn, CFG, "a1", form, link_on=False))
+        assert (rec["sync"]["title"], rec["sync"]["date"], rec["sync"]["note"]) == (True, True, True)
+
     def test_stack_variant_is_refused(self, conn):
         a = tagged("c1")
         a["stack"] = {"id": "s1", "primaryAssetId": "p1"}
@@ -360,11 +371,25 @@ class VersionsImmich(FakeImmich):
         return self.duplicates
 
     async def search_assets(self, page=1, size=60, person_id=None, filename=None, order="desc",
-                            tag_id=None, description=None, order_by=None):
+                            tag_id=None, description=None, order_by=None, album_id=None):
+        if album_id:
+            album = next((a for a in getattr(self, "albums", []) if a["id"] == album_id), None)
+            items = [self.assets[i] for i in (album or {}).get("asset_ids", []) if i in self.assets]
+            if order == "asc":
+                items = list(reversed(items))
+            return {"items": items, "nextPage": None}
         value = self._tag_value(tag_id) if tag_id else None
         items = [a for a in self.assets.values() if value and any(
             (t.get("value") or "").lower() == value.lower() for t in a.get("tags") or [])]
+        if not tag_id:
+            items = [a for a in self.assets.values() if not a.get("stack") or a["stack"].get("primaryAssetId") == a["id"]]
         return {"items": items, "nextPage": None}
+
+    async def list_albums(self):
+        return [{"id": a["id"], "albumName": a["name"], "assetCount": len(a["asset_ids"]),
+                 "description": a.get("description", ""), "order": a.get("order", "desc"),
+                 "albumThumbnailAssetId": a["asset_ids"][0] if a["asset_ids"] else None}
+                for a in getattr(self, "albums", [])]
 
 
 def stacked(im, primary, *others):
@@ -640,3 +665,106 @@ class TestCollections:
         assert pc.item_ids(conn, c["id"]) == ["v1"]
         rec = run(photos.load([im], conn, CFG, "v1"))
         assert rec["collections"] == [{"id": c["id"], "name": "Farm"}]
+
+
+from bifrost.core.config import load_config  # noqa: E402
+
+
+class TestBrowseAccounts:
+    def test_config_accepts_a_list_or_a_string(self, tmp_path):
+        base = "gramps: {base_url: x, username: u, password: p}\npaperless: {base_url: x, api_token: t}\n"
+        (tmp_path / "a.yaml").write_text(base + "sync:\n  immich:\n    photos_accounts: [fh, ' ']\n")
+        (tmp_path / "b.yaml").write_text(base + "sync:\n  immich:\n    photos_accounts: fh\n")
+        (tmp_path / "c.yaml").write_text(base)
+        assert load_config(tmp_path / "a.yaml").sync_immich.photos_accounts == ("fh",)
+        assert load_config(tmp_path / "b.yaml").sync_immich.photos_accounts == ("fh",)
+        assert load_config(tmp_path / "c.yaml").sync_immich.photos_accounts == ()
+
+    def test_filter_by_label(self):
+        fh, me = FakeImmich(me_id="u-fh"), FakeImmich(me_id="u-me")
+        fh.label, me.label = "fh", "me"
+        assert photos.browse_accounts([fh, me], CFG) == [fh, me]
+        cfg = SyncImmichConfig(photos_accounts=("FH",))
+        assert photos.browse_accounts([fh, me], cfg) == [fh]
+        with pytest.raises(SyncError, match="names no configured Immich account"):
+            photos.browse_accounts([fh, me], SyncImmichConfig(photos_accounts=("nobody",)))
+
+    def test_synced_mode_hides_other_accounts_photos(self, conn):
+        mint(conn, "AAA111", "a1")
+        mint(conn, "BBB222", "b1")
+        a = tagged("a1", desc="mine")
+        a["ownerId"] = "u-fh"
+        b = tagged("b1", desc="theirs")
+        b["ownerId"] = "u-me"
+        fh = VersionsImmich(assets={"a1": a, "b1": b}, me_id="u-fh")
+        fh.label = "fh"
+        rows = run(photos.search([fh], conn, CFG, mode="synced", browse=[fh]))["items"]
+        assert [i["asset_id"] for i in rows] == ["a1", "b1"]
+        me = VersionsImmich(assets={"a1": a, "b1": b}, me_id="u-me")
+        me.label = "me"
+        rows = run(photos.search([fh, me], conn, CFG, mode="synced", browse=[fh]))["items"]
+        assert [i["asset_id"] for i in rows] == ["a1"]
+
+
+class TestVersionLabels:
+    def test_label_is_kept_in_bifrost_and_the_immich_record(self, conn):
+        a = tagged("a1")
+        a.update({"ownerId": "me-1"})
+        v = tagged("v1")
+        v.update({"ownerId": "me-1"})
+        im = VersionsImmich(assets={"a1": a, "v1": v})
+        stacked(im, "a1", "v1")
+        im.metadata["v1"] = {"bifrost": {"gramps_id": "ABC123"}}
+        run(photos.set_version_label([im], conn, CFG, "v1", "  screenshot version "))
+        assert im.metadata["v1"]["bifrost"] == {"gramps_id": "ABC123", "version_label": "screenshot version"}
+        rec = run(photos.load([im], conn, CFG, "a1"))
+        assert [(m["asset_id"], m["label"]) for m in rec["versions"]["members"]] == [("a1", ""), ("v1", "screenshot version")]
+        run(photos.set_version_label([im], conn, CFG, "a1", "the edited original"))
+        assert im.metadata["a1"]["bifrost"] == {"version_label": "the edited original"}
+        assert run(photos.load([im], conn, CFG, "a1"))["label"] == "the edited original"
+        run(photos.set_version_label([im], conn, CFG, "a1", ""))
+        assert im.metadata["a1"] == {}
+        assert conn.execute("SELECT COUNT(*) FROM version_labels").fetchone()[0] == 1
+
+    def test_match_keeps_the_target_label_and_drops_the_sources(self, conn):
+        a = tagged("a1", "Sync/Gramps", desc="T")
+        a.update({"width": 100, "height": 80, "ownerId": "me-1"})
+        v = tagged("v1", desc="old")
+        v.update({"width": 100, "height": 80, "ownerId": "me-1"})
+        im = VersionsImmich(assets={"a1": a, "v1": v})
+        stacked(im, "a1", "v1")
+        im.metadata["a1"] = {"bifrost": {"gramps_id": "ABC123", "notes": "n", "version_label": "main scan"}}
+        run(photos.set_version_label([im], conn, CFG, "v1", "raw"))
+        run(photos.match_member([im], conn, CFG, "a1", "v1"))
+        assert im.metadata["v1"]["bifrost"] == {"gramps_id": "ABC123", "notes": "n", "version_label": "raw"}
+
+    def test_save_and_sync_records_carry_the_label(self, conn):
+        mint(conn, "ABC123", "a1")
+        a = tagged("a1", "Sync/Gramps", "ID/ABC123", desc="T")
+        im = VersionsImmich(assets={"a1": a})
+        run(photos.set_version_label([im], conn, CFG, "a1", "edited"))
+        run(photos.save([im], conn, CFG, "a1", {"title": "T", "notes": "n", "sync": {"media": True}}, link_on=False))
+        assert im.metadata["a1"]["bifrost"] == {"gramps_id": "ABC123",
+                                                "gramps_url": "https://gramps.example/media/ABC123",
+                                                "notes": "n", "version_label": "edited"}
+        assert sync_immich.link_record("X", CFG, "", "lbl") == {"gramps_id": "X", "gramps_url": "https://gramps.example/media/X", "version_label": "lbl"}
+
+
+class TestAlbumImport:
+    def test_import_makes_an_ordered_collection_of_main_images(self, conn):
+        a, v, b, c = tagged("a1", desc="A"), tagged("v1"), tagged("b1", desc="B"), tagged("c1", desc="C")
+        im = VersionsImmich(assets={"a1": a, "v1": v, "b1": b, "c1": c})
+        im.label = "fh"
+        stacked(im, "a1", "v1")
+        im.albums = [{"id": "al-1", "name": "Summer 1923", "description": "the farm", "order": "asc",
+                      "asset_ids": ["c1", "v1", "b1"]}]
+        albums = run(photos.list_albums([im]))
+        assert albums == [{"id": "al-1", "name": "Summer 1923", "count": 3, "description": "the farm",
+                           "order": "asc", "account": "fh", "thumb": "/photos/api/thumb/c1"}]
+        cid, added = run(photos.import_album([im], [im], conn, "al-1"))
+        assert added == 3
+        assert pc.get(conn, cid)["name"] == "Summer 1923"
+        assert pc.get(conn, cid)["description"] == "the farm"
+        assert pc.item_ids(conn, cid) == ["b1", "a1", "c1"]
+        with pytest.raises(SyncError, match="no such Immich album"):
+            run(photos.import_album([im], [im], conn, "al-9"))

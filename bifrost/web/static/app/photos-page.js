@@ -1,4 +1,4 @@
-import { BifrostElement, html, nothing, api, post, btn, field, selectField, spinner, statusLine, searchMenu } from './core.js';
+import { BifrostElement, html, nothing, api, post, btn, field, selectField, spinner, statusLine, searchMenu, iconYes } from './core.js';
 
 const MODES = [['recent', 'Recent', 'schedule'], ['tagged', 'Tagged for sync', 'sell'], ['synced', 'In Gramps', 'check_circle']];
 const PRECISION = [['exact', 'Exact day'], ['month', 'Month'], ['year', 'Year']];
@@ -31,7 +31,8 @@ function grampsDate(d) {
 }
 
 function placeItem(p) {
-  return { id: p.gramps_id, label: p.hierarchy.join(', ') || p.name, sub: p.gramps_id, mono: true,
+  const parents = (p.hierarchy || []).slice(1).join(', ');
+  return { id: p.gramps_id, label: p.name || p.gramps_id, sub: [parents, p.gramps_id].filter(Boolean).join(' · '),
     icon: p.known === false ? 'location_off' : p.tagged ? 'location_on' : 'map' };
 }
 
@@ -47,6 +48,18 @@ function formFrom(rec) {
       ? { media: true, title: true, date: true, note: false }
       : { media: rec.sync.media, title: rec.sync.title, date: rec.sync.date, note: rec.sync.note },
   };
+}
+
+function menuUp(e) {
+  const r = e?.currentTarget?.getBoundingClientRect?.();
+  if (!r) return false;
+  return window.innerHeight - r.bottom < 24 * 16 && r.top > window.innerHeight / 2;
+}
+
+function sizeText(m) {
+  const dims = m.width ? `${m.width}×${m.height}` : '';
+  const mb = m.size ? `${(m.size / 1048576).toFixed(1)} MB` : '';
+  return [dims, mb].filter(Boolean).join(' · ');
 }
 
 function cardFrom(rec) {
@@ -112,6 +125,15 @@ class PhotosPage extends BifrostElement {
     ecQ: { state: true },
     ecOpen: { state: true },
     hiEc: { state: true },
+    up: { state: true },
+    lightbox: { state: true },
+    editLabel: { state: true },
+    labelDraft: { state: true },
+    albums: { state: true },
+    albumQ: { state: true },
+    albumOpen: { state: true },
+    hiAlbum: { state: true },
+    tab: { state: true },
   };
 
   constructor() {
@@ -161,7 +183,18 @@ class PhotosPage extends BifrostElement {
     this.ecQ = '';
     this.ecOpen = false;
     this.hiEc = -1;
+    this.up = {};
+    this.lightbox = null;
+    this.editLabel = null;
+    this.labelDraft = '';
+    this.albums = null;
+    this.albumQ = '';
+    this.albumOpen = false;
+    this.hiAlbum = -1;
+    this.tab = 'details';
   }
+
+  flip(name, e) { this.up = { ...this.up, [name]: menuUp(e) }; }
 
   connectedCallback() {
     super.connectedCallback();
@@ -440,7 +473,7 @@ class PhotosPage extends BifrostElement {
 
   placeMatches() {
     const q = this.placeQ.trim().toLowerCase();
-    if (!q) return [];
+    if (!q) return this.form?.place ? [{ id: null, label: 'No place', icon: 'location_off' }] : [];
     const rank = (p) => {
       const name = p.name.toLowerCase();
       let r = -1;
@@ -466,6 +499,9 @@ class PhotosPage extends BifrostElement {
     this.verOpen = false;
     this.hiVer = -1;
     this.verItems = [];
+    this.lightbox = null;
+    this.editLabel = null;
+    this.tab = 'details';
     try {
       const rec = await api(`/photos/api/photo/${id}`);
       if (this.openId !== id) return;
@@ -487,6 +523,67 @@ class PhotosPage extends BifrostElement {
   updated() {
     const dlg = this.renderRoot.querySelector('dialog.photos-editor');
     if (dlg && this.openId && !dlg.open) dlg.showModal();
+    const box = this.renderRoot.querySelector('dialog.photos-lightbox');
+    if (box && this.lightbox && !box.open) box.showModal();
+    if (this.editLabel) {
+      const input = this.renderRoot.querySelector('.photos-version-label input');
+      if (input && document.activeElement !== input) input.focus();
+    }
+  }
+
+  startLabel(m) {
+    this.editLabel = m.asset_id;
+    this.labelDraft = m.label || '';
+  }
+
+  async saveLabel(m) {
+    if (this.editLabel !== m.asset_id) return;
+    const label = this.labelDraft.trim();
+    this.editLabel = null;
+    if (label === (m.label || '')) return;
+    this.busy = 'label';
+    try {
+      const rec = await api(`/photos/api/photo/${this.rec.asset_id}/versions/${m.asset_id}/label`,
+        { method: 'PUT', body: JSON.stringify({ label }) });
+      this.applyRecord(rec);
+      this.status = { kind: 'ok', msg: label ? 'Version note saved' : 'Version note removed' };
+    } catch (e) {
+      this.status = { kind: 'error', msg: e.message };
+    } finally {
+      this.busy = '';
+    }
+  }
+
+  async loadAlbums() {
+    if (this.albums !== null) return;
+    try { this.albums = await api('/photos/api/immich-albums'); } catch (e) { this.albums = []; this.colStatus = { kind: 'error', msg: e.message }; }
+  }
+
+  albumMatches() {
+    const q = this.albumQ.trim().toLowerCase();
+    return (this.albums || []).filter((a) => !q || a.name.toLowerCase().includes(q)).slice(0, 8)
+      .map((a) => ({ id: a.id, label: a.name || '(unnamed album)', thumb: a.thumb, icon: 'photo_album',
+        sub: `${a.count} photo${a.count === 1 ? '' : 's'} · ${a.account}` }));
+  }
+
+  async importAlbum(it) {
+    this.albumOpen = false;
+    this.albumQ = '';
+    if (this.colBusy) return;
+    this.colBusy = 'import';
+    this.colStatus = { kind: 'busy', msg: `Importing ${it.label}` };
+    try {
+      const c = await post('/photos/api/collections/import', { album_id: it.id });
+      await this.loadCollections();
+      this.colOpen = c;
+      this.colName = c.name;
+      this.colDesc = c.description || '';
+      this.colStatus = { kind: 'ok', msg: `Imported ${c.added} photo${c.added === 1 ? '' : 's'} from the Immich album` };
+    } catch (e) {
+      this.colStatus = { kind: 'error', msg: e.message };
+    } finally {
+      this.colBusy = '';
+    }
   }
 
   scrimClick(e) {
@@ -512,7 +609,7 @@ class PhotosPage extends BifrostElement {
   setSync(key, on) { this.setForm({ sync: { ...this.form.sync, [key]: on } }); }
 
   pickPlace(it) {
-    this.setForm({ place: it });
+    this.setForm({ place: it.id ? it : null });
     this.placeQ = '';
     this.hiPlace = -1;
     this.placeOpen = false;
@@ -681,8 +778,8 @@ class PhotosPage extends BifrostElement {
         ? html`<button class="chip fill" @click=${() => this.clearPerson()}><i>face</i><span>${this.person.label}</span><i>close</i></button>`
         : searchMenu({
           label: 'Person', icon: 'face', value: this.personQ, items, active: this.hiPerson, open: this.personOpen,
-          cls: 'chip',
-          onToggle: () => { this.personOpen = !this.personOpen; },
+          cls: 'chip', up: this.up.person,
+          onToggle: (e) => { this.personOpen = !this.personOpen; this.flip('person', e); },
           onClose: () => { this.personOpen = false; },
           onInput: (e) => { this.personQ = e.target.value; this.hiPerson = -1; },
           onPick: (it) => this.pickPerson(it),
@@ -729,27 +826,30 @@ class PhotosPage extends BifrostElement {
       </nav>`;
   }
 
-  syncBox(key, label) {
-    return html`<label class="checkbox"><input type="checkbox" .checked=${this.form.sync[key]}
+  syncBox(key, label, disabled = false) {
+    return html`<label class="checkbox"><input type="checkbox" .checked=${this.form.sync[key]} ?disabled=${disabled}
       @change=${(e) => this.setSync(key, e.target.checked)}><span>${label}</span></label>`;
+  }
+
+  renderSync(r, f) {
+    const inGramps = !!r.gramps;
+    const off = !inGramps && !f.sync.media;
+    return html`<div class="photos-sync">
+      <span class="small-text secondary-text">Sync to Gramps</span>
+      ${inGramps ? nothing : this.syncBox('media', 'Media object')}
+      ${this.syncBox('title', 'Title', off)}
+      ${this.syncBox('date', 'Date', off)}
+      ${this.syncBox('note', 'Note', off)}
+    </div>`;
   }
 
   renderPlace(f) {
     const items = this.placeMatches();
-    return html`<div class="photos-place">
-      <div class="chosen-media">
-        ${f.place ? html`<i>${f.place.icon}</i>
-          <div>
-            <div>${f.place.label}</div>
-            <div class="small-text secondary-text mono">${f.place.sub}</div>
-          </div>
-          <button class="circle transparent small" aria-label="Clear place" @click=${() => this.setForm({ place: null })}><i>close</i></button>`
-        : html`<span class="secondary-text small-text">No Gramps place</span>`}
-      </div>
+    return html`<nav class="photos-place-line">
       ${searchMenu({
-        label: f.place ? 'Change place' : 'Choose place', icon: 'add_location',
-        value: this.placeQ, items, active: this.hiPlace, open: this.placeOpen,
-        onToggle: () => { this.placeOpen = !this.placeOpen; },
+        label: f.place ? f.place.label : 'Choose place', icon: f.place ? f.place.icon : 'add_location',
+        value: this.placeQ, items, active: this.hiPlace, open: this.placeOpen, up: this.up.place,
+        onToggle: (e) => { this.placeOpen = !this.placeOpen; this.flip('place', e); },
         onClose: () => { this.placeOpen = false; },
         onInput: (e) => { this.placeQ = e.target.value; this.hiPlace = -1; },
         onPick: (it) => this.pickPlace(it),
@@ -757,28 +857,58 @@ class PhotosPage extends BifrostElement {
         onMove: (d) => { if (items.length) this.hiPlace = (this.hiPlace + d + items.length) % items.length; },
         empty: !this.placeQ.trim() ? '' : this.places ? 'No Gramps place matches' : 'Loading places...',
       })}
-    </div>`;
+    </nav>`;
   }
 
   renderPeople(r) {
-    if (!r.people.length) return nothing;
-    return html`<div class="photos-people">
-      <span class="small-text secondary-text">People</span>
-      ${r.people.map((p) => html`<span class="chip small ${p.linked ? 'fill' : 'border'}"
-        title=${p.linked ? 'Linked to a Gramps person' : 'Not linked in Faces'}>
-        <i>${p.linked ? 'link' : 'link_off'}</i><span>${p.name || '(unnamed)'}</span></span>`)}
-    </div>`;
+    if (!r.people.length) {
+      return html`<p class="small-text secondary-text">No faces.</p>`;
+    }
+    return html`<ul class="list photos-people-list">${r.people.map((p) => html`<li>
+        <div class="max">
+          <div>${p.name || '(unnamed)'}</div>
+          ${p.linked ? nothing : html`<div class="small-text secondary-text">Not linked to a Gramps person yet</div>`}
+        </div>
+      </li>`)}</ul>`;
+  }
+
+  renderLightbox() {
+    const m = this.lightbox;
+    if (!m) return nothing;
+    return html`<dialog class="photos-lightbox" @close=${() => { this.lightbox = null; }}
+        @keydown=${(e) => { if (e.key === 'Escape') { e.stopPropagation(); e.currentTarget.close(); } }}
+        @click=${(e) => { if (e.target === e.currentTarget) e.currentTarget.close(); }}>
+      <img src=${`/photos/api/thumb/${m.asset_id}?size=preview`} alt="">
+      <div class="photos-lightbox-caption">
+        <span class="max">${m.label ? html`${m.label} <span class="secondary-text">·</span> ` : nothing}<span class="mono">${m.filename}</span>
+          <span class="mono secondary-text"> ${sizeText(m)}</span></span>
+        <button class="circle transparent" aria-label="Close" @click=${(e) => e.currentTarget.closest('dialog').close()}><i>close</i></button>
+      </div>
+    </dialog>`;
+  }
+
+  versionLabel(m) {
+    if (this.editLabel === m.asset_id) {
+      return html`<div class="field small no-margin photos-version-label">
+        <input type="text" placeholder="Note about this version" .value=${this.labelDraft}
+          @input=${(e) => { this.labelDraft = e.target.value; }}
+          @keydown=${(e) => { if (e.key === 'Enter') this.saveLabel(m); else if (e.key === 'Escape') { this.editLabel = null; } }}
+          @blur=${() => this.saveLabel(m)}></div>`;
+    }
+    return html`<button class="photos-version-note ${m.label ? '' : 'secondary-text'}" title="Edit the note about this version"
+      @click=${() => this.startLabel(m)}><i class="tiny">edit</i><span>${m.label || 'Add a note about this version'}</span></button>`;
   }
 
   versionRow(m) {
     const drift = m.drift || [];
     return html`<li>
-      <img class="small-round" src=${m.thumb} alt="">
+      <img class="small-round photos-version-open" src=${m.thumb} alt="" title="View larger"
+        @click=${() => { this.lightbox = m; }}>
       <div class="max">
-        <div>${m.filename}${m.is_primary ? html` <span class="chip tiny fill">main</span>` : nothing}</div>
-        <div class="small-text secondary-text mono">${m.width ? `${m.width}×${m.height}` : ''}${m.size ? ` · ${(m.size / 1048576).toFixed(1)} MB` : ''}</div>
-        ${m.is_primary ? nothing : html`<div class="small-text ${drift.length ? 'error-text' : 'secondary-text'}">
-          ${drift.length ? `differs: ${drift.join(', ')}` : 'matches the main image'}</div>`}
+        <div><span class="photos-version-open" @click=${() => { this.lightbox = m; }}>${m.filename}</span>${m.is_primary ? html` <span class="chip tiny fill">main</span>` : nothing}</div>
+        <div class="small-text secondary-text mono">${sizeText(m)}</div>
+        ${this.versionLabel(m)}
+        ${!m.is_primary && drift.length ? html`<div class="small-text error-text" title="Compared with the main image">differs: ${drift.join(', ')}</div>` : nothing}
       </div>
       ${m.is_primary ? nothing : html`<nav class="photos-version-actions">
         ${drift.length ? btn('Match', !!this.busy, () => this.matchVersion(m), 'border small') : nothing}
@@ -795,11 +925,10 @@ class PhotosPage extends BifrostElement {
     const items = this.verItems;
     return html`<div class="photos-versions">
       <nav class="wrap photos-versions-bar">
-        <span class="small-text secondary-text">Versions${members.length ? ` (${members.length})` : ''}</span>
         ${searchMenu({
           label: 'Add version', icon: 'library_add', value: this.verQ, items, active: this.hiVer, open: this.verOpen,
-          cls: 'border small', placeholder: 'Search titles and file names',
-          onToggle: () => { this.verOpen = !this.verOpen; },
+          cls: 'border small', placeholder: 'Search titles and file names', up: this.up.version,
+          onToggle: (e) => { this.verOpen = !this.verOpen; this.flip('version', e); },
           onClose: () => { this.verOpen = false; },
           onInput: (e) => this.onVersionQuery(e.target.value),
           onPick: (it) => this.addVersion(it),
@@ -809,10 +938,11 @@ class PhotosPage extends BifrostElement {
         })}
         ${members.length > 1 ? html`<label class="checkbox"><input type="checkbox" .checked=${this.redraw}
           @change=${(e) => { this.redraw = e.target.checked; }}><span class="small-text">Redraw face boxes when the main image changes</span></label>` : nothing}
+        ${this.renderStatus()}
       </nav>
       ${v?.error ? html`<p class="error-text small-text">${v.error}</p>` : nothing}
-      ${members.length ? html`<ul class="list">${members.map((m) => this.versionRow(m))}</ul>`
-        : html`<p class="small-text secondary-text photos-versions-empty">No other versions yet. Add a rescan or a restored copy and they stay together with the same metadata.</p>`}
+      <div class="photos-versions-scroll">
+      ${members.length ? html`<ul class="list">${members.map((m) => this.versionRow(m))}</ul>` : nothing}
       ${r.suggestions?.length ? html`<span class="small-text secondary-text">Suggested versions</span>
         <ul class="list">${r.suggestions.map((sg) => html`<li>
           <img class="small-round" src=${sg.thumb} alt="">
@@ -822,6 +952,7 @@ class PhotosPage extends BifrostElement {
           </div>
           ${sg.in_stack ? nothing : btn('Add', !!this.busy, () => this.addVersion({ id: sg.asset_id }), 'border small')}
         </li>`)}</ul>` : nothing}
+      </div>
     </div>`;
   }
 
@@ -841,12 +972,24 @@ class PhotosPage extends BifrostElement {
 
   renderCollectionList() {
     if (this.collections === null) return html`<p>${spinner}</p>`;
+    const albums = this.albumMatches();
     return html`<nav class="wrap photos-col-new">
         ${field('New collection', this.newColName, (e) => { this.newColName = e.target.value; },
           { width: 'medium', onEnter: () => this.createCollection() })}
         ${btn('Create', !this.newColName.trim() || !!this.colBusy, () => this.createCollection(), 'border')}
+        ${searchMenu({
+          label: 'Import Immich album', icon: 'photo_album', value: this.albumQ, items: albums, active: this.hiAlbum,
+          open: this.albumOpen, cls: 'border', placeholder: 'Search albums',
+          onToggle: (e) => { this.albumOpen = !this.albumOpen; this.flip('album', e); if (this.albumOpen) this.loadAlbums(); },
+          onClose: () => { this.albumOpen = false; },
+          onInput: (e) => { this.albumQ = e.target.value; this.hiAlbum = -1; },
+          onPick: (it) => this.importAlbum(it),
+          onEnter: () => { if (this.hiAlbum >= 0 && this.hiAlbum < albums.length) this.importAlbum(albums[this.hiAlbum]); },
+          onMove: (d) => { if (albums.length) this.hiAlbum = (this.hiAlbum + d + albums.length) % albums.length; },
+          empty: this.albums === null ? 'Loading albums...' : 'No album matches',
+        })}
+        ${this.renderColStatus()}
       </nav>
-      ${this.colStatus ? html`<p>${statusLine(this.colStatus.kind, this.colStatus.msg)}</p>` : nothing}
       ${this.collections.length ? html`<div class="photos-grid">${this.collections.map((c) => html`
         <article class="photo-card no-margin" @click=${() => this.openCollection(c.id)}>
           <div class="photo-thumb">
@@ -857,8 +1000,7 @@ class PhotosPage extends BifrostElement {
             <div class="photo-title">${c.name}</div>
             <div class="photo-sub secondary-text"><span>${c.description || ' '}</span></div>
           </div>
-        </article>`)}</div>`
-        : html`<div class="faces-empty"><i>collections_bookmark</i><span>No collections yet. Name one above, then add photos from the editor or from the collection page.</span></div>`}`;
+        </article>`)}</div>` : nothing}`;
   }
 
   renderCollection() {
@@ -872,8 +1014,8 @@ class PhotosPage extends BifrostElement {
         ${btn('Save', !dirty || !!this.colBusy, () => this.saveCollection(), 'border')}
         ${searchMenu({
           label: 'Add photos', icon: 'add_photo_alternate', value: this.colQ, items, active: this.hiCol, open: this.colMenuOpen,
-          cls: 'border', placeholder: 'Search titles and file names',
-          onToggle: () => { this.colMenuOpen = !this.colMenuOpen; },
+          cls: 'border', placeholder: 'Search titles and file names', up: this.up.album_add,
+          onToggle: (e) => { this.colMenuOpen = !this.colMenuOpen; this.flip('album_add', e); },
           onClose: () => { this.colMenuOpen = false; },
           onInput: (e) => this.onCollectionQuery(e.target.value),
           onPick: (it) => this.addToOpenCollection(it),
@@ -885,25 +1027,19 @@ class PhotosPage extends BifrostElement {
         <button class="border small ${this.confirmDelete ? 'error' : ''}" ?disabled=${!!this.colBusy}
           @click=${() => this.deleteCollection()}>
           <i>delete</i><span>${this.confirmDelete ? 'Click again to delete' : 'Delete'}</span></button>
+        ${this.renderColStatus()}
       </nav>
-      <p class="small-text secondary-text photos-col-hint">
-        ${c.items.length} photo${c.items.length === 1 ? '' : 's'} in your order. Drag a photo to move it, or use the arrows. Click one to open it.
-        ${this.colStatus ? html` ${statusLine(this.colStatus.kind, this.colStatus.msg)}` : nothing}
-      </p>
-      ${c.items.length ? html`<div class="photos-grid">${c.items.map((it, i) => this.colCard(it, i, c.items.length))}</div>`
-        : html`<div class="faces-empty"><i>add_photo_alternate</i><span>Empty. Use Add photos, or Add to collection inside a photo.</span></div>`}`;
+      ${c.items.length ? html`<div class="photos-grid">${c.items.map((it, i) => this.colCard(it, i, c.items.length))}</div>` : nothing}`;
   }
 
-  renderEditorCollections(r) {
+  renderCollectionsTab(r) {
     const items = this.editorCollectionMatches();
-    return html`<div class="photos-editor-cols">
-      <span class="small-text secondary-text">Collections</span>
-      ${(r.collections || []).map((c) => html`<button class="chip small fill" title="Remove from ${c.name}"
-        ?disabled=${!!this.busy} @click=${() => this.removeRecFromCollection(c)}><span>${c.name}</span><i>close</i></button>`)}
+    const mine = r.collections || [];
+    return html`<nav class="wrap photos-versions-bar">
       ${searchMenu({
         label: 'Add to collection', icon: 'collections_bookmark', value: this.ecQ, items, active: this.hiEc, open: this.ecOpen,
-        cls: 'border small', placeholder: 'Find or name a collection',
-        onToggle: () => { this.ecOpen = !this.ecOpen; },
+        cls: 'border small', placeholder: 'Find or name a collection', up: this.up.collection,
+        onToggle: (e) => { this.ecOpen = !this.ecOpen; this.flip('collection', e); },
         onClose: () => { this.ecOpen = false; },
         onInput: (e) => { this.ecQ = e.target.value; this.hiEc = -1; },
         onPick: (it) => this.addRecToCollection(it),
@@ -911,49 +1047,79 @@ class PhotosPage extends BifrostElement {
         onMove: (d) => { if (items.length) this.hiEc = (this.hiEc + d + items.length) % items.length; },
         empty: this.collections === null ? 'Loading collections...' : 'Type a name to create one',
       })}
-    </div>`;
+      ${this.renderStatus()}
+    </nav>
+    ${mine.length ? html`<ul class="list">${mine.map((c) => html`<li>
+        <div class="max">${c.name}</div>
+        <button class="circle transparent small" title="Remove from ${c.name}" ?disabled=${!!this.busy}
+          @click=${() => this.removeRecFromCollection(c)}><i>close</i></button>
+      </li>`)}</ul>` : html``}`;
+  }
+
+  renderStatus() {
+    if (!this.status) return nothing;
+    if (this.status.kind === 'ok') return html`<span class="photos-status">${iconYes}</span>`;
+    if (this.status.kind === 'busy') return html`<span class="photos-status">${spinner}</span>`;
+    return html`<span class="photos-status">${statusLine(this.status.kind, this.status.msg)}</span>`;
+  }
+
+  tabLink(id, label) {
+    return html`<a class=${this.tab === id ? 'active' : ''} @click=${() => { this.tab = id; this.status = null; }}>${label}</a>`;
+  }
+
+  renderColStatus() {
+    if (!this.colStatus) return nothing;
+    if (this.colStatus.kind === 'ok') return html`<span class="photos-status">${iconYes}</span>`;
+    if (this.colStatus.kind === 'busy') return html`<span class="photos-status">${spinner}</span>`;
+    return html`<span class="photos-status">${statusLine(this.colStatus.kind, this.colStatus.msg)}</span>`;
+  }
+
+  renderDetails(r, f) {
+    return html`${field('Title', f.title, (e) => this.setForm({ title: e.target.value }), { small: true })}
+      <div class="photos-date-grid">
+        ${field('Date', f.dateText, (e) => this.setDate(e.target.value),
+          { small: true, mono: true, placeholder: 'YYYY, YYYY-MM or YYYY-MM-DD',
+            error: f.dateText.trim() && !f.date ? 'Unreadable' : '' })}
+        ${selectField('Precision', f.date?.precision || 'exact', PRECISION, (e) => this.setDateField('precision', e.target.value), { small: true })}
+        ${selectField('Modifier', f.date?.modifier || 'regular', MODIFIER, (e) => this.setDateField('modifier', e.target.value), { small: true })}
+        ${selectField('Quality', f.date?.quality || 'regular', QUALITY, (e) => this.setDateField('quality', e.target.value), { small: true })}
+      </div>
+      <p class="small-text secondary-text photos-hint">Gramps date: <span class="mono">${grampsDate(f.date) || '(none)'}</span></p>
+      ${this.renderPlace(f)}
+      ${field('Notes', f.notes, (e) => this.setForm({ notes: e.target.value }), { rows: 3, small: true })}
+      ${this.renderSync(r, f)}
+      <nav class="wrap photos-actions">
+        ${btn(this.busy === 'save' ? 'Saving...' : 'Save', !!this.busy, () => this.save(false), 'border')}
+        ${btn(this.busy === 'sync' ? 'Syncing...' : 'Save and sync', !!this.busy, () => this.save(true))}
+        ${this.renderStatus()}
+      </nav>`;
+  }
+
+  mainAsVersion(r) {
+    const main = (r.versions?.members || []).find((m) => m.is_primary);
+    return main || { asset_id: r.asset_id, filename: r.filename, width: r.width, height: r.height, label: r.label };
   }
 
   renderRecord(r, f) {
+    const versions = r.versions?.members?.length || 0;
+    const cols = r.collections?.length || 0;
     return html`<div class="photos-editor-body">
       <div class="photos-preview">
-        <img src=${r.preview} alt="">
-        <div class="photos-links small-text">
-          ${r.immich_url ? html`<a class="link" href=${r.immich_url} target="_blank" rel="noopener">Open in Immich</a>` : nothing}
-          ${r.gramps?.url ? html`<a class="link" href=${r.gramps.url} target="_blank" rel="noopener">Open in Gramps</a>` : nothing}
-          <span class="mono secondary-text">${r.gramps ? r.gramps.gramps_id : 'not in Gramps'}</span>
-          <span class="mono secondary-text photos-file">${r.filename}${r.width ? ` · ${r.width}×${r.height}` : ''}</span>
-        </div>
-        ${this.renderPeople(r)}
-        ${this.renderEditorCollections(r)}
-        ${this.renderVersions(r)}
+        <img src=${r.preview} alt="" class="photos-version-open" title="View larger" @click=${() => { this.lightbox = this.mainAsVersion(r); }}>
       </div>
       <div class="photos-form">
-        ${field('Title', f.title, (e) => this.setForm({ title: e.target.value }))}
-        <nav class="wrap photos-row">
-          ${field('Date', f.dateText, (e) => this.setDate(e.target.value),
-            { width: 'small', mono: true, placeholder: 'YYYY, YYYY-MM or YYYY-MM-DD',
-              error: f.dateText.trim() && !f.date ? 'Unreadable' : '' })}
-          ${selectField('Precision', f.date?.precision || 'exact', PRECISION, (e) => this.setDateField('precision', e.target.value), { width: 'small' })}
-          ${selectField('Modifier', f.date?.modifier || 'regular', MODIFIER, (e) => this.setDateField('modifier', e.target.value), { width: 'small' })}
-          ${selectField('Quality', f.date?.quality || 'regular', QUALITY, (e) => this.setDateField('quality', e.target.value), { width: 'small' })}
-        </nav>
-        <p class="small-text secondary-text photos-hint">Gramps date: <span class="mono">${grampsDate(f.date) || '(none)'}</span></p>
-        ${this.renderPlace(f)}
-        ${field('Notes', f.notes, (e) => this.setForm({ notes: e.target.value }), { rows: 4 })}
-        <div class="photos-sync-row">
-          <span class="small-text secondary-text">Sync to Gramps</span>
-          ${this.syncBox('media', 'media object')}
-          ${this.syncBox('title', 'title')}
-          ${this.syncBox('date', 'date')}
-          ${this.syncBox('note', 'note')}
+        <div class="tabs small photos-tabs">
+          ${this.tabLink('details', 'Details')}
+          ${this.tabLink('versions', versions > 1 ? `Versions (${versions})` : 'Versions')}
+          ${this.tabLink('people', r.people.length ? `People (${r.people.length})` : 'People')}
+          ${this.tabLink('collections', cols ? `Collections (${cols})` : 'Collections')}
         </div>
-        <nav class="wrap photos-actions">
-          ${btn(this.busy === 'save' ? 'Saving...' : 'Save', !!this.busy, () => this.save(false), 'border')}
-          ${btn(this.busy === 'sync' ? 'Syncing...' : 'Save and sync', !!this.busy, () => this.save(true))}
-          ${this.busy ? spinner : nothing}
-        </nav>
-        ${this.status ? html`<p class="photos-status">${statusLine(this.status.kind, this.status.msg)}</p>` : nothing}
+        <div class="photos-tab">
+          ${this.tab === 'versions' ? this.renderVersions(r)
+            : this.tab === 'people' ? this.renderPeople(r)
+              : this.tab === 'collections' ? this.renderCollectionsTab(r)
+                : this.renderDetails(r, f)}
+        </div>
       </div>
     </div>`;
   }
@@ -962,8 +1128,13 @@ class PhotosPage extends BifrostElement {
     if (!this.openId) return nothing;
     const r = this.rec;
     return html`<dialog class="photos-editor" @close=${() => this.closeEditor()} @click=${(e) => this.scrimClick(e)}>
-      <nav>
+      <nav class="photos-editor-head">
         <h5 class="max small">${r ? (r.title || r.filename) : 'Loading...'}</h5>
+        ${r?.immich_url ? html`<a class="photos-app-link" href=${r.immich_url} target="_blank" rel="noopener" title="Open in Immich">
+          <span class="photos-app-icon" style="--icon: url('/static/vendor/icons/immich.svg')"></span></a>` : nothing}
+        ${r?.gramps?.url ? html`<a class="photos-app-link" href=${r.gramps.url} target="_blank" rel="noopener" title="Open in Gramps">
+          <span class="photos-app-icon" style="--icon: url('/static/vendor/icons/gramps-web.svg')"></span>
+          </a>` : nothing}
         <button class="circle transparent" aria-label="Close" @click=${(e) => e.currentTarget.closest('dialog').close()}><i>close</i></button>
       </nav>
       ${this.recError ? html`<p>${statusLine('error', this.recError)}</p>`
@@ -981,7 +1152,8 @@ class PhotosPage extends BifrostElement {
       : html`${this.error ? html`<p>${statusLine('error', this.error)}</p>` : nothing}${this.renderGrid()}`;
     return html`${this.renderBar()}
       ${body}
-      ${this.renderEditor()}`;
+      ${this.renderEditor()}
+      ${this.renderLightbox()}`;
   }
 }
 customElements.define('photos-page', PhotosPage);

@@ -1,4 +1,4 @@
-import { BifrostElement, html, nothing, api, post, btn, field, selectField, spinner, statusLine, searchMenu } from './core.js';
+import { BifrostElement, html, nothing, api, post, btn, field, selectField, spinner, statusLine, searchMenu, iconYes } from './core.js';
 
 const MODES = [['recent', 'Recent', 'schedule'], ['tagged', 'Tagged for sync', 'sell'], ['synced', 'In Gramps', 'check_circle']];
 const PRECISION = [['exact', 'Exact day'], ['month', 'Month'], ['year', 'Year']];
@@ -942,6 +942,7 @@ class PhotosPage extends BifrostElement {
         })}
         ${members.length > 1 ? html`<label class="checkbox"><input type="checkbox" .checked=${this.redraw}
           @change=${(e) => { this.redraw = e.target.checked; }}><span class="small-text">Redraw face boxes when the main image changes</span></label>` : nothing}
+        ${this.renderStatus()}
       </nav>
       <p class="small-text secondary-text photos-versions-hint">Versions share the main image's title, date, place and sync tags. One that has drifted says what differs and offers Match.</p>
       ${v?.error ? html`<p class="error-text small-text">${v.error}</p>` : nothing}
@@ -1056,12 +1057,20 @@ class PhotosPage extends BifrostElement {
         onMove: (d) => { if (items.length) this.hiEc = (this.hiEc + d + items.length) % items.length; },
         empty: this.collections === null ? 'Loading collections...' : 'Type a name to create one',
       })}
+      ${this.renderStatus()}
     </nav>
     ${mine.length ? html`<ul class="list">${mine.map((c) => html`<li>
         <div class="max">${c.name}</div>
         <button class="circle transparent small" title="Remove from ${c.name}" ?disabled=${!!this.busy}
           @click=${() => this.removeRecFromCollection(c)}><i>close</i></button>
       </li>`)}</ul>` : html`<p class="small-text secondary-text">Not in any collection.</p>`}`;
+  }
+
+  renderStatus() {
+    if (!this.status) return nothing;
+    if (this.status.kind === 'ok') return html`<span class="photos-status">${iconYes}</span>`;
+    if (this.status.kind === 'busy') return html`<span class="photos-status">${spinner}</span>`;
+    return html`<span class="photos-status">${statusLine(this.status.kind, this.status.msg)}</span>`;
   }
 
   tabLink(id, label) {
@@ -1085,8 +1094,7 @@ class PhotosPage extends BifrostElement {
       <nav class="wrap photos-actions">
         ${btn(this.busy === 'save' ? 'Saving...' : 'Save', !!this.busy, () => this.save(false), 'border')}
         ${btn(this.busy === 'sync' ? 'Syncing...' : 'Save and sync', !!this.busy, () => this.save(true))}
-        ${this.busy ? spinner : nothing}
-        ${this.status ? html`<span class="photos-status">${statusLine(this.status.kind, this.status.msg)}</span>` : nothing}
+        ${this.renderStatus()}
       </nav>`;
   }
 

@@ -74,7 +74,7 @@ function payload(f) {
     notes: f.notes,
     place_gramps_id: f.place?.id || null,
     date: f.date ? { value: f.date.value, precision: f.date.precision, modifier: f.date.modifier, quality: f.date.quality } : null,
-    sync: f.sync,
+    sync: { ...f.sync, date: !!f.date && f.sync.date },
   };
 }
 
@@ -620,17 +620,20 @@ class PhotosPage extends BifrostElement {
     this.form = formFrom(rec);
     const old = replacing || rec.asset_id;
     this.openId = rec.asset_id;
-    this.items = this.items.map((i) => (i.asset_id === old
-      ? { ...i, ...cardFrom(rec) } : i));
+    const seen = new Set();
+    this.items = this.items
+      .map((i) => (i.asset_id === old ? { ...i, ...cardFrom(rec) } : i))
+      .filter((i) => !seen.has(i.asset_id) && seen.add(i.asset_id));
   }
 
   async versionAction(label, fn, done) {
     if (!this.rec || this.busy) return;
     this.busy = label;
     this.status = { kind: 'busy', msg: 'Working in Immich' };
+    const old = this.rec.asset_id;
     try {
-      const rec = await fn(this.rec.asset_id);
-      this.applyRecord(rec);
+      const rec = await fn(old);
+      this.applyRecord(rec, old);
       this.status = { kind: 'ok', msg: done };
     } catch (e) {
       this.status = { kind: 'error', msg: e.message };
@@ -827,7 +830,7 @@ class PhotosPage extends BifrostElement {
   }
 
   syncBox(key, label, disabled = false) {
-    return html`<label class="checkbox"><input type="checkbox" .checked=${this.form.sync[key]} ?disabled=${disabled}
+    return html`<label class="checkbox"><input type="checkbox" .checked=${this.form.sync[key] && !disabled} ?disabled=${disabled}
       @change=${(e) => this.setSync(key, e.target.checked)}><span>${label}</span></label>`;
   }
 
@@ -838,7 +841,7 @@ class PhotosPage extends BifrostElement {
       <span class="small-text secondary-text">Sync to Gramps</span>
       ${inGramps ? nothing : this.syncBox('media', 'Media object')}
       ${this.syncBox('title', 'Title', off)}
-      ${this.syncBox('date', 'Date', off)}
+      ${this.syncBox('date', 'Date', off || !f.date)}
       ${this.syncBox('note', 'Note', off)}
     </div>`;
   }
@@ -1077,12 +1080,12 @@ class PhotosPage extends BifrostElement {
   renderDetails(r, f) {
     return html`${field('Title', f.title, (e) => this.setForm({ title: e.target.value }), { small: true })}
       <div class="photos-date-grid">
-        ${field('Date', f.dateText, (e) => this.setDate(e.target.value),
-          { small: true, mono: true, placeholder: 'YYYY, YYYY-MM or YYYY-MM-DD',
-            error: f.dateText.trim() && !f.date ? 'Unreadable' : '' })}
-        ${selectField('Precision', f.date?.precision || 'exact', PRECISION, (e) => this.setDateField('precision', e.target.value), { small: true })}
-        ${selectField('Modifier', f.date?.modifier || 'regular', MODIFIER, (e) => this.setDateField('modifier', e.target.value), { small: true })}
-        ${selectField('Quality', f.date?.quality || 'regular', QUALITY, (e) => this.setDateField('quality', e.target.value), { small: true })}
+        ${field(f.dateText || !r.immich_date ? 'Date' : `Date (Immich: ${r.immich_date})`, f.dateText,
+          (e) => this.setDate(e.target.value),
+          { small: true, mono: true, error: f.dateText.trim() && !f.date ? 'Unreadable' : '' })}
+        ${selectField('Precision', f.date?.precision || 'exact', PRECISION, (e) => this.setDateField('precision', e.target.value), { small: true, disabled: !f.date })}
+        ${selectField('Modifier', f.date?.modifier || 'regular', MODIFIER, (e) => this.setDateField('modifier', e.target.value), { small: true, disabled: !f.date })}
+        ${selectField('Quality', f.date?.quality || 'regular', QUALITY, (e) => this.setDateField('quality', e.target.value), { small: true, disabled: !f.date })}
       </div>
       <p class="small-text secondary-text photos-hint">Gramps date: <span class="mono">${grampsDate(f.date) || '(none)'}</span></p>
       ${this.renderPlace(f)}

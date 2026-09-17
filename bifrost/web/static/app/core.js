@@ -100,7 +100,7 @@ function searchRows({ items, active = -1, onPick, empty = 'No matches' }) {
 
 export function selectField(label, value, options, onChange, opts = {}) {
   return html`<div class="field label suffix fill ${opts.small ? 'small no-margin' : ''} ${WIDTH[opts.width] || ''}">
-    <select @change=${onChange}>${options.map((o) => {
+    <select @change=${onChange} ?disabled=${opts.disabled || false}>${options.map((o) => {
     const [v, l] = Array.isArray(o) ? o : [o, o];
     return html`<option value=${v} ?selected=${String(v) === String(value)}>${l}</option>`;
   })}</select>

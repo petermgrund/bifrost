@@ -78,16 +78,18 @@ def date_display(form: dict | None) -> str:
 
 
 def date_form(asset: dict) -> dict | None:
-    """The editor's date fields from an asset's date and tags"""
+    """The editor's date fields from an asset's date and tags; None until a date is curated"""
     exif = asset.get("exifInfo") or {}
     dt_str = asset.get("localDateTime") or exif.get("dateTimeOriginal")
     if not dt_str:
+        return None
+    tags = si.tag_values(asset)
+    if si.TAG_SYNC_DATE not in tags and not tags & DATE_TAGS:
         return None
     try:
         dt = datetime.fromisoformat(str(dt_str).replace("Z", "+00:00"))
     except ValueError:
         return None
-    tags = si.tag_values(asset)
     form = {
         "value": dt.strftime("%Y-%m-%d"),
         "precision": next((p for p, t in PRECISION_TAGS.items() if t in tags), "exact"),
@@ -182,6 +184,19 @@ def set_note(conn: sqlite3.Connection, asset_id: str, gramps_id: str | None, tex
             "gramps_id=COALESCE(excluded.gramps_id, photo_notes.gramps_id), "
             "updated_at=excluded.updated_at",
             (asset_id, gramps_id, text, _now()))
+
+
+def mark_dated(conn: sqlite3.Connection, asset_id: str, dated: bool) -> None:
+    with conn:
+        if dated:
+            conn.execute("INSERT OR REPLACE INTO dated_photos (asset_id, dated_at) VALUES (?, ?)",
+                         (asset_id, _now()))
+        else:
+            conn.execute("DELETE FROM dated_photos WHERE asset_id=?", (asset_id,))
+
+
+def is_dated(conn: sqlite3.Connection, asset_id: str) -> bool:
+    return conn.execute("SELECT 1 FROM dated_photos WHERE asset_id=?", (asset_id,)).fetchone() is not None
 
 
 def registered_gid(conn: sqlite3.Connection, asset_id: str,
@@ -407,9 +422,40 @@ async def add_version(accounts: list[ImmichClient], conn: sqlite3.Connection, cf
     if new.get("ownerId") != primary.get("ownerId"):
         raise SyncError(400, "versions must belong to the same Immich account as the main image")
     _versions, member_ids = await _stack_members(client, primary)
-    await client.create_stack([asset_id] + [m for m in member_ids if m != asset_id] + [new_id])
-    await match_version(client, cfg, primary, new, conn)
-    return await load(accounts, conn, cfg, asset_id, place_rows)
+    others = [m for m in member_ids if m != asset_id]
+    main_gid = registered_gid(conn, asset_id, member_ids)
+    new_gid = registered_gid(conn, new_id)
+    if main_gid and new_gid and new_gid != main_gid:
+        raise SyncError(400, f"both photos are already in Gramps ({main_gid} and {new_gid}); "
+                             "a stack can stand for only one media object")
+    if new_gid and not main_gid:
+        await client.create_stack([new_id, asset_id] + others)
+        move_identity(conn, asset_id, new_id, prefer_new=True)
+        main_id = new_id
+    else:
+        await client.create_stack([asset_id] + others + [new_id])
+        main_id = asset_id
+    await match_all(accounts, client, cfg, conn, main_id, [asset_id, *others, new_id])
+    return await load(accounts, conn, cfg, main_id, place_rows)
+
+
+async def upload_version(accounts: list[ImmichClient], conn: sqlite3.Connection, cfg: SyncImmichConfig,
+                         asset_id: str, filename: str, data, modified_at: str,
+                         place_rows: dict | None = None) -> tuple[str, dict]:
+    """Upload a file to the main image's Immich account and add it as a version"""
+    _primary, client = await _primary_and_client(accounts, asset_id)
+    new_id = (await client.upload_asset(filename, data, modified_at or _now()))["id"]
+    await _wait_for_thumbnail(client, new_id)
+    return new_id, await add_version(accounts, conn, cfg, asset_id, new_id, place_rows)
+
+
+async def _wait_for_thumbnail(client: ImmichClient, asset_id: str,
+                              tries: int = 120, pause: float = 0.5) -> None:
+    """Immich reads an upload's metadata before it renders the thumbnail"""
+    for _ in range(tries):
+        if (await client.get_asset(asset_id)).get("thumbhash"):
+            return
+        await asyncio.sleep(pause)
 
 
 async def match_member(accounts: list[ImmichClient], conn: sqlite3.Connection, cfg: SyncImmichConfig,
@@ -471,11 +517,7 @@ async def promote(accounts: list[ImmichClient], conn: sqlite3.Connection, cfg: S
     member = await si._merged_one(accounts, member_id)
     await match_version(client, cfg, primary, member, conn)
     await client.update_stack(primary["stack"]["id"], member_id)
-    with conn:
-        conn.execute("DELETE FROM photo_notes WHERE asset_id=?", (member_id,))
-        conn.execute("UPDATE photo_notes SET asset_id=?, updated_at=? WHERE asset_id=?",
-                     (member_id, _now(), asset_id))
-    photo_collections.move_items(conn, asset_id, member_id)
+    move_identity(conn, asset_id, member_id)
     gid = registered_gid(conn, asset_id, member_ids)
     if redraw_faces and gid:
         await clear_face_rects(gramps, gid)
@@ -553,6 +595,9 @@ async def load(accounts: list[ImmichClient], conn: sqlite3.Connection, cfg: Sync
                 member["drift"] = drift(mine, version_fields(detail, cfg))
             member["label"] = labels.get(member["asset_id"], "")
     suggestions = await _suggestions(client, cfg, asset, member_ids, gid)
+    for sg in suggestions:
+        sg["gramps_id"] = registered_gid(conn, sg["asset_id"])
+    tagged_date = date_form(asset)
     row = si.note_for(conn, asset_id, gid)
     notes = row["text"] if row else ""
     digest = hashlib.sha256(notes.strip().encode("utf-8")).hexdigest() if notes.strip() else None
@@ -574,13 +619,16 @@ async def load(accounts: list[ImmichClient], conn: sqlite3.Connection, cfg: Sync
         "width": asset.get("width"),
         "height": asset.get("height"),
         "owner": getattr(client, "label", ""),
+        "owner_id": asset.get("ownerId"),
         "immich_url": f"{cfg.public_url}/photos/{asset_id}" if cfg.public_url else None,
         "thumb": f"/photos/api/thumb/{asset_id}",
         "preview": f"/photos/api/thumb/{asset_id}?size=preview",
         "title": title,
         "link_line": link_line,
         "label": labels.get(asset_id, ""),
-        "date": date_form(asset),
+        "date": tagged_date if gid or is_dated(conn, asset_id) else None,
+        "tagged_date": tagged_date,
+        "immich_date": (asset.get("localDateTime") or "")[:10],
         "place": place,
         "tags": sorted(tags),
         "sync": {"media": cfg.sync_tag.lower() in tags,
@@ -657,12 +705,49 @@ async def save(accounts: list[ImmichClient], conn: sqlite3.Connection, cfg: Sync
             await _wait_for_date(client, asset_id, form["date"]["value"])
     await apply_tags(client, asset_id, add, remove)
     set_note(conn, asset_id, gid, form["notes"])
+    mark_dated(conn, asset_id, bool(form["date"]))
     record = si.link_record(gid, cfg, form["notes"], si.version_label(conn, asset_id))
     if record:
         await client.upsert_asset_metadata(asset_id, si.METADATA_KEY, record)
     else:
         await client.delete_asset_metadata(asset_id, si.METADATA_KEY)
+    if member_ids:
+        await match_all(accounts, client, cfg, conn, asset_id, member_ids)
     return await load(accounts, conn, cfg, asset_id, place_rows)
+
+
+async def match_all(accounts: list[ImmichClient], client: ImmichClient, cfg: SyncImmichConfig,
+                    conn: sqlite3.Connection, main_id: str, member_ids: list[str]) -> int:
+    """Every other version takes the main image's metadata; returns how many changed"""
+    others = [m for m in member_ids if m != main_id]
+    if not others:
+        return 0
+    main = await si._merged_one(accounts, main_id)
+    details = await client.get_assets_many(others)
+    changed = 0
+    for member_id in others:
+        detail = details.get(member_id)
+        if detail is None:
+            continue
+        if await match_version(client, cfg, main, detail, conn):
+            changed += 1
+    return changed
+
+
+def move_identity(conn: sqlite3.Connection, old: str, new: str, prefer_new: bool = False) -> None:
+    """Notes, the dated mark and collection memberships follow the photo's new main image"""
+    with conn:
+        has_new = conn.execute("SELECT 1 FROM photo_notes WHERE asset_id=?", (new,)).fetchone()
+        if has_new and prefer_new:
+            conn.execute("DELETE FROM photo_notes WHERE asset_id=?", (old,))
+        else:
+            conn.execute("DELETE FROM photo_notes WHERE asset_id=?", (new,))
+            conn.execute("UPDATE photo_notes SET asset_id=?, updated_at=? WHERE asset_id=?",
+                         (new, _now(), old))
+        conn.execute("INSERT OR IGNORE INTO dated_photos (asset_id, dated_at) "
+                     "SELECT ?, dated_at FROM dated_photos WHERE asset_id=?", (new, old))
+        conn.execute("DELETE FROM dated_photos WHERE asset_id=?", (old,))
+    photo_collections.move_items(conn, old, new)
 
 
 async def _wait_for_date(client: ImmichClient, asset_id: str, value: str,
@@ -718,7 +803,7 @@ async def _card_context(accounts: list[ImmichClient], conn: sqlite3.Connection):
         return {"asset_id": aid, "filename": a.get("originalFileName") or "",
                 "title": si.split_description(exif.get("description") or "")[0],
                 "date": (a.get("localDateTime") or "")[:10], "type": a.get("type"),
-                "thumb": f"/photos/api/thumb/{aid}", "gramps_id": gid,
+                "thumb": f"/photos/api/thumb/{aid}", "gramps_id": gid, "owner_id": a.get("ownerId"),
                 "versions": st[2] if st else 1, "is_child": bool(st and st[1] != aid),
                 "missing": bool(a.get("_missing"))}
 

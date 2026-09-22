@@ -107,6 +107,16 @@ def reorder(conn: sqlite3.Connection, cid: int, asset_ids: list[str]) -> list[st
     return wanted
 
 
+def move_item(conn: sqlite3.Connection, cid: int, asset_id: str, position: int) -> list[str] | None:
+    """Put one item at a 1-based position, clamped to the collection; None if it is not in it"""
+    current = item_ids(conn, cid)
+    if asset_id not in current:
+        return None
+    order = [a for a in current if a != asset_id]
+    order.insert(min(max(position, 1), len(current)) - 1, asset_id)
+    return reorder(conn, cid, order)
+
+
 def for_asset(conn: sqlite3.Connection, asset_id: str) -> list[dict]:
     rows = conn.execute(
         "SELECT c.id, c.name FROM collection_items i JOIN collections c ON c.id=i.collection_id "

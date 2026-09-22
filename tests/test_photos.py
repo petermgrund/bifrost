@@ -1,4 +1,5 @@
 import asyncio
+import io
 
 import pytest
 
@@ -370,6 +371,13 @@ class VersionsImmich(FakeImmich):
     async def list_duplicates(self):
         return self.duplicates
 
+    async def upload_asset(self, filename, data, modified_at):
+        self.uploads = getattr(self, "uploads", []) + [(filename, data.read(), modified_at)]
+        new = tagged("u1", name=filename, when=modified_at)
+        new.update({"width": 1000, "height": 800, "ownerId": "me-1", "thumbhash": "th"})
+        self.assets["u1"] = new
+        return {"id": "u1", "status": "created"}
+
     async def search_assets(self, page=1, size=60, person_id=None, filename=None, order="desc",
                             tag_id=None, description=None, order_by=None, album_id=None):
         if album_id:
@@ -469,6 +477,15 @@ class TestVersions:
             ("a1", True, []), ("n1", False, [])]
         assert sorted(t["value"] for t in n["tags"]) == [
             "Date/Year", "ID/ABC123", "Place/P0001", "Sync/Date", "Sync/Gramps"]
+
+    def test_an_upload_joins_as_a_version_with_the_main_metadata(self, conn):
+        im = VersionsImmich(assets={"a1": self._primary()})
+        new_id, rec = run(photos.upload_version([im], conn, CFG, "a1", "rescan.tif", io.BytesIO(b"tif"),
+                                                "2026-09-22T10:00:00Z"))
+        assert new_id == "u1" and im.uploads == [("rescan.tif", b"tif", "2026-09-22T10:00:00Z")]
+        assert im.created_stacks == [["a1", "u1"]]
+        assert [(m["asset_id"], m["drift"]) for m in rec["versions"]["members"]] == [("a1", []), ("u1", [])]
+        assert im.assets["u1"]["exifInfo"]["description"] == "The farm, 1923"
 
     def test_add_version_refuses_stacked_foreign_or_self(self, conn):
         a = self._primary()
@@ -617,6 +634,21 @@ class TestCollections:
         assert pc.item_ids(conn, c["id"]) == ["c1", "a1", "b1", "d1"]
         pc.add_items(conn, c["id"], ["e1"])
         assert pc.item_ids(conn, c["id"]) == ["c1", "a1", "b1", "d1", "e1"]
+
+    def test_move_item_to_a_position(self, conn):
+        c = pc.create(conn, "Farm")
+        pc.add_items(conn, c["id"], ["a1", "b1", "c1", "d1"])
+        assert pc.move_item(conn, c["id"], "d1", 1) == ["d1", "a1", "b1", "c1"]
+        assert pc.move_item(conn, c["id"], "d1", 3) == ["a1", "b1", "d1", "c1"]
+        assert pc.item_ids(conn, c["id"]) == ["a1", "b1", "d1", "c1"]
+
+    def test_move_item_clamps_and_ignores_strangers(self, conn):
+        c = pc.create(conn, "Farm")
+        pc.add_items(conn, c["id"], ["a1", "b1", "c1"])
+        assert pc.move_item(conn, c["id"], "a1", 99) == ["b1", "c1", "a1"]
+        assert pc.move_item(conn, c["id"], "a1", 0) == ["a1", "b1", "c1"]
+        assert pc.move_item(conn, c["id"], "zz", 1) is None
+        assert pc.item_ids(conn, c["id"]) == ["a1", "b1", "c1"]
 
     def test_cap(self, conn):
         c = pc.create(conn, "Big")
@@ -768,3 +800,93 @@ class TestAlbumImport:
         assert pc.item_ids(conn, cid) == ["b1", "a1", "c1"]
         with pytest.raises(SyncError, match="no such Immich album"):
             run(photos.import_album([im], [im], conn, "al-9"))
+
+
+class TestOptionalDate:
+    def test_no_date_until_curated(self):
+        assert photos.date_form(tagged("a1", "Sync/Gramps")) is None
+        assert photos.date_form(tagged("a1", "Sync/Date"))["value"] == "1923-06-15"
+        assert photos.date_form(tagged("a1", "Date/Year"))["precision"] == "year"
+
+    def test_a_date_shows_only_when_set_in_bifrost_or_in_gramps(self, conn):
+        im = VersionsImmich(assets={"a1": tagged("a1", "Sync/Date", "Date/Year", desc="T")})
+        rec = run(photos.load([im], conn, CFG, "a1"))
+        assert rec["date"] is None and rec["tagged_date"]["precision"] == "year"
+        mint(conn, "ABC123", "a1")
+        assert run(photos.load([im], conn, CFG, "a1"))["date"]["precision"] == "year"
+
+    def test_saving_a_date_marks_it_and_clearing_it_unmarks_it(self, conn):
+        a = tagged("a1", desc="T")
+        im = VersionsImmich(assets={"a1": a})
+        dated = {"title": "T", "date": {"value": "1923", "precision": "year"}, "sync": {}}
+        assert run(photos.save([im], conn, CFG, "a1", dated, link_on=False))["date"]["precision"] == "year"
+        run(photos.save([im], conn, CFG, "a1", {"title": "T", "date": None, "sync": {}}, link_on=False))
+        a["tags"].append({"value": "Date/Year"})
+        assert run(photos.load([im], conn, CFG, "a1"))["date"] is None
+
+    def test_the_dated_mark_follows_the_main_image(self, conn):
+        photos.mark_dated(conn, "a1", True)
+        photos.move_identity(conn, "a1", "v1")
+        assert (photos.is_dated(conn, "a1"), photos.is_dated(conn, "v1")) == (False, True)
+
+    def test_clearing_the_date_drops_the_date_tags(self, conn):
+        mint(conn, "ABC123", "a1")
+        a = tagged("a1", "Sync/Gramps", "Sync/Date", "Date/Year", "Date/Approximate", "ID/ABC123", desc="T")
+        im = VersionsImmich(assets={"a1": a})
+        rec = run(photos.save([im], conn, CFG, "a1", {"title": "T", "date": None,
+                                                      "sync": {"media": True, "title": True, "date": True}}, link_on=False))
+        assert rec["date"] is None and rec["immich_date"] == "1923-06-15"
+        assert rec["sync"]["date"] is False
+        assert sorted(t["value"] for t in a["tags"]) == ["ID/ABC123", "Sync/Description", "Sync/Gramps"]
+        assert im.updated_assets == []
+
+
+class TestSaveReachesVersions:
+    def test_save_matches_every_version(self, conn):
+        a = tagged("a1", "Sync/Gramps", desc="old")
+        a.update({"width": 100, "height": 80, "ownerId": "me-1"})
+        v = tagged("v1", "Sync/Gramps", desc="old")
+        v.update({"width": 100, "height": 80, "ownerId": "me-1"})
+        im = VersionsImmich(assets={"a1": a, "v1": v})
+        stacked(im, "a1", "v1")
+        rec = run(photos.save([im], conn, CFG, "a1", {"title": "new title", "date": {"value": "1923"},
+                                                      "sync": {"media": True, "title": True, "date": True}}, link_on=False))
+        assert v["exifInfo"]["description"] == "new title"
+        assert v["localDateTime"] == "1923-01-01T12:00:00.000Z"
+        assert sorted(t["value"] for t in v["tags"]) == ["Date/Year", "Sync/Date", "Sync/Description", "Sync/Gramps"]
+        assert rec["versions"]["members"][1]["drift"] == []
+
+
+class TestSyncedVersionLeads:
+    def _pair(self, conn):
+        mint(conn, "ABC123", "s1")
+        unsynced = tagged("u1", "Sync/Gramps", desc="unsynced title")
+        unsynced.update({"width": 100, "height": 80, "ownerId": "me-1"})
+        synced = tagged("s1", "Sync/Gramps", "Sync/Date", "Date/Year", "ID/ABC123", desc="synced title")
+        synced.update({"width": 100, "height": 80, "ownerId": "me-1"})
+        return unsynced, synced
+
+    def test_the_gramps_photo_becomes_the_main_and_everyone_inherits(self, conn):
+        unsynced, synced = self._pair(conn)
+        photos.set_note(conn, "u1", None, "note on the unsynced one")
+        photos.set_note(conn, "s1", "ABC123", "note on the synced one")
+        c = pc.create(conn, "Album")
+        pc.add_items(conn, c["id"], ["u1"])
+        im = VersionsImmich(assets={"u1": unsynced, "s1": synced})
+        rec = run(photos.add_version([im], conn, CFG, "u1", "s1"))
+        assert im.created_stacks == [["s1", "u1"]]
+        assert rec["asset_id"] == "s1" and rec["gramps"]["gramps_id"] == "ABC123"
+        assert [(m["asset_id"], m["is_primary"], m["drift"]) for m in rec["versions"]["members"]] == [
+            ("s1", True, []), ("u1", False, [])]
+        assert unsynced["exifInfo"]["description"] == "synced title"
+        assert rec["notes"] == "note on the synced one"
+        assert conn.execute("SELECT COUNT(*) FROM photo_notes").fetchone()[0] == 1
+        assert pc.item_ids(conn, c["id"]) == ["s1"]
+
+    def test_two_gramps_photos_cannot_share_a_stack(self, conn):
+        unsynced, synced = self._pair(conn)
+        mint(conn, "XYZ789", "u1")
+        im = VersionsImmich(assets={"u1": unsynced, "s1": synced})
+        with pytest.raises(SyncError, match="both photos are already in Gramps"):
+            run(photos.add_version([im], conn, CFG, "u1", "s1"))
+        assert im.created_stacks == []

@@ -1,0 +1,19 @@
+{
+  "name": "bifrost-frontend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "watch": "vite build --watch"
+  },
+  "devDependencies": {
+    "@immich/ui": "^0.89.1",
+    "@mdi/js": "^7.4.47",
+    "@sveltejs/vite-plugin-svelte": "^7.3.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "bits-ui": "^2.19.2",
+    "svelte": "^5.57.1",
+    "tailwindcss": "^4.3.3",
+    "vite": "^8.3.0"
+  }
+}

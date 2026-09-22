@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
+
 from fastapi import APIRouter, HTTPException, Request, Response
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from ...core import settings as ui_settings
@@ -14,6 +18,7 @@ from ..runs import record_run
 from .sync import _accounts_or_503
 
 router = APIRouter(prefix="/photos", tags=["photos"])
+templates = Jinja2Templates(directory=Path(__file__).resolve().parents[1] / "templates")
 PLACES_KEY = "photos_places"
 
 
@@ -21,9 +26,9 @@ def _state(request: Request):
     return request.app.state
 
 
-@router.get("")
+@router.get("", response_class=HTMLResponse)
 async def photos_page(request: Request):
-    return RedirectResponse(url="/#photos")
+    return templates.TemplateResponse(request, "photos.html", {})
 
 
 def _config(st) -> dict:
@@ -208,6 +213,22 @@ async def add_version(request: Request, asset_id: str, body: VersionBody) -> dic
         raise HTTPException(exc.status, exc.detail)
 
 
+@router.post("/api/photo/{asset_id}/versions/upload")
+async def upload_version(request: Request, asset_id: str, filename: str, modified: str = "") -> dict:
+    st = _state(request)
+    accounts = _accounts_or_503(request)
+    with tempfile.SpooledTemporaryFile(max_size=16 * 1024 * 1024) as data:
+        async for chunk in request.stream():
+            data.write(chunk)
+        data.seek(0)
+        try:
+            new_id, rec = await photos.upload_version(accounts, st.conn, st.cfg.sync_immich, asset_id,
+                                                      filename, data, modified, await _place_rows(request))
+        except SyncError as exc:
+            raise HTTPException(exc.status, exc.detail)
+    return {"asset_id": new_id, "photo": rec}
+
+
 @router.post("/api/photo/{asset_id}/versions/{member_id}/match")
 async def match_version(request: Request, asset_id: str, member_id: str) -> dict:
     st = _state(request)
@@ -226,12 +247,17 @@ class PromoteBody(BaseModel):
 async def promote_version(request: Request, asset_id: str, member_id: str,
                           body: PromoteBody = PromoteBody()) -> dict:
     st = _state(request)
+    accounts = _accounts_or_503(request)
     try:
-        new_main = await photos.promote(_accounts_or_503(request), st.conn, st.cfg.sync_immich,
+        new_main = await photos.promote(accounts, st.conn, st.cfg.sync_immich,
                                         st.gramps, asset_id, member_id, body.redraw_faces)
+        photo_rec = await photos.load(accounts, st.conn, st.cfg.sync_immich, new_main,
+                                      await _place_rows(request))
     except SyncError as exc:
         raise HTTPException(exc.status, exc.detail)
-    return await _run_sync(request, new_main)
+    if photo_rec["gramps"]:
+        return await _run_sync(request, new_main)
+    return {"run_id": None, "summary": {}, "events": [], "photo": photo_rec}
 
 
 class LabelBody(BaseModel):
@@ -355,6 +381,20 @@ async def reorder_collection(request: Request, cid: int, body: ItemsBody) -> dic
     st = _state(request)
     _collection_or_404(st, cid)
     order = photo_collections.reorder(st.conn, cid, body.asset_ids)
+    return {"id": cid, "asset_ids": order}
+
+
+class PositionBody(BaseModel):
+    position: int
+
+
+@router.put("/api/collections/{cid}/items/{asset_id}/position")
+async def move_collection_item(request: Request, cid: int, asset_id: str, body: PositionBody) -> dict:
+    st = _state(request)
+    _collection_or_404(st, cid)
+    order = photo_collections.move_item(st.conn, cid, asset_id, body.position)
+    if order is None:
+        raise HTTPException(404, "that photo is not in this collection")
     return {"id": cid, "asset_ids": order}
 
 

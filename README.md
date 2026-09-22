@@ -15,7 +15,6 @@ Your family-tree data itself always lives in Gramps and the source systems. Bifr
 # Features
 
 * Sync Immich photos into Gramps as media objects. Use Tags in Immich to mark a photo for sync and define a fuzzy date (like about 1920 or before June 1955).
-* Curate Immich photos for Gramps from one page: title, fuzzy date, Gramps place, people and notes, written back to Immich as the same tags. Keep rescans and restored copies together as versions that share one Gramps media object and one set of metadata, and arrange photos in collections with an order you choose.
 * Sync documents in Paperless-ngx to Gramps Web as media objects, and keep their versions, titles, dates, and transcription text up to date.
 * Link Immich's face recognition to Gramps people by pairing each recognized face with its Gramps person once. Then, every synced photo gets face boxes in Gramps.
 * Draft properly formatted genealogical source citations with the help of AI.
@@ -32,6 +31,7 @@ Copy `config.example.yaml` to `config.yaml` and fill it in. Make sure you create
 
 * Dev: `python -m venv venv && venv/bin/pip install -r requirements.txt`, then `venv/bin/uvicorn bifrost.web.app:app --reload --port 8800`. The `BIFROST_CONFIG` env var overrides the config path.
 * Docker: edit the host-side bind mounts in `docker-compose.yml` to match your machine. Then `docker compose up -d --build`. Create `config.yaml` before the first `compose up`.
+* Photos page: its Svelte source (built on Immich's `@immich/ui`) is in `frontend/`, and the built bundle in `bifrost/web/static/photos/` is committed, so Node is only needed after changing it: `cd frontend && npm ci && npm run build`.
 
 `python -m bifrost.cli doctor` checks the database and the Gramps/Paperless connections. 
 

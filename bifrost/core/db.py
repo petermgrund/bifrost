@@ -170,6 +170,13 @@ MIGRATIONS: list[str] = [
         updated_at TEXT NOT NULL
     );
     """,
+    # 13 photos whose date was set in the Photos editor
+    """
+    CREATE TABLE dated_photos (
+        asset_id TEXT PRIMARY KEY,
+        dated_at TEXT NOT NULL
+    );
+    """,
 ]
 
 

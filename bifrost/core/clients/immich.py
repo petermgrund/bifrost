@@ -122,6 +122,14 @@ class ImmichClient:
         return (await self._request(
             "PUT", f"/assets/{_checked_id(asset_id)}", json=fields)).json()
 
+    async def upload_asset(self, filename: str, data, modified_at: str) -> dict:
+        """{id, status}; status is "duplicate" when the account already holds this file"""
+        return (await self._request(
+            "POST", "/assets",
+            data={"fileCreatedAt": modified_at, "fileModifiedAt": modified_at, "filename": filename},
+            files={"assetData": (filename, data, "application/octet-stream")},
+            timeout=httpx.Timeout(300.0))).json()
+
     async def get_asset_metadata(self, asset_id: str) -> dict[str, dict]:
         items = (await self._request(
             "GET", f"/assets/{_checked_id(asset_id)}/metadata")).json()

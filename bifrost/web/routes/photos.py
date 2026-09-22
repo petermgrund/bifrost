@@ -326,10 +326,14 @@ async def create_collection(request: Request, body: CollectionBody) -> dict:
 
 async def _detail(request: Request, cid: int) -> dict:
     st = _state(request)
-    row = _collection_or_404(st, cid)
-    ids = photo_collections.item_ids(st.conn, cid)
-    items = await photos.cards_for(_accounts_or_503(request), st.conn, ids) if ids else []
-    return {**row, "items": items}
+    row = {**_collection_or_404(st, cid), "max_slots": photo_collections.MAX_ITEMS}
+    if not photo_collections.item_ids(st.conn, cid):
+        return {**row, "items": []}
+    accounts = _accounts_or_503(request)
+    ids = await photos.fold_stacked_items(accounts, st.conn, cid)
+    slots = photo_collections.slots(st.conn, cid)
+    return {**row, "items": [{**c, "slot": slots[c["asset_id"]]}
+                             for c in await photos.cards_for(accounts, st.conn, ids)]}
 
 
 @router.get("/api/collections/{cid}")
@@ -376,14 +380,6 @@ async def remove_collection_item(request: Request, cid: int, asset_id: str) -> d
     return await _detail(request, cid)
 
 
-@router.put("/api/collections/{cid}/order")
-async def reorder_collection(request: Request, cid: int, body: ItemsBody) -> dict:
-    st = _state(request)
-    _collection_or_404(st, cid)
-    order = photo_collections.reorder(st.conn, cid, body.asset_ids)
-    return {"id": cid, "asset_ids": order}
-
-
 class PositionBody(BaseModel):
     position: int
 
@@ -392,10 +388,10 @@ class PositionBody(BaseModel):
 async def move_collection_item(request: Request, cid: int, asset_id: str, body: PositionBody) -> dict:
     st = _state(request)
     _collection_or_404(st, cid)
-    order = photo_collections.move_item(st.conn, cid, asset_id, body.position)
-    if order is None:
+    slots = photo_collections.move_item(st.conn, cid, asset_id, body.position)
+    if slots is None:
         raise HTTPException(404, "that photo is not in this collection")
-    return {"id": cid, "asset_ids": order}
+    return {"id": cid, "slots": slots}
 
 
 @router.get("/api/immich-albums")

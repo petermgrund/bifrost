@@ -572,13 +572,19 @@ async def _stack_members(client: ImmichClient, asset: dict) -> tuple[dict | None
 
 async def load(accounts: list[ImmichClient], conn: sqlite3.Connection, cfg: SyncImmichConfig,
                asset_id: str, place_rows: dict[str, dict] | None = None) -> dict:
-    """The editor's record for one asset"""
+    """The editor's record for one asset; a stack variant opens as its main image"""
     asset = await si._merged_one(accounts, asset_id)
+    main = (asset.get("stack") or {}).get("primaryAssetId")
+    if main and main != asset_id:
+        asset_id, asset = main, await si._merged_one(accounts, main)
     client, _err = await si.owner_client(accounts, asset)
     tags = si.tag_values(asset)
     exif = asset.get("exifInfo") or {}
     title, link_line = si.split_description(exif.get("description") or "")
     versions, member_ids = await _stack_members(client, asset)
+    for member in member_ids:
+        if member != asset_id:
+            photo_collections.move_items(conn, member, asset_id)
     gid = registered_gid(conn, asset_id, member_ids)
     labels = labels_for(conn, [asset_id, *member_ids])
     if versions is not None:
@@ -598,6 +604,7 @@ async def load(accounts: list[ImmichClient], conn: sqlite3.Connection, cfg: Sync
     for sg in suggestions:
         sg["gramps_id"] = registered_gid(conn, sg["asset_id"])
     tagged_date = date_form(asset)
+    dated = is_dated(conn, asset_id)
     row = si.note_for(conn, asset_id, gid)
     notes = row["text"] if row else ""
     digest = hashlib.sha256(notes.strip().encode("utf-8")).hexdigest() if notes.strip() else None
@@ -626,7 +633,8 @@ async def load(accounts: list[ImmichClient], conn: sqlite3.Connection, cfg: Sync
         "title": title,
         "link_line": link_line,
         "label": labels.get(asset_id, ""),
-        "date": tagged_date if gid or is_dated(conn, asset_id) else None,
+        "date": tagged_date if gid or dated else None,
+        "dated": dated,
         "tagged_date": tagged_date,
         "immich_date": (asset.get("localDateTime") or "")[:10],
         "place": place,
@@ -802,7 +810,7 @@ async def _card_context(accounts: list[ImmichClient], conn: sqlite3.Connection):
         exif = a.get("exifInfo") or {}
         return {"asset_id": aid, "filename": a.get("originalFileName") or "",
                 "title": si.split_description(exif.get("description") or "")[0],
-                "date": (a.get("localDateTime") or "")[:10], "type": a.get("type"),
+                "type": a.get("type"),
                 "thumb": f"/photos/api/thumb/{aid}", "gramps_id": gid, "owner_id": a.get("ownerId"),
                 "versions": st[2] if st else 1, "is_child": bool(st and st[1] != aid),
                 "missing": bool(a.get("_missing"))}
@@ -820,6 +828,16 @@ async def primaries_of(accounts: list[ImmichClient], asset_ids: list[str]) -> li
         if main not in out:
             out.append(main)
     return out
+
+
+async def fold_stacked_items(accounts: list[ImmichClient], conn: sqlite3.Connection, cid: int) -> list[str]:
+    """A collection's ids after each stack variant in it gives its place to the stack's main image"""
+    stacks, _members = await _stack_index(accounts)
+    for aid in photo_collections.item_ids(conn, cid):
+        main = stacks[aid][1] if aid in stacks else None
+        if main and main != aid:
+            photo_collections.move_items(conn, aid, main)
+    return photo_collections.item_ids(conn, cid)
 
 
 async def cards_for(accounts: list[ImmichClient], conn: sqlite3.Connection,

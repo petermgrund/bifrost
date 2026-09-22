@@ -177,6 +177,17 @@ MIGRATIONS: list[str] = [
         dated_at TEXT NOT NULL
     );
     """,
+    # 14 collection order becomes stable slots numbered from 1
+    """
+    CREATE TEMP TABLE slot_ranks AS
+        SELECT collection_id, asset_id,
+               ROW_NUMBER() OVER (PARTITION BY collection_id ORDER BY seq, added_at, asset_id) AS slot
+        FROM collection_items;
+    UPDATE collection_items SET seq = (
+        SELECT slot FROM slot_ranks r
+        WHERE r.collection_id = collection_items.collection_id AND r.asset_id = collection_items.asset_id);
+    DROP TABLE slot_ranks;
+    """,
 ]
 
 

@@ -36,8 +36,7 @@
         />
         <div class="flex w-full max-w-5xl items-center gap-3 text-sm text-white/90">
           <Dialog.Title class="flex min-w-0 grow items-baseline gap-3 font-normal">
-            {#if item.label}<span class="truncate">{item.label}</span>{/if}
-            <span class="truncate font-mono">{item.filename}</span>
+            <span class={['truncate', !item.label && 'font-mono']}>{item.label || item.filename}</span>
             <span class="shrink-0 font-mono text-white/50">{sizeText(item)}</span>
           </Dialog.Title>
           <IconButton

@@ -26,7 +26,8 @@
   let adding = $state(null);
   let content = $state(null);
 
-  const unsaved = $derived(!!form && formKey(form) !== saved);
+  const undecided = $derived(!!rec && !rec.dated && !rec.gramps && !!rec.tagged_date);
+  const unsaved = $derived(!!form && (formKey(form) !== saved || undecided));
   const edited = $derived(!!form && formKey(form) !== presented);
   const problem = $derived(form ? dateProblem(form.date) : '');
   const syncable = $derived(!!rec && (!!rec.gramps || rec.sync.media));
@@ -59,6 +60,7 @@
       rec = r;
       saved = formKey(savedForm(r));
       setForm(formFrom(r));
+      if (r.asset_id !== id) recordChanged(r, id);
     } catch (e) {
       recError = e.message;
     }
@@ -216,10 +218,10 @@
   async function saveLabel(m, label) {
     if (!rec || busy) return;
     busy = 'label';
-    status = { kind: 'busy', msg: 'Saving the version note' };
+    status = { kind: 'busy', msg: 'Renaming the version' };
     try {
       applyRecord(await put(`/photos/api/photo/${rec.asset_id}/versions/${m.asset_id}/label`, { label }), null, true);
-      succeed(label ? 'Version note saved' : 'Version note removed');
+      succeed(label ? `Renamed to ${label}` : 'Name set back to the file name');
     } catch (e) {
       fail(e);
     } finally {
@@ -296,8 +298,13 @@
       }}
     >
       <header class="flex shrink-0 items-center gap-1 border-b border-gray-200 px-5 py-3 dark:border-white/10">
-        <Dialog.Title class="text-dark/90 min-w-0 grow truncate pe-2 text-lg font-semibold">
-          {rec ? rec.title || rec.filename : 'Loading…'}
+        <Dialog.Title class="text-dark/90 flex min-w-0 grow items-baseline gap-2 pe-2 text-lg font-semibold">
+          <span class="truncate">{rec ? rec.title || rec.filename : 'Loading…'}</span>
+          {#if rec?.gramps}
+            <span class="shrink-0 font-mono text-base font-normal text-gray-500 dark:text-gray-400">
+              ({rec.gramps.gramps_id})
+            </span>
+          {/if}
         </Dialog.Title>
         {#if rec?.immich_url}{@render appLink(rec.immich_url, 'immich', 'Open in Immich')}{/if}
         {#if rec?.gramps?.url}{@render appLink(rec.gramps.url, 'gramps-web', `Open ${rec.gramps.gramps_id} in Gramps`)}{/if}

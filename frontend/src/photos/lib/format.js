@@ -119,7 +119,6 @@ export function cardFrom(rec) {
     asset_id: rec.asset_id,
     filename: rec.filename,
     title: rec.title,
-    date: rec.immich_date || rec.date?.value || '',
     type: rec.type,
     thumb: rec.thumb,
     gramps_id: rec.gramps?.gramps_id || null,

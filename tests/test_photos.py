@@ -627,28 +627,41 @@ class TestCollections:
         assert pc.for_asset(conn, "a1") == [{"id": c["id"], "name": "Farm"}]
         assert pc.for_asset(conn, "b1") == []
 
-    def test_reorder_is_total_and_tolerant(self, conn):
+    def test_slots_stay_put(self, conn):
         c = pc.create(conn, "Farm")
-        pc.add_items(conn, c["id"], ["a1", "b1", "c1", "d1"])
-        assert pc.reorder(conn, c["id"], ["c1", "a1", "zz"]) == ["c1", "a1", "b1", "d1"]
-        assert pc.item_ids(conn, c["id"]) == ["c1", "a1", "b1", "d1"]
-        pc.add_items(conn, c["id"], ["e1"])
-        assert pc.item_ids(conn, c["id"]) == ["c1", "a1", "b1", "d1", "e1"]
+        pc.add_items(conn, c["id"], ["a1", "b1"])
+        assert pc.slots(conn, c["id"]) == {"a1": 1, "b1": 2}
+        assert pc.move_item(conn, c["id"], "b1", 5) == {"a1": 1, "b1": 5}
+        pc.add_items(conn, c["id"], ["c1"])
+        pc.remove_item(conn, c["id"], "a1")
+        assert pc.slots(conn, c["id"]) == {"b1": 5, "c1": 6}
+        assert pc.item_ids(conn, c["id"]) == ["b1", "c1"]
 
-    def test_move_item_to_a_position(self, conn):
+    def test_moving_onto_a_photo_swaps_the_two(self, conn):
         c = pc.create(conn, "Farm")
-        pc.add_items(conn, c["id"], ["a1", "b1", "c1", "d1"])
-        assert pc.move_item(conn, c["id"], "d1", 1) == ["d1", "a1", "b1", "c1"]
-        assert pc.move_item(conn, c["id"], "d1", 3) == ["a1", "b1", "d1", "c1"]
-        assert pc.item_ids(conn, c["id"]) == ["a1", "b1", "d1", "c1"]
+        pc.add_items(conn, c["id"], ["a1", "b1", "c1"])
+        assert pc.move_item(conn, c["id"], "c1", 1) == {"c1": 1, "b1": 2, "a1": 3}
 
     def test_move_item_clamps_and_ignores_strangers(self, conn):
         c = pc.create(conn, "Farm")
-        pc.add_items(conn, c["id"], ["a1", "b1", "c1"])
-        assert pc.move_item(conn, c["id"], "a1", 99) == ["b1", "c1", "a1"]
-        assert pc.move_item(conn, c["id"], "a1", 0) == ["a1", "b1", "c1"]
+        pc.add_items(conn, c["id"], ["a1", "b1"])
+        assert pc.move_item(conn, c["id"], "a1", 0) == {"a1": 1, "b1": 2}
+        assert pc.move_item(conn, c["id"], "a1", 10_000) == {"b1": 2, "a1": pc.MAX_ITEMS}
         assert pc.move_item(conn, c["id"], "zz", 1) is None
-        assert pc.item_ids(conn, c["id"]) == ["a1", "b1", "c1"]
+
+    def test_new_photos_go_after_the_last_slot_then_into_gaps(self, conn):
+        c = pc.create(conn, "Farm")
+        pc.add_items(conn, c["id"], ["a1"])
+        pc.move_item(conn, c["id"], "a1", pc.MAX_ITEMS)
+        pc.add_items(conn, c["id"], ["b1", "c1"])
+        assert pc.slots(conn, c["id"]) == {"b1": 1, "c1": 2, "a1": pc.MAX_ITEMS}
+
+    def test_migration_turns_the_old_order_into_slots(self, conn):
+        c = pc.create(conn, "Old")
+        conn.executemany("INSERT INTO collection_items (collection_id, asset_id, seq, added_at) VALUES (?, ?, ?, ?)",
+                         [(c["id"], "b1", 2, "t"), (c["id"], "a1", 0, "t"), (c["id"], "c1", 7, "t")])
+        conn.executescript(db.MIGRATIONS[13])
+        assert pc.slots(conn, c["id"]) == {"a1": 1, "b1": 2, "c1": 3}
 
     def test_cap(self, conn):
         c = pc.create(conn, "Big")
@@ -677,6 +690,24 @@ class TestCollections:
         cards = run(photos.cards_for([im], conn, ["b1", "gone", "a1"]))
         assert [(c["asset_id"], c["title"] or c["filename"], c["gramps_id"], c["missing"]) for c in cards] == [
             ("b1", "b.jpg", None, False), ("gone", "", None, True), ("a1", "Farm", "ABC123", False)]
+
+    def test_a_collection_gives_a_variants_place_to_its_main_image(self, conn):
+        im = VersionsImmich(assets={a: tagged(a) for a in ("a1", "v1", "b1", "w1", "x1")})
+        stacked(im, "a1", "v1")
+        stacked(im, "b1", "w1")
+        one = pc.create(conn, "One")
+        pc.add_items(conn, one["id"], ["x1", "v1", "b1", "w1"])
+        assert run(photos.fold_stacked_items([im], conn, one["id"])) == ["x1", "a1", "b1"]
+
+    def test_a_variant_opens_as_its_main_image_and_brings_its_collections(self, conn):
+        im = VersionsImmich(assets={"a1": tagged("a1", desc="Main"), "v1": tagged("v1", desc="Variant")})
+        stacked(im, "a1", "v1")
+        c = pc.create(conn, "Grund History")
+        pc.add_items(conn, c["id"], ["v1"])
+        rec = run(photos.load([im], conn, CFG, "v1"))
+        assert (rec["asset_id"], rec["title"]) == ("a1", "Main")
+        assert rec["collections"] == [{"id": c["id"], "name": "Grund History"}]
+        assert pc.item_ids(conn, c["id"]) == ["a1"]
 
     def test_primaries_of_swaps_variants_for_their_main(self, conn):
         a, v = tagged("a1"), tagged("v1")

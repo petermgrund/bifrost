@@ -12,7 +12,6 @@
   } from '@immich/ui';
   import { mdiArrowLeft, mdiClose, mdiDeleteOutline, mdiImageMultipleOutline, mdiImagePlusOutline } from '@mdi/js';
   import { tick, untrack } from 'svelte';
-  import { flip } from 'svelte/animate';
   import { del, get, post, put } from '../lib/api.svelte.js';
   import { assetItem, cardFrom, plural } from '../lib/format.js';
   import { loadCollections, onRecord, searchAssets } from '../lib/store.svelte.js';
@@ -27,10 +26,12 @@
   let name = $state('');
   let description = $state('');
   let dragId = $state(null);
+  let overSlot = $state(null);
+  let gridEl = $state(null);
+  let cols = $state(1);
   let flash = $state(null);
   let addQ = $state('');
   let addItems = $state([]);
-  let orderBefore = '';
   let fromField = false;
   let searchTimer;
   let flashTimer;
@@ -41,6 +42,22 @@
       col = null;
       load();
     });
+  });
+
+  const bySlot = $derived(new Map((col?.items || []).map((i) => [i.slot, i])));
+  const slotCount = $derived.by(() => {
+    if (!col?.items.length) return 0;
+    const last = Math.max(...col.items.map((i) => i.slot));
+    return Math.min(Math.ceil((last + 1) / cols) * cols, col.max_slots);
+  });
+
+  $effect(() => {
+    if (!gridEl) return;
+    const measure = () => (cols = Math.max(1, getComputedStyle(gridEl).gridTemplateColumns.split(' ').length));
+    const observer = new ResizeObserver(measure);
+    observer.observe(gridEl);
+    measure();
+    return () => observer.disconnect();
   });
 
   $effect(() =>
@@ -165,10 +182,8 @@
     }
   }
 
-  function applyOrder(ids) {
-    const byId = new Map(col.items.map((i) => [i.asset_id, i]));
-    const listed = new Set(ids);
-    col.items = [...ids.map((a) => byId.get(a)).filter(Boolean), ...col.items.filter((i) => !listed.has(i.asset_id))];
+  function applySlots(slots) {
+    for (const i of col.items) if (slots[i.asset_id]) i.slot = slots[i.asset_id];
   }
 
   async function highlight(assetId) {
@@ -181,16 +196,17 @@
       ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }
 
-  async function moveTo(it, position) {
+  async function moveTo(it, slot) {
+    if (!col || slot === it.slot) return;
     const cid = col.id;
-    const items = col.items.filter((i) => i.asset_id !== it.asset_id);
-    items.splice(position - 1, 0, it);
-    col.items = items;
+    const other = bySlot.get(slot);
+    if (other) other.slot = it.slot;
+    it.slot = slot;
     highlight(it.asset_id);
     try {
-      const r = await put(`/photos/api/collections/${cid}/items/${it.asset_id}/position`, { position });
+      const r = await put(`/photos/api/collections/${cid}/items/${it.asset_id}/position`, { position: slot });
       loadCollections();
-      if (col?.id === cid) applyOrder(r.asset_ids);
+      if (col?.id === cid) applySlots(r.slots);
     } catch (e) {
       toastManager.danger(e.message);
       if (col?.id === cid) load();
@@ -203,38 +219,27 @@
       return;
     }
     dragId = it.asset_id;
-    orderBefore = col.items.map((i) => i.asset_id).join(',');
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', it.asset_id);
   }
 
-  function onDragOver(e, it) {
+  function onDragOver(e, slot) {
     if (!dragId) return;
     e.preventDefault();
-    if (dragId === it.asset_id) return;
-    const items = [...col.items];
-    const from = items.findIndex((i) => i.asset_id === dragId);
-    const to = items.findIndex((i) => i.asset_id === it.asset_id);
-    if (from < 0 || to < 0) return;
-    const [moved] = items.splice(from, 1);
-    items.splice(to, 0, moved);
-    col.items = items;
+    e.dataTransfer.dropEffect = 'move';
+    overSlot = slot;
   }
 
-  async function finishDrag() {
-    if (!dragId) return;
+  function onDrop(e, slot) {
+    e.preventDefault();
+    const it = col?.items.find((i) => i.asset_id === dragId);
+    endDrag();
+    if (it) moveTo(it, slot);
+  }
+
+  function endDrag() {
     dragId = null;
-    const cid = col.id;
-    const ids = col.items.map((i) => i.asset_id);
-    if (ids.join(',') === orderBefore) return;
-    try {
-      const r = await put(`/photos/api/collections/${cid}/order`, { asset_ids: ids });
-      loadCollections();
-      if (col?.id === cid) applyOrder(r.asset_ids);
-    } catch (e) {
-      toastManager.danger(e.message);
-      if (col?.id === cid) load();
-    }
+    overSlot = null;
   }
 </script>
 
@@ -298,44 +303,61 @@
     </div>
 
     {#if col.items.length}
-      <div class="grid grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] gap-2 sm:grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] sm:gap-3" role="list">
-        {#each col.items as it, i (it.asset_id)}
+      <div
+        bind:this={gridEl}
+        class="grid grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] gap-2 sm:grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] sm:gap-3"
+        role="list"
+      >
+        {#each Array.from({ length: slotCount }, (_, k) => k + 1) as slot (slot)}
+          {@const it = bySlot.get(slot)}
           <div
             role="listitem"
-            data-asset={it.asset_id}
-            draggable="true"
-            class={['cursor-grab transition-opacity', dragId === it.asset_id && 'opacity-40']}
-            animate:flip={{ duration: dragId ? 0 : 250 }}
-            onpointerdown={(e) => (fromField = !!e.target.closest('input, button, a'))}
-            ondragstart={(e) => onDragStart(e, it)}
-            ondragover={(e) => onDragOver(e, it)}
-            ondrop={(e) => {
-              e.preventDefault();
-              finishDrag();
+            aria-label={it ? undefined : `Slot ${slot}, empty`}
+            class={['outline-primary outline-offset-2', dragId && overSlot === slot && 'outline-2']}
+            ondragover={(e) => onDragOver(e, slot)}
+            ondragleave={(e) => {
+              if (overSlot === slot && !e.currentTarget.contains(e.relatedTarget)) overSlot = null;
             }}
-            ondragend={finishDrag}
+            ondrop={(e) => onDrop(e, slot)}
           >
-            <PhotoTile item={it} highlight={flash === it.asset_id} onOpen={() => onOpenPhoto(it.asset_id)}>
-              {#snippet topLeft()}
-                <PositionInput
-                  position={i + 1}
-                  max={col.items.length}
-                  label={it.title || it.filename}
-                  onMove={(n) => moveTo(it, n)}
-                />
-              {/snippet}
-              {#snippet topRight()}
-                <IconButton
-                  icon={mdiClose}
-                  size="tiny"
-                  shape="round"
-                  color="secondary"
-                  class="bg-black/55 text-white backdrop-blur-sm not-disabled:hover:bg-black/75"
-                  aria-label="Remove from collection"
-                  onclick={() => removeItem(it)}
-                />
-              {/snippet}
-            </PhotoTile>
+            {#if it}
+              <div
+                data-asset={it.asset_id}
+                draggable="true"
+                class={['cursor-grab transition-opacity', dragId === it.asset_id && 'opacity-40']}
+                onpointerdown={(e) => (fromField = !!e.target.closest('input, button, a'))}
+                ondragstart={(e) => onDragStart(e, it)}
+                ondragend={endDrag}
+              >
+                <PhotoTile item={it} highlight={flash === it.asset_id} onOpen={() => onOpenPhoto(it.asset_id)}>
+                  {#snippet topLeft()}
+                    <PositionInput
+                      position={slot}
+                      max={col.max_slots}
+                      label={it.title || it.filename}
+                      onMove={(n) => moveTo(it, n)}
+                    />
+                  {/snippet}
+                  {#snippet topRight()}
+                    <IconButton
+                      icon={mdiClose}
+                      size="tiny"
+                      shape="round"
+                      color="secondary"
+                      class="bg-black/55 text-white opacity-0 backdrop-blur-sm not-disabled:hover:bg-black/75 group-focus-within:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100"
+                      aria-label="Remove from collection"
+                      onclick={() => removeItem(it)}
+                    />
+                  {/snippet}
+                </PhotoTile>
+              </div>
+            {:else}
+              <div
+                class="grid aspect-square place-items-center border-2 border-dashed border-gray-200 font-mono text-sm text-gray-400 dark:border-white/10 dark:text-gray-500"
+              >
+                {slot}
+              </div>
+            {/if}
           </div>
         {/each}
       </div>

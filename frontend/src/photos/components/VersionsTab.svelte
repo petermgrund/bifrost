@@ -3,7 +3,7 @@
   import {
     mdiImagePlusOutline,
     mdiImageRemoveOutline,
-    mdiPencilOutline,
+    mdiRenameOutline,
     mdiStarOutline,
     mdiSync,
     mdiTrayArrowUp,
@@ -29,7 +29,7 @@
   const verItems = $derived(verQ.trim() ? found.map(candidate) : [UPLOAD]);
 
   $effect(() => {
-    if (editLabel && labelRef) labelRef.focus();
+    if (editLabel && labelRef) labelRef.select();
   });
 
   function blocker(c) {
@@ -85,24 +85,25 @@
   function startLabel(m) {
     setTimeout(() => {
       editLabel = m.asset_id;
-      labelDraft = m.label || '';
+      labelDraft = m.label || m.filename;
     }, 150);
   }
 
   function saveLabel(m) {
     if (editLabel !== m.asset_id) return;
     editLabel = null;
-    const label = labelDraft.trim();
+    const name = labelDraft.trim();
+    const label = name === m.filename ? '' : name;
     if (label !== (m.label || '')) onLabel(m, label);
   }
 
   function menu(m) {
-    const note = { title: m.label ? 'Edit note' : 'Add note', icon: mdiPencilOutline, onAction: () => startLabel(m) };
-    if (m.is_primary) return [note];
+    const rename = { title: 'Rename', icon: mdiRenameOutline, onAction: () => startLabel(m) };
+    if (m.is_primary) return [rename];
     return [
       { title: 'Make main', icon: mdiStarOutline, onAction: () => onPromote(m) },
       m.drift?.length ? { title: 'Match to main', icon: mdiSync, onAction: () => onMatch(m) } : undefined,
-      note,
+      rename,
       MenuItemType.Divider,
       { title: 'Remove from versions', icon: mdiImageRemoveOutline, color: 'danger', onAction: () => onRemove(m) },
     ];
@@ -143,38 +144,39 @@
             </button>
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2">
-                <p class="truncate text-sm font-medium">{m.filename}</p>
+                {#if editLabel === m.asset_id}
+                  <div class="max-w-72 min-w-0 flex-1">
+                    <Input
+                      bind:ref={labelRef}
+                      bind:value={labelDraft}
+                      size="tiny"
+                      placeholder={m.filename}
+                      aria-label="Name of this version"
+                      onkeydown={(e) => {
+                        if (e.key === 'Enter') saveLabel(m);
+                        else if (e.key === 'Escape') {
+                          e.stopPropagation();
+                          editLabel = null;
+                        }
+                      }}
+                      onblur={() => saveLabel(m)}
+                    />
+                  </div>
+                {:else}
+                  <p class="truncate text-sm font-medium" title={m.label ? m.filename : undefined}>
+                    {m.label || m.filename}
+                  </p>
+                {/if}
                 {#if m.is_primary}<Badge size="tiny" color="primary" shape="round">Main</Badge>{/if}
               </div>
-              {#if editLabel === m.asset_id}
-                <Input
-                  bind:ref={labelRef}
-                  bind:value={labelDraft}
-                  size="tiny"
-                  placeholder="Note about this version"
-                  class="mt-1 max-w-sm"
-                  onkeydown={(e) => {
-                    if (e.key === 'Enter') saveLabel(m);
-                    else if (e.key === 'Escape') {
-                      e.stopPropagation();
-                      editLabel = null;
-                    }
-                  }}
-                  onblur={() => saveLabel(m)}
-                />
-              {:else}
-                <p class="flex min-w-0 gap-1.5 text-xs text-gray-600 dark:text-gray-400">
-                  <span class="shrink-0 font-mono">{sizeText(m)}</span>
-                  {#if m.label}<span>·</span><span class="truncate italic">{m.label}</span>{/if}
-                </p>
-              {/if}
+              <p class="truncate font-mono text-xs text-gray-600 dark:text-gray-400">{sizeText(m)}</p>
               {#if !m.is_primary && m.drift?.length}
                 <p class="text-warning-700 truncate text-xs" title="Compared with the main image">
                   Differs: {m.drift.join(', ')}
                 </p>
               {/if}
             </div>
-            <ContextMenuButton aria-label="Actions for {m.filename}" items={menu(m)} disabled={!!busy} />
+            <ContextMenuButton aria-label="Actions for {m.label || m.filename}" items={menu(m)} disabled={!!busy} />
           </li>
         {/each}
       </ul>

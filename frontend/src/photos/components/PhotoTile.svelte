@@ -18,9 +18,8 @@
   <div
     role="button"
     tabindex="0"
-    title={item.filename}
     class={[
-      'outline-primary bg-light-200 relative aspect-square cursor-pointer overflow-hidden rounded-xl outline-offset-2 focus-visible:outline-2',
+      'outline-primary bg-light-200 relative aspect-square cursor-pointer overflow-hidden outline-offset-2 focus-visible:outline-2',
       highlight && 'ring-primary ring-4',
     ]}
     onclick={onOpen}
@@ -40,13 +39,12 @@
       />
     {/if}
     <div
-      class="absolute inset-x-0 bottom-0 bg-linear-to-t from-black/80 via-black/40 to-transparent px-2.5 pt-10 pb-2 text-white"
+      class="pointer-events-none absolute inset-x-0 bottom-0 bg-linear-to-t from-black/80 via-black/40 to-transparent px-2.5 pt-10 pb-2 text-white opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
     >
       <p class="line-clamp-2 text-sm leading-snug font-medium">{caption}</p>
-      <p class="mt-0.5 flex justify-between gap-2 text-xs text-white/75">
-        <span class={['truncate', item.gramps_id && 'font-mono']}>{item.gramps_id || 'Not in Gramps'}</span>
-        <span class="shrink-0 font-mono">{item.date}</span>
-      </p>
+      {#if item.gramps_id}
+        <p class="mt-0.5 truncate font-mono text-xs text-white/75">{item.gramps_id}</p>
+      {/if}
     </div>
   </div>
   {#if topLeft}

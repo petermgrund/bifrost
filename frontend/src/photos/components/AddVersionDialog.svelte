@@ -18,7 +18,7 @@
     return [
       ...current.map((m) => ({
         id: m.asset_id,
-        name: m.filename,
+        name: m.label || m.filename,
         thumb: m.thumb,
         tags: [m.is_primary && 'Main now', m.is_primary && rec.gramps && `in Gramps as ${rec.gramps.gramps_id}`],
       })),

@@ -1,4 +1,4 @@
-"""Bifrost-only photo collections with a manual order"""
+"""Bifrost-only photo collections whose photos sit in numbered slots"""
 
 from __future__ import annotations
 
@@ -57,6 +57,12 @@ def delete(conn: sqlite3.Connection, cid: int) -> bool:
     return cur.rowcount > 0
 
 
+def slots(conn: sqlite3.Connection, cid: int) -> dict[str, int]:
+    """asset id -> slot, in slot order"""
+    return {r["asset_id"]: r["seq"] for r in conn.execute(
+        "SELECT asset_id, seq FROM collection_items WHERE collection_id=? ORDER BY seq, added_at", (cid,))}
+
+
 def item_ids(conn: sqlite3.Connection, cid: int) -> list[str]:
     return [r["asset_id"] for r in conn.execute(
         "SELECT asset_id FROM collection_items WHERE collection_id=? ORDER BY seq, added_at", (cid,))]
@@ -67,19 +73,21 @@ def _touch(conn: sqlite3.Connection, cid: int) -> None:
 
 
 def add_items(conn: sqlite3.Connection, cid: int, asset_ids: list[str]) -> int:
-    """Append the new ids in the given order; ids already present keep their place"""
-    current = item_ids(conn, cid)
-    new = [a for a in dict.fromkeys(asset_ids) if a and a not in set(current)]
-    if len(current) + len(new) > MAX_ITEMS:
+    """New ids take the free slots after the last one, then any gaps; ids already present keep theirs"""
+    taken = slots(conn, cid)
+    new = [a for a in dict.fromkeys(asset_ids) if a and a not in taken]
+    if len(taken) + len(new) > MAX_ITEMS:
         raise ValueError(f"a collection holds at most {MAX_ITEMS} photos")
     if not new:
         return 0
-    seq = len(current)
+    used = set(taken.values())
+    last = max(used, default=0)
+    free = [*range(last + 1, MAX_ITEMS + 1), *(s for s in range(1, last) if s not in used)]
     with conn:
-        for i, asset_id in enumerate(new):
+        for asset_id, slot in zip(new, free):
             conn.execute(
                 "INSERT INTO collection_items (collection_id, asset_id, seq, added_at) VALUES (?, ?, ?, ?)",
-                (cid, asset_id, seq + i, _now()))
+                (cid, asset_id, slot, _now()))
         _touch(conn, cid)
     return len(new)
 
@@ -93,28 +101,21 @@ def remove_item(conn: sqlite3.Connection, cid: int, asset_id: str) -> bool:
     return cur.rowcount > 0
 
 
-def reorder(conn: sqlite3.Connection, cid: int, asset_ids: list[str]) -> list[str]:
-    """The listed ids first, in that order; anything unlisted keeps its old relative order after them"""
-    current = item_ids(conn, cid)
-    present = set(current)
-    wanted = [a for a in dict.fromkeys(asset_ids) if a in present]
-    wanted += [a for a in current if a not in set(wanted)]
-    with conn:
-        for i, asset_id in enumerate(wanted):
-            conn.execute("UPDATE collection_items SET seq=? WHERE collection_id=? AND asset_id=?",
-                         (i, cid, asset_id))
-        _touch(conn, cid)
-    return wanted
-
-
-def move_item(conn: sqlite3.Connection, cid: int, asset_id: str, position: int) -> list[str] | None:
-    """Put one item at a 1-based position, clamped to the collection; None if it is not in it"""
-    current = item_ids(conn, cid)
+def move_item(conn: sqlite3.Connection, cid: int, asset_id: str, slot: int) -> dict[str, int] | None:
+    """Put one item in a slot from 1 to MAX_ITEMS, swapping with a photo already there; None if it is not in the collection"""
+    current = slots(conn, cid)
     if asset_id not in current:
         return None
-    order = [a for a in current if a != asset_id]
-    order.insert(min(max(position, 1), len(current)) - 1, asset_id)
-    return reorder(conn, cid, order)
+    slot = min(max(slot, 1), MAX_ITEMS)
+    other = next((a for a, s in current.items() if s == slot and a != asset_id), None)
+    with conn:
+        if other:
+            conn.execute("UPDATE collection_items SET seq=? WHERE collection_id=? AND asset_id=?",
+                         (current[asset_id], cid, other))
+        conn.execute("UPDATE collection_items SET seq=? WHERE collection_id=? AND asset_id=?",
+                     (slot, cid, asset_id))
+        _touch(conn, cid)
+    return slots(conn, cid)
 
 
 def for_asset(conn: sqlite3.Connection, asset_id: str) -> list[dict]:

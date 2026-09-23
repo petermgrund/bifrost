@@ -51,9 +51,55 @@ def test_prompt_includes_existing_source_style():
 
 def test_schema_required_paths():
     assert set(COMPOSE_SCHEMA["required"]) == {"analysis", "citation", "notes", "quality"}
-    assert COMPOSE_SCHEMA["properties"]["citation"]["properties"]["confidence"]["maximum"] == 4
+    assert COMPOSE_SCHEMA["properties"]["citation"]["properties"]["confidence"]["enum"] == [0, 1, 2, 3, 4]
     assert "date" not in COMPOSE_SCHEMA["properties"]["citation"]["properties"]
     assert "source_list_entry" not in COMPOSE_SCHEMA["properties"]["notes"]["properties"]
+
+
+STRICT_UNSUPPORTED = {"minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
+                      "multipleOf", "minLength", "maxLength", "maxItems", "oneOf"}
+
+
+def _strict_violations(schema, path="$"):
+    """what the API's strict tool mode rejects, found offline"""
+    out = []
+    if isinstance(schema.get("type"), list):
+        out.append(f"{path}: type list, use anyOf")
+    out += [f"{path}: {k}" for k in STRICT_UNSUPPORTED & set(schema)]
+    if schema.get("minItems", 0) > 1:
+        out.append(f"{path}: minItems > 1")
+    if schema.get("type") == "object":
+        if schema.get("additionalProperties") is not False:
+            out.append(f"{path}: additionalProperties must be false")
+        props = schema.get("properties", {})
+        out += [f"{path}: required {r!r} not a property"
+                for r in schema.get("required", []) if r not in props]
+        for k, sub in props.items():
+            out += _strict_violations(sub, f"{path}.{k}")
+    for i, sub in enumerate(schema.get("anyOf", [])):
+        out += _strict_violations(sub, f"{path}|{i}")
+    if isinstance(schema.get("items"), dict):
+        out += _strict_violations(schema["items"], f"{path}[]")
+    return out
+
+
+def test_schemas_meet_strict_tool_rules():
+    from bifrost.modules.citations import DUMP_SCHEMA
+    assert _strict_violations(COMPOSE_SCHEMA) == []
+    assert _strict_violations(DUMP_SCHEMA) == []
+
+
+def test_strict_checker_catches_the_old_schema_shape():
+    old = {"type": "object", "properties": {
+        "citation": {"type": "object", "properties": {
+            "confidence": {"type": "integer", "minimum": 0}}},
+        "source": {"type": ["object", "null"]}}}
+    assert _strict_violations(old) == [
+        "$: additionalProperties must be false",
+        "$.citation: additionalProperties must be false",
+        "$.citation.confidence: minimum",
+        "$.source: type list, use anyOf",
+    ]
 
 
 def test_system_prompt_carries_style_guides(tmp_path):
@@ -286,7 +332,6 @@ def test_client_search_media_sends_escaped_or_rules():
 def test_dump_schema_asks_for_suggestions_and_a_record_date():
     from bifrost.modules.citations import DUMP_SCHEMA, COMPOSE_SCHEMA
     props = DUMP_SCHEMA["properties"]
-    assert props["suggested_sources"]["maxItems"] == 3
     assert props["suggested_sources"]["items"]["properties"]["confidence"]["enum"] == ["high", "low"]
     assert set(props["citation"]["properties"]["date"]["properties"]) == {
         "modifier", "quality", "year", "month", "day"}
@@ -314,6 +359,19 @@ def test_suggestions_resolve_against_the_catalog_and_keep_the_record_date():
     assert r["matched_source"]["gramps_id"] == "S1"
     assert r["draft"]["citation"]["date"]["year"] == "1910"
     assert "suggested_sources" not in r["draft"]
+
+
+@_NEEDS_TYPES
+def test_suggestions_are_capped_at_three_in_code():
+    # strict tool mode has no maxItems, so the schema no longer enforces this
+    from bifrost.modules.citations import compose_from_dump
+    ids = ["S1", "S2", "S3", "S4"]
+    first = _draft(source=None, repository=None, suggested_sources=[
+        {"gramps_id": i, "reason": "r", "confidence": "low"} for i in ids])
+    sources = [{"handle": i.lower(), "gramps_id": i, "title": i} for i in ids]
+    r = asyncio.run(compose_from_dump(
+        _StubAnthropic(first, dict(first)), "", None, sources=sources, repos=[], subject="x"))
+    assert [s["gramps_id"] for s in r["suggested"]] == ["S1", "S2", "S3"]
 
 
 @_NEEDS_TYPES

@@ -2,7 +2,9 @@ import asyncio
 import copy
 import logging
 
-from bifrost.core.clients.anthropic import AnthropicClient
+import pytest
+
+from bifrost.core.clients.anthropic import AnthropicClient, AnthropicError
 
 SCHEMA = {"type": "object", "properties": {"ok": {"type": "boolean"}}}
 
@@ -63,3 +65,33 @@ def test_structured_call_caches_the_system_block_for_an_hour(caplog):
     assert calls[0]["system"] == [{"type": "text", "text": "sys",
                                    "cache_control": {"type": "ephemeral", "ttl": "1h"}}]
     assert "cache_read=70000" in caplog.text
+
+
+def _one_call(payload):
+    client = AnthropicClient("key", "m")
+    calls = []
+
+    async def fake_post(url, json=None):
+        calls.append(copy.deepcopy(json))
+        return _Resp(200, payload=payload)
+
+    client._client.post = fake_post
+    try:
+        return calls, asyncio.run(client.complete_structured("sys", "user", SCHEMA, max_tokens=50))
+    finally:
+        asyncio.run(client.close())
+
+
+def test_structured_tool_is_strict():
+    calls, _ = _one_call({"content": [{"type": "tool_use", "input": {"ok": True}}]})
+    assert calls[0]["tools"][0]["strict"] is True
+
+
+@pytest.mark.parametrize("stop_reason, message", [
+    ("max_tokens", "cut off at max_tokens=50"),
+    ("refusal", "declined"),
+])
+def test_cut_off_or_declined_reply_is_an_error_not_a_partial_result(stop_reason, message):
+    with pytest.raises(AnthropicError, match=message):
+        _one_call({"stop_reason": stop_reason,
+                   "content": [{"type": "tool_use", "input": {"ok": "partial"}}]})

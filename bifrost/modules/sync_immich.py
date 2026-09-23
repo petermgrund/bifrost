@@ -545,8 +545,10 @@ async def sync_one_asset(
                 raise SyncError(400, f"invalid gramps_id {gramps_id!r} (6 chars, safe alphabet)")
             if gid in live_ids:
                 raise SyncError(400, f"gramps_id {gid} already exists in Gramps")
+            if gid in ids.all_ids_ever_seen(conn, open_reservations=False):
+                raise SyncError(400, f"gramps_id {gid} was issued before and can't be reused")
         else:
-            gid = ids.generate_gramps_id(live_ids | ids.unminted_reserved(conn))
+            gid = ids.generate_gramps_id(ids.all_ids_ever_seen(conn, live_ids))
 
         gramps_path, mime = gramps_file(asset, cfg, await preview_of(accounts, asset, cfg))
         title = wanted_title(asset) or gid
@@ -573,11 +575,10 @@ async def sync_one_asset(
             raise SyncError(502, f"Gramps create failed: {exc}")
         with conn:
             ids.mark_minted(conn, gid, _now())
-            conn.execute(
-                "INSERT OR REPLACE INTO minted_media "
-                "(gramps_id, source_system, source_id, title, minted_at) VALUES (?, 'immich', ?, ?, ?)",
-                (gid, asset_id, title, _now()),
-            )
+            try:
+                ids.register_minted(conn, gid, "immich", asset_id, title, _now())
+            except ids.IdReused as exc:
+                raise SyncError(409, f"media {gid} created in Gramps but not registered: {exc}")
         created = True
         yield SyncEvent(
             kind="item", entity="media", action="created", source_id=asset_id,

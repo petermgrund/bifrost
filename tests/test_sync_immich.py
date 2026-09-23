@@ -705,6 +705,15 @@ class TestSyncAssetsScan:
         assert row and row["gramps_id"] == gid
         assert summary_of(events).data["created"] == 1
 
+    def test_apply_register_conflict_is_a_failed_row(self, conn):
+        im = FakeImmich(assets={"a1": asset("a1", "img1.jpg")}, tagged={"a1"})
+        events = run_scan(im, RacingGramps(conn), conn, apply=True)
+        failed = actions(events, "failed")
+        assert len(failed) == 1 and "not registered" in failed[0].detail
+        assert summary_of(events).data["created"] == 0
+        assert summary_of(events).data["errors"] == 1
+        assert [r["source_id"] for r in conn.execute("SELECT source_id FROM minted_media")] == ["202"]
+
 
 def test_sync_counts_are_all_initialized():
     import inspect
@@ -832,6 +841,71 @@ class TestSyncOneAsset:
         with pytest.raises(SyncError) as exc:
             self._run(im, gr, conn, "a2", gramps_id="bad id")
         assert exc.value.status == 400 and "invalid" in exc.value.detail
+
+    def _issued_before(self, conn):
+        # XJ4DBT: minted, then its media was deleted from Gramps
+        conn.execute(
+            "INSERT INTO minted_media (gramps_id, source_system, source_id, title, minted_at) "
+            "VALUES ('XJ4DBT', 'paperless', '101', 'Deleted doc', '2026-01-01')")
+        conn.executemany(
+            "INSERT INTO reserved_ids (gramps_id, created_at, assigned_at, minted_at) "
+            "VALUES (?, 't', ?, ?)",
+            [("PENCHD", None, None), ("RSVD22", "t", None), ("MNTD22", "t", "t")])
+        conn.commit()
+
+    def test_create_never_reissues_a_deleted_or_reserved_id(self, conn, script_ids):
+        self._issued_before(conn)
+        script_ids("XJ4DBT", "PENCHD", "RSVD22", "MNTD22", "FRESH2")
+        gr = FakeGramps()
+        events = self._run(FakeImmich(assets={"a1": asset("a1")}), gr, conn, "a1")
+        assert summary_of(events).data["gramps_id"] == "FRESH2"
+        assert [m["gramps_id"] for m in gr.created] == ["FRESH2"]
+        row = conn.execute("SELECT source_id FROM minted_media WHERE gramps_id='XJ4DBT'").fetchone()
+        assert row["source_id"] == "101"
+
+    def test_manual_id_issued_before_is_rejected(self, conn):
+        self._issued_before(conn)
+        gr = FakeGramps()
+        for gid in ("xj4dbt", "MNTD22"):
+            with pytest.raises(SyncError) as exc:
+                self._run(FakeImmich(assets={"a1": asset("a1")}), gr, conn, "a1", gramps_id=gid)
+            assert exc.value.status == 400 and "issued before" in exc.value.detail
+        assert gr.created == []
+
+    def test_manual_id_claims_its_open_reservation(self, conn):
+        self._issued_before(conn)
+        events = self._run(FakeImmich(assets={"a1": asset("a1")}), FakeGramps(), conn, "a1",
+                           gramps_id="RSVD22")
+        assert summary_of(events).data["gramps_id"] == "RSVD22"
+        assert conn.execute(
+            "SELECT minted_at FROM reserved_ids WHERE gramps_id='RSVD22'").fetchone()[0]
+
+    def test_register_conflict_fails_without_overwriting(self, conn):
+        self._issued_before(conn)
+        gr = RacingGramps(conn)
+        with pytest.raises(SyncError) as exc:
+            self._run(FakeImmich(assets={"a1": asset("a1")}), gr, conn, "a1", gramps_id="RSVD22")
+        assert exc.value.status == 409 and "paperless 202" in exc.value.detail
+        row = conn.execute(
+            "SELECT source_system, source_id FROM minted_media WHERE gramps_id='RSVD22'").fetchone()
+        assert tuple(row) == ("paperless", "202")
+        assert conn.execute(
+            "SELECT minted_at FROM reserved_ids WHERE gramps_id='RSVD22'").fetchone()[0] is None
+
+
+class RacingGramps(FakeGramps):
+    """Another mint registers the same id while Gramps creates the media"""
+
+    def __init__(self, conn, **kw):
+        super().__init__(**kw)
+        self.conn = conn
+
+    async def create_media(self, obj):
+        await super().create_media(obj)
+        self.conn.execute(
+            "INSERT INTO minted_media (gramps_id, source_system, source_id, title, minted_at) "
+            "VALUES (?, 'paperless', '202', 'Racer', '2026-01-01')", (obj["gramps_id"],))
+        self.conn.commit()
 
 
 class TestTagDate:

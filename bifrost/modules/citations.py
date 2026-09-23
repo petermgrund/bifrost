@@ -56,40 +56,47 @@ COMPOSE_SCHEMA = {
             ),
         },
         "repository": {
-            "type": ["object", "null"],
             "description": "Null when an existing repository was chosen.",
-            "properties": {
-                "name": {"type": "string"},
-                "type": {"type": "string", "enum": [
-                    "Archive", "Library", "Church", "Collection", "Association",
-                    "Web site", "Bookstore", "Cemetery", "Safe"]},
-                "url": {"type": ["string", "null"]},
-            },
-            "required": ["name", "type"],
+            "anyOf": [{
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "type": {"type": "string", "enum": [
+                        "Archive", "Library", "Church", "Collection", "Association",
+                        "Web site", "Bookstore", "Cemetery", "Safe"]},
+                    "url": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+                },
+                "required": ["name", "type"],
+                "additionalProperties": False,
+            }, {"type": "null"}],
         },
         "call_number": {
-            "type": ["string", "null"],
+            "anyOf": [{"type": "string"}, {"type": "null"}],
             "description": "Repository call number for the source (NAD ref, NARA pub, RG...).",
         },
         "source": {
-            "type": ["object", "null"],
             "description": "Null when an existing source was chosen.",
-            "properties": {
-                "title": {"type": "string"},
-                "author": {"type": "string"},
-                "pubinfo": {"type": "string"},
-                "abbrev": {"type": "string"},
-            },
-            "required": ["title", "author", "pubinfo", "abbrev"],
+            "anyOf": [{
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "author": {"type": "string"},
+                    "pubinfo": {"type": "string"},
+                    "abbrev": {"type": "string"},
+                },
+                "required": ["title", "author", "pubinfo", "abbrev"],
+                "additionalProperties": False,
+            }, {"type": "null"}],
         },
         "citation": {
             "type": "object",
             "properties": {
                 "page": {"type": "string", "description": "Locator: page/entry/dwelling/image..."},
-                "confidence": {"type": "integer", "minimum": 0, "maximum": 4,
+                "confidence": {"type": "integer", "enum": [0, 1, 2, 3, 4],
                                "description": "Gramps: 0 very low … 4 very high, per the GPS mapping."},
             },
             "required": ["page", "confidence"],
+            "additionalProperties": False,
         },
         "notes": {
             "type": "object",
@@ -97,7 +104,7 @@ COMPOSE_SCHEMA = {
                 "first_reference": {"type": "string"},
                 "short_reference": {"type": "string"},
                 "abstract": {
-                    "type": ["string", "null"],
+                    "anyOf": [{"type": "string"}, {"type": "null"}],
                     "description": (
                         "Research abstract of what THIS record entry states. the "
                         "facts extracted from the record that do NOT belong in the "
@@ -111,6 +118,7 @@ COMPOSE_SCHEMA = {
                 },
             },
             "required": ["first_reference", "short_reference"],
+            "additionalProperties": False,
         },
         "quality": {
             "type": "object",
@@ -121,9 +129,11 @@ COMPOSE_SCHEMA = {
                 "note": {"type": "string", "description": "One sentence."},
             },
             "required": ["source_type", "information_type", "evidence_type", "note"],
+            "additionalProperties": False,
         },
     },
     "required": ["analysis", "citation", "notes", "quality"],
+    "additionalProperties": False,
 }
 
 SYSTEM_PROMPT_CORE = """You construct Evidence Explained (EE) citations for \
@@ -381,6 +391,7 @@ DATE_SCHEMA = {
         "day": {"type": "string"},
     },
     "required": ["modifier", "quality", "year", "month", "day"],
+    "additionalProperties": False,
 }
 
 DUMP_SCHEMA = {
@@ -395,7 +406,6 @@ DUMP_SCHEMA = {
         },
         "suggested_sources": {
             "type": "array",
-            "maxItems": 3,
             "description": (
                 "Up to three EXISTING sources this record could belong to, best "
                 "first, each with a short reason. Empty when none plausibly fits. "
@@ -410,15 +420,16 @@ DUMP_SCHEMA = {
                     "confidence": {"type": "string", "enum": ["high", "low"]},
                 },
                 "required": ["gramps_id", "reason", "confidence"],
+                "additionalProperties": False,
             },
         },
         "matched_source_gramps_id": {
-            "type": ["string", "null"],
+            "anyOf": [{"type": "string"}, {"type": "null"}],
             "description": "gramps_id of the EXISTING source this record belongs to, "
                            "or null if none truly fits. Never force a match.",
         },
         "matched_repository_gramps_id": {
-            "type": ["string", "null"],
+            "anyOf": [{"type": "string"}, {"type": "null"}],
             "description": "When drafting a NEW source: gramps_id of an existing "
                            "repository that holds it, or null to create one.",
         },

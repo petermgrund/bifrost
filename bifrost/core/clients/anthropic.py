@@ -68,6 +68,7 @@ class AnthropicClient:
             "tools": [{
                 "name": "emit_result",
                 "description": "Emit the structured result.",
+                "strict": True,  # the API enforces the schema, so nested objects arrive as objects
                 "input_schema": schema,
             }],
             "tool_choice": {"type": "tool", "name": "emit_result"},
@@ -81,6 +82,11 @@ class AnthropicClient:
         if resp.status_code >= 400:
             raise AnthropicError(f"{resp.status_code}: {resp.text[:500]}")
         data = resp.json()
+        # the schema guarantee does not hold for a cut-off or declined reply
+        if data.get("stop_reason") == "max_tokens":
+            raise AnthropicError(f"output cut off at max_tokens={max_tokens}")
+        if data.get("stop_reason") == "refusal":
+            raise AnthropicError("the model declined this request")
         for block in data.get("content", []):
             if block.get("type") == "tool_use":
                 return block["input"]

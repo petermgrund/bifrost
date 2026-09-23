@@ -1,4 +1,5 @@
 import asyncio
+import copy
 
 import pytest
 
@@ -275,3 +276,74 @@ class TestMinting:
             "SELECT source_system, source_id FROM minted_media WHERE gramps_id=?",
             (failed[0].gramps_id,)).fetchone()
         assert tuple(row) == ("immich", "a9")
+
+
+class TestTranscriptionOfNewDoc:
+
+    class Paperless:
+        def __init__(self, doc):
+            self.doc = doc
+
+        async def resolve_tag_id(self, name):
+            return 1 if name == "doc" else None
+
+        async def list_documents_by_tags(self, ids):
+            return [copy.deepcopy(self.doc)]
+
+        async def list_documents_by_tag(self, tag_id):  # a separate listing, like the real API
+            return [copy.deepcopy(self.doc)]
+
+        async def get_document_metadata(self, doc_id):
+            return {"media_filename": f"{doc_id:07d}.jpg", "original_checksum": "c"}
+
+        async def patch_custom_fields(self, doc_id, cfs):
+            pass
+
+    class Gramps:
+        def __init__(self):
+            self.media = {}
+            self.notes = {}
+
+        async def list_media_gramps_ids(self):
+            return set(self.media)
+
+        async def create_media(self, obj):
+            self.media[obj["gramps_id"]] = obj
+
+        async def get_media_by_gramps_id(self, gid):
+            return self.media.get(gid)
+
+        async def update_media(self, handle, obj):
+            self.media[obj["gramps_id"]] = obj
+
+        async def get_tag_handle(self, name):
+            return None
+
+        async def _paged(self, path, keys=None):
+            return [{"gramps_id": n["gramps_id"]} for n in self.notes.values()]
+
+        async def create_note(self, obj):
+            self.notes[obj["handle"]] = obj
+
+    def test_doc_created_this_run_gets_its_transcription_and_translation(self, tmp_path):
+        doc = {"id": 1133, "title": "Death index", "custom_fields": [], "tags": [1, 43],
+               "content": f"Siggerud\n{TRANSLATION_DELIMITER}\nSiggerud (en)"}
+        cfg = SyncPaperlessConfig(sync_tags=("doc",), gramps_id_field_id=12,
+                                  gramps_url_field_id=14, transcription_tag_id=43)
+        conn = db.connect(tmp_path / "t.db")
+        gramps = self.Gramps()
+
+        async def collect():
+            return [e async for e in sync_paperless.sync(
+                self.Paperless(doc), gramps, conn, cfg, apply=True)]
+        events = asyncio.run(collect())
+
+        summary = next(e for e in events if e.kind == "summary")
+        assert summary.data["created"] == 1 and summary.data["tx_created"] == 1
+        (media,) = gramps.media.values()
+        assert sorted(gramps.notes[h]["type"] for h in media["note_list"]) == [
+            "Transcription", "Translation"]
+        row = conn.execute(
+            "SELECT gramps_media_id FROM transcription_state WHERE paperless_id=1133").fetchone()
+        assert row["gramps_media_id"] == media["gramps_id"]
+        conn.close()

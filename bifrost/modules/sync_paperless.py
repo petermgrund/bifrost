@@ -277,6 +277,9 @@ async def sync(
         tx_docs = await paperless.list_documents_by_tag(cfg.transcription_tag_id)
         if single_doc_id is not None:
             tx_docs = [d for d in tx_docs if d["id"] == single_doc_id]
+        # same dicts as `documents`, so a Gramps ID minted this run reaches the transcription pass
+        by_id = {d["id"]: d for d in documents}
+        tx_docs = [by_id.get(d["id"], d) for d in tx_docs]
     existing_ids = all_ids_ever_seen(
         conn, live_ids,
         (_doc_gramps_id(d, cfg.gramps_id_field_id) for d in documents + (tx_docs or [])))

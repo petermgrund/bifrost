@@ -1,5 +1,7 @@
 import asyncio
 
+import pytest
+
 from bifrost.core import db
 from bifrost.core.config import SyncPaperlessConfig
 from bifrost.modules import sync_paperless
@@ -186,3 +188,90 @@ class TestProgressBands:
         progress = self._progress(tmp_path, versions_only=True)
         assert progress and {e.detail for e in progress} == {"Checking versions"}
         assert progress[-1].data["done"] == progress[-1].data["total"]
+
+
+class TestMinting:
+
+    class Paperless:
+        def __init__(self, docs):
+            self.docs = docs
+
+        async def resolve_tag_id(self, name):
+            return 1 if name == "doc" else None
+
+        async def list_documents_by_tags(self, ids):
+            return self.docs
+
+        async def get_document_metadata(self, doc_id):
+            return {"media_filename": f"{doc_id:07d}.pdf", "original_checksum": "c"}
+
+        async def patch_custom_fields(self, doc_id, cfs):
+            pass
+
+    class Gramps:
+        def __init__(self, conn=None):
+            self.media = {}
+            self.conn = conn
+
+        async def list_media_gramps_ids(self):
+            return set(self.media)
+
+        async def create_media(self, obj):
+            self.media[obj["gramps_id"]] = obj
+            if self.conn is not None:  # another mint registers the same id meanwhile
+                self.conn.execute(
+                    "INSERT INTO minted_media (gramps_id, source_system, source_id, title, minted_at) "
+                    "VALUES (?, 'immich', 'a9', 'Racer', '2026-01-01')", (obj["gramps_id"],))
+                self.conn.commit()
+
+        async def get_media_by_gramps_id(self, gid):
+            return self.media.get(gid)
+
+        async def get_tag_handle(self, name):
+            return None
+
+    @pytest.fixture
+    def conn(self, tmp_path):
+        c = db.connect(tmp_path / "m.db")
+        # XJ4DBT: minted, then its media was deleted from Gramps
+        c.execute(
+            "INSERT INTO minted_media (gramps_id, source_system, source_id, title, minted_at) "
+            "VALUES ('XJ4DBT', 'paperless', '101', 'Deleted doc', '2026-01-01')")
+        c.execute(
+            "INSERT INTO reserved_ids (gramps_id, created_at, assigned_at) VALUES ('RSVD22', 't', 't')")
+        c.commit()
+        yield c
+        c.close()
+
+    def _sync(self, conn, gramps, docs):
+        cfg = SyncPaperlessConfig(sync_tags=("doc",), gramps_id_field_id=12, gramps_url_field_id=14)
+
+        async def collect():
+            return [e async for e in sync_paperless.sync(
+                self.Paperless(docs), gramps, conn, cfg, apply=True)]
+        return asyncio.run(collect())
+
+    def test_create_never_reissues_a_deleted_reserved_or_paperless_id(self, conn, script_ids):
+        docs = [{"id": 1, "title": "New", "custom_fields": [], "tags": [1]},
+                {"id": 2, "title": "Typed by hand", "tags": [1],
+                 "custom_fields": [{"field": 12, "value": "PPRK22"}]}]
+        script_ids("XJ4DBT", "RSVD22", "PPRK22", "FRESH2")
+        gramps = self.Gramps()
+        events = self._sync(conn, gramps, docs)
+        created = [e for e in events if e.kind == "item" and e.action == "created"]
+        assert [(e.source_id, e.gramps_id) for e in created] == [("1", "FRESH2")]
+        assert set(gramps.media) == {"FRESH2"}
+        row = conn.execute("SELECT source_id FROM minted_media WHERE gramps_id='XJ4DBT'").fetchone()
+        assert row["source_id"] == "101"
+
+    def test_register_conflict_is_a_failed_row_and_not_overwritten(self, conn):
+        docs = [{"id": 1, "title": "New", "custom_fields": [], "tags": [1]}]
+        events = self._sync(conn, self.Gramps(conn), docs)
+        failed = [e for e in events if e.kind == "item" and e.action == "failed"]
+        assert len(failed) == 1 and "immich a9" in failed[0].detail
+        summary = next(e for e in events if e.kind == "summary")
+        assert summary.data["created"] == 0 and summary.data["errors"] == 1
+        row = conn.execute(
+            "SELECT source_system, source_id FROM minted_media WHERE gramps_id=?",
+            (failed[0].gramps_id,)).fetchone()
+        assert tuple(row) == ("immich", "a9")

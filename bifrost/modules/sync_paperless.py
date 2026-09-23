@@ -10,7 +10,7 @@ from typing import AsyncIterator
 from ..core.clients import GrampsClient, PaperlessClient
 from ..core.config import SyncPaperlessConfig
 from ..core.events import SyncEvent
-from ..core.ids import generate_gramps_id, generate_handle
+from ..core.ids import IdReused, all_ids_ever_seen, generate_gramps_id, generate_handle, register_minted
 from .citations import next_sequential_id
 
 log = logging.getLogger("bifrost.sync.paperless")
@@ -222,7 +222,7 @@ async def sync(
         yield SyncEvent(kind="summary", data=counts)
         return
 
-    existing_ids = await gramps.list_media_gramps_ids()
+    live_ids = await gramps.list_media_gramps_ids()
 
     q_options: dict[str, str] = {}
     q_field = cfg.date_qualifier_field_id
@@ -277,6 +277,9 @@ async def sync(
         tx_docs = await paperless.list_documents_by_tag(cfg.transcription_tag_id)
         if single_doc_id is not None:
             tx_docs = [d for d in tx_docs if d["id"] == single_doc_id]
+    existing_ids = all_ids_ever_seen(
+        conn, live_ids,
+        (_doc_gramps_id(d, cfg.gramps_id_field_id) for d in documents + (tx_docs or [])))
     passes = 0 if transcriptions_only else (1 if versions_only else 3)
     total = passes * len(documents) + (len(tx_docs) if tx_docs is not None else 0)
     done = 0
@@ -369,14 +372,16 @@ async def sync(
                         f"duplicate this doc. You must fix the custom field manually. ({exc})"),
             )
 
-        with conn:
-            conn.execute(
-                "INSERT OR REPLACE INTO minted_media"
-                " (gramps_id, source_system, source_id, title, minted_at)"
-                " VALUES (?, 'paperless', ?, ?, ?)",
-                (gramps_id, str(doc_id), title,
-                 datetime.now().isoformat(timespec="seconds")),
-            )
+        try:
+            with conn:
+                register_minted(conn, gramps_id, "paperless", str(doc_id), title,
+                                datetime.now().isoformat(timespec="seconds"))
+        except IdReused as exc:
+            counts["errors"] += 1
+            yield SyncEvent(kind="item", entity="doc", action="failed",
+                            source_id=str(doc_id), gramps_id=gramps_id, title=title,
+                            detail=f"media {gramps_id} created in Gramps but not registered: {exc}")
+            continue
         counts["created"] += 1
         yield SyncEvent(kind="item", entity="doc", action="created",
                         source_id=str(doc_id), gramps_id=gramps_id, title=title,

@@ -389,6 +389,13 @@ async def sync(
         yield SyncEvent(kind="item", entity="doc", action="created",
                         source_id=str(doc_id), gramps_id=gramps_id, title=title,
                         data={"path": gramps_path, "cols": _prospective_cols(doc)})
+        try:
+            await gramps.store_checksum(media_obj)
+        except Exception as exc:  # noqa BLE001
+            counts["errors"] += 1
+            yield SyncEvent(kind="item", entity="doc", action="failed",
+                            source_id=str(doc_id), gramps_id=gramps_id, title=title,
+                            detail=f"created, but Gramps could not read its file for the checksum: {exc}")
 
     img_tag_id = tag_map.get("img")
     for doc in documents:
@@ -437,8 +444,19 @@ async def sync(
             if apply:
                 media["path"] = new_path
                 media["mime"] = new_mime
+                media["checksum"] = ""
                 media["change"] = int(datetime.utcnow().timestamp())
                 await gramps.update_media(media["handle"], media)
+        if apply:
+            try:
+                if await gramps.store_checksum(media):
+                    vcols["checksum"] = "updated"
+            except Exception as exc:  # noqa BLE001
+                counts["errors"] += 1
+                yield SyncEvent(kind="item", entity="doc", action="failed",
+                                source_id=str(doc_id), gramps_id=gramps_id, title=title,
+                                detail=f"Gramps could not read the new version for its checksum: {exc}")
+                continue
 
         has_img_tag = img_tag_id and img_tag_id in doc.get("tags", [])
         if has_img_tag:
@@ -519,6 +537,19 @@ async def sync(
                 media["date"] = date_obj
                 media_dirty = True
             counts["dates_updated"] += 1
+
+        if not media.get("checksum"):
+            mcols["checksum"] = "missing"
+            if apply:
+                try:
+                    media["checksum"] = await gramps.media_md5(media["handle"])
+                    media_dirty = True
+                except Exception as exc:  # noqa BLE001
+                    counts["errors"] += 1
+                    del mcols["checksum"]
+                    yield SyncEvent(kind="item", entity="doc", action="failed",
+                                    source_id=str(doc_id), gramps_id=gramps_id, title=title,
+                                    detail=f"Gramps could not read the file for its checksum: {exc}")
 
         if media_dirty:
             try:

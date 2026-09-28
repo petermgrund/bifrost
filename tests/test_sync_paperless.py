@@ -4,6 +4,7 @@ import copy
 import pytest
 
 from bifrost.core import db
+from bifrost.core.clients.gramps import GrampsClient
 from bifrost.core.config import SyncPaperlessConfig
 from bifrost.modules import sync_paperless
 from bifrost.modules.sync_paperless import (
@@ -228,6 +229,14 @@ class TestMinting:
         async def get_media_by_gramps_id(self, gid):
             return self.media.get(gid)
 
+        async def update_media(self, handle, obj):
+            self.media[obj["gramps_id"]] = obj
+
+        async def media_md5(self, handle):
+            return f"md5-{handle}"
+
+        store_checksum = GrampsClient.store_checksum
+
         async def get_tag_handle(self, name):
             return None
 
@@ -278,6 +287,69 @@ class TestMinting:
         assert tuple(row) == ("immich", "a9")
 
 
+class TestChecksums:
+
+    @pytest.fixture
+    def conn(self, tmp_path):
+        c = db.connect(tmp_path / "c.db")
+        yield c
+        c.close()
+
+    def _sync(self, conn, gramps, docs, apply=True, versions_only=False):
+        cfg = SyncPaperlessConfig(sync_tags=("doc",), gramps_id_field_id=12, gramps_url_field_id=14)
+
+        async def collect():
+            return [e async for e in sync_paperless.sync(
+                TestMinting.Paperless(docs), gramps, conn, cfg, apply=apply, versions_only=versions_only)]
+        return asyncio.run(collect())
+
+    def _synced(self, conn, checksum, tracked):
+        gramps = TestMinting.Gramps()
+        gramps.media["DOC111"] = {"gramps_id": "DOC111", "handle": "h1", "desc": "Letter",
+                                  "path": "paperless/0000001.pdf", "mime": "application/pdf",
+                                  "checksum": checksum}
+        conn.execute("INSERT INTO doc_versions (paperless_id, checksum, gramps_id, updated_at) "
+                     "VALUES (1, ?, 'DOC111', 't')", (tracked,))
+        conn.commit()
+        return gramps, [{"id": 1, "title": "Letter", "tags": [1],
+                         "custom_fields": [{"field": 12, "value": "DOC111"}]}]
+
+    def test_created_media_carry_the_md5_of_their_file(self, conn):
+        gramps = TestMinting.Gramps()
+        self._sync(conn, gramps, [{"id": 1, "title": "New", "custom_fields": [], "tags": [1]}])
+        (media,) = gramps.media.values()
+        assert media["checksum"] == f"md5-{media['handle']}"
+
+    def test_a_new_version_at_the_same_path_refreshes_the_checksum(self, conn):
+        gramps, docs = self._synced(conn, "old-md5", tracked="old")
+        events = self._sync(conn, gramps, docs, versions_only=True)
+        updated = [e for e in events if e.kind == "item" and e.action == "updated"]
+        assert [e.data["cols"] for e in updated] == [{"version": "changed", "checksum": "updated"}]
+        assert gramps.media["DOC111"]["checksum"] == "md5-h1"
+
+    def test_an_unreadable_new_version_is_retried_on_the_next_run(self, conn):
+        class Unreadable(TestMinting.Gramps):
+            async def media_md5(self, handle):
+                raise RuntimeError("404 file not found")
+
+        gramps, docs = self._synced(conn, "old-md5", tracked="old")
+        flaky = Unreadable()
+        flaky.media = gramps.media
+        events = self._sync(conn, flaky, docs, versions_only=True)
+        assert [e.action for e in events if e.kind == "item"] == ["failed"]
+        assert conn.execute("SELECT checksum FROM doc_versions WHERE paperless_id=1").fetchone()[0] == "old"
+        events = self._sync(conn, gramps, docs, versions_only=True)
+        assert [e.data["cols"] for e in events if e.kind == "item"] == [{"version": "changed", "checksum": "updated"}]
+        assert conn.execute("SELECT checksum FROM doc_versions WHERE paperless_id=1").fetchone()[0] == "c"
+
+    def test_the_scan_fills_a_missing_checksum(self, conn):
+        gramps, docs = self._synced(conn, "", tracked="c")
+        preview = self._sync(conn, gramps, docs, apply=False)
+        assert [e.data["cols"] for e in preview if e.action == "would_update"] == [{"checksum": "missing"}]
+        self._sync(conn, gramps, docs)
+        assert gramps.media["DOC111"]["checksum"] == "md5-h1"
+
+
 class TestTranscriptionOfNewDoc:
 
     class Paperless:
@@ -315,6 +387,11 @@ class TestTranscriptionOfNewDoc:
 
         async def update_media(self, handle, obj):
             self.media[obj["gramps_id"]] = obj
+
+        async def media_md5(self, handle):
+            return f"md5-{handle}"
+
+        store_checksum = GrampsClient.store_checksum
 
         async def get_tag_handle(self, name):
             return None

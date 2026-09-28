@@ -584,6 +584,14 @@ async def sync_one_asset(
             kind="item", entity="media", action="created", source_id=asset_id,
             gramps_id=gid, title=title, detail=gramps_path,
         )
+        try:
+            await gramps.store_checksum(media_obj)
+        except Exception as exc:
+            counts["errors"] += 1
+            yield SyncEvent(
+                kind="item", entity="media", action="failed", source_id=asset_id,
+                gramps_id=gid, title=title,
+                detail=f"created, but Gramps could not read its file for the checksum: {str(exc)[:200]}")
 
     if not refreshed:
         tag_cols = id_tag_plan(asset, gid, cfg)
@@ -942,6 +950,8 @@ def update_plan(asset: dict, media: dict, cfg: SyncImmichConfig,
         gramps_path, _mime = gramps_file(asset, cfg, preview)
         if gramps_path != (media.get("path") or ""):
             cols["file"] = f"{media.get('path') or '(none)'} → {gramps_path}"
+    if not media.get("checksum"):
+        cols["checksum"] = "missing"
     aid = asset.get("id") or ""
     linked = next((a.get("value") for a in media.get("attribute_list") or []
                    if a.get("type") == "Immich ID"), None)
@@ -1079,13 +1089,24 @@ async def update_synced(
         return
 
     if pending and (selected is None or f"media:{asset_id}" in selected):
-        if cols:
+        landed = dict(cols)
+        if "checksum" in cols and "file" not in cols:
+            try:
+                media["checksum"] = await gramps.media_md5(media["handle"])
+            except Exception as exc:
+                counts["errors"] += 1
+                del landed["checksum"]
+                yield SyncEvent(kind="item", entity="media", action="failed",
+                                source_id=asset_id, gramps_id=gid, title=media.get("desc"),
+                                detail=f"Gramps could not read the file for its checksum: {str(exc)[:200]}")
+        if landed:
             if "title" in cols:
                 media["desc"] = wanted_update_title(asset)
             if "date" in cols:
                 media["date"] = wanted_date(asset)[0]
             if "file" in cols:
                 media["path"], media["mime"] = gramps_file(asset, cfg, preview)
+                media["checksum"] = ""
             if "link" in cols:
                 _set_attr(media, "Immich ID", asset_id)
                 if cfg.public_url:
@@ -1106,13 +1127,20 @@ async def update_synced(
                         "WHERE gramps_id=? AND source_system='immich'",
                         (asset_id, gid),
                     )
+                try:
+                    await gramps.store_checksum(media)
+                except Exception as exc:
+                    counts["errors"] += 1
+                    landed.pop("checksum", None)
+                    yield SyncEvent(kind="item", entity="media", action="failed",
+                                    source_id=asset_id, gramps_id=gid, title=media.get("desc"),
+                                    detail=f"Gramps could not read the new file for its checksum: {str(exc)[:200]}")
             elif "link" in cols:
                 counts["links_updated"] += 1
             if "title" in cols:
                 counts["titles_updated"] += 1
             if "date" in cols:
                 counts["dates_updated"] += 1
-        landed = dict(cols)
         if tag_cols:
             tag_error = await write_id_tag(accounts, asset, gid, cfg)
             if tag_error:

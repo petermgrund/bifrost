@@ -3,6 +3,7 @@ import asyncio
 import pytest
 
 from bifrost.core import db
+from bifrost.core.clients.gramps import GrampsClient, GrampsError
 from bifrost.core.clients.immich import ImmichError
 from bifrost.core.config import SyncImmichConfig
 from bifrost.modules import sync_immich
@@ -230,9 +231,22 @@ class FakeGramps:
         self.updated_people = []
         self.notes = {}
         self.updated_notes = []
+        self.checksums = {}
+        self.unreadable = set()
 
     async def get_media_by_gramps_id(self, gid):
-        return self.media.get(gid)
+        media = self.media.get(gid)
+        if media is not None:
+            media.setdefault("checksum", f"md5-{media.get('handle')}")
+        return media
+
+    async def media_md5(self, handle):
+        path = next((m.get("path") for m in self.media.values() if m.get("handle") == handle), None)
+        if path in self.unreadable:
+            raise GrampsError(f"GET /media/{handle}/file → 404: not found")
+        return self.checksums.get(handle, f"md5-{handle}")
+
+    store_checksum = GrampsClient.store_checksum
 
     async def get_place_by_gramps_id(self, gid):
         return next((p for p in self.places if p.get("gramps_id") == gid), None)
@@ -451,6 +465,56 @@ class TestSyncAssetsScan:
         updates = actions(events, "would_update")
         assert len(updates) == 1 and set(updates[0].data["cols"]) == {"title"}
 
+    def test_minted_media_carry_the_md5_of_their_file(self, conn):
+        im = FakeImmich(assets={"a1": asset("a1", "img1.jpg")}, tagged={"a1"})
+        gr = FakeGramps()
+        run_scan(im, gr, conn, apply=True)
+        media = gr.created[0]
+        assert media["checksum"] == f"md5-{media['handle']}"
+
+    def test_a_file_gramps_cannot_read_is_reported_at_mint(self, conn):
+        im = FakeImmich(assets={"a1": asset("a1", "img1.jpg")}, tagged={"a1"})
+        gr = FakeGramps()
+        gr.unreadable.add("immich/img1.jpg")
+        events = run_scan(im, gr, conn, apply=True)
+        failed = actions(events, "failed")
+        assert len(failed) == 1 and "could not read its file" in failed[0].detail
+        assert len(gr.created) == 1 and not gr.created[0].get("checksum")
+
+    def test_a_missing_checksum_is_filled_by_the_update_pass(self, conn):
+        self._mint(conn, "BBBBBB", "a1")
+        im = FakeImmich(assets={"a1": asset("a1", "img.jpg")}, tagged=set())
+        gr = FakeGramps({"BBBBBB": {"gramps_id": "BBBBBB", "handle": "h1", "desc": "t",
+                                    "path": "immich/img.jpg", "checksum": "",
+                                    "attribute_list": [{"type": "Immich ID", "value": "a1"}]}})
+        preview = run_scan(im, gr, conn)
+        assert [u.data["cols"] for u in actions(preview, "would_update")] == [{"checksum": "missing"}]
+        run_scan(im, gr, conn, apply=True)
+        assert len(gr.updated) == 1 and gr.updated[0]["checksum"] == "md5-h1"
+
+    def test_a_repointed_file_gets_a_fresh_checksum(self, conn):
+        self._mint(conn, "BBBBBB", "a1")
+        im = FakeImmich(assets={"a1": asset("a1", "new.jpg")}, tagged=set())
+        gr = FakeGramps({"BBBBBB": {"gramps_id": "BBBBBB", "handle": "h1", "desc": "t",
+                                    "path": "immich/old.jpg", "checksum": "old-md5",
+                                    "attribute_list": [{"type": "Immich ID", "value": "a1"}]}})
+        gr.checksums["h1"] = "new-md5"
+        run_scan(im, gr, conn, apply=True)
+        media = gr.media["BBBBBB"]
+        assert (media["path"], media["checksum"], len(gr.updated)) == ("immich/new.jpg", "new-md5", 2)
+
+    def test_an_unreadable_new_file_leaves_the_checksum_missing_for_the_next_scan(self, conn):
+        self._mint(conn, "BBBBBB", "a1")
+        im = FakeImmich(assets={"a1": asset("a1", "new.jpg")}, tagged=set())
+        gr = FakeGramps({"BBBBBB": {"gramps_id": "BBBBBB", "handle": "h1", "desc": "t",
+                                    "path": "immich/old.jpg", "checksum": "old-md5",
+                                    "attribute_list": [{"type": "Immich ID", "value": "a1"}]}})
+        gr.unreadable.add("immich/new.jpg")
+        events = run_scan(im, gr, conn, apply=True)
+        assert ["new file" in e.detail for e in actions(events, "failed")] == [True]
+        preview = run_scan(im, gr, conn)
+        assert [u.data["cols"] for u in actions(preview, "would_update")] == [{"checksum": "missing"}]
+
     def test_stale_immich_attrs_heal_without_a_file_move(self, conn):
         self._mint(conn, "BBBBBB", "a1")
         im = FakeImmich(assets={"a1": asset("a1", "img.jpg")}, tagged=set())
@@ -521,9 +585,9 @@ class TestSyncAssetsScan:
                                     "desc": "T", "path": "immich/old.jpg",
                                     "attribute_list": []}})
         events = run_scan(im, gr, conn, apply=True)
-        assert len(gr.updated) == 1
+        assert len(gr.updated) == 2
         media = gr.updated[0]
-        assert media["path"] == "immich/new.jpg"
+        assert media["path"] == "immich/new.jpg" and media["checksum"] == "md5-h1"
         assert media["desc"] == "T"
         attrs = {a["type"]: a["value"] for a in media["attribute_list"]}
         assert attrs["Immich ID"] == "new1"
@@ -605,7 +669,7 @@ class TestSyncAssetsScan:
         events = run_scan(im, gr, conn, apply=True)
         assert actions(events, "would_create") == []
         assert gr.created == []
-        assert len(gr.updated) == 1 and gr.updated[0]["path"] == "immich/new.jpg"
+        assert len(gr.updated) == 2 and gr.updated[0]["path"] == "immich/new.jpg"
         assert gr.updated[0]["desc"] == "T"
 
     def test_registered_asset_gone_from_immich_is_surfaced(self, conn):
@@ -997,33 +1061,38 @@ class TestUpdatePlan:
              "exifInfo": {"description": "Grandma, 1920",
                           "dateTimeOriginal": "1920-06-01T10:00:00Z"},
              "tags": [{"value": "Sync/Description"}, {"value": "Sync/Date"}]}
-        media = {"desc": "img_0001.jpg", "date": None}
+        media = {"desc": "img_0001.jpg", "date": None, "checksum": "c"}
         assert set(sync_immich.update_plan(a, media, self.MAPPED)) == {"title", "date"}
 
     def test_in_sync(self):
         a = {"exifInfo": {"description": "T",
                           "dateTimeOriginal": "1955-07-14T10:00:00Z"},
              "tags": [{"value": "Sync/Description"}, {"value": "Sync/Date"}]}
-        media = {"desc": "T", "date": {"dateval": [14, 7, 1955, False],
-                                       "modifier": 0, "quality": 0, "text": ""}}
+        media = {"desc": "T", "checksum": "c", "date": {"dateval": [14, 7, 1955, False],
+                                                        "modifier": 0, "quality": 0, "text": ""}}
         assert sync_immich.update_plan(a, media, self.MAPPED) == {}
 
     def test_never_clears_gramps_date(self):
-        media = {"desc": "t", "date": {"dateval": [1, 1, 1920, False],
-                                       "modifier": 0, "quality": 0, "text": ""}}
+        media = {"desc": "t", "checksum": "c", "date": {"dateval": [1, 1, 1920, False],
+                                                        "modifier": 0, "quality": 0, "text": ""}}
         assert sync_immich.update_plan({"tags": []}, media, self.MAPPED) == {}
 
     def test_repoints_changed_file(self):
         a = {"originalPath": "/usr/src/app/upload/upload/u1/new.jpg", "tags": []}
-        media = {"desc": "t", "path": "immich/u1/old.jpg"}
+        media = {"desc": "t", "path": "immich/u1/old.jpg", "checksum": "c"}
         cols = sync_immich.update_plan(a, media, self.MAPPED)
         assert set(cols) == {"file"}
         assert "immich/u1/new.jpg" in cols["file"]
 
     def test_same_file_no_repoint(self):
         a = {"originalPath": "/usr/src/app/upload/upload/u1/a.jpg", "tags": []}
-        media = {"desc": "t", "path": "immich/u1/a.jpg"}
+        media = {"desc": "t", "path": "immich/u1/a.jpg", "checksum": "c"}
         assert sync_immich.update_plan(a, media, self.MAPPED) == {}
+
+    def test_missing_checksum_is_a_column(self):
+        a = {"originalPath": "/usr/src/app/upload/upload/u1/a.jpg", "tags": []}
+        media = {"desc": "t", "path": "immich/u1/a.jpg", "checksum": ""}
+        assert sync_immich.update_plan(a, media, self.MAPPED) == {"checksum": "missing"}
 
     def test_unmapped_path_hard_fails(self):
         with pytest.raises(SyncError):

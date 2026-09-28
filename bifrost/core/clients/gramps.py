@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import re
 
@@ -177,6 +178,36 @@ class GrampsClient:
             json=media_obj, headers={"Content-Type": "application/json"},
         )
         return resp.json()
+
+    async def media_md5(self, handle: str) -> str:
+        """MD5 of the file Gramps serves for a media object, the value Gramps keeps as its checksum"""
+        for fresh in (False, True):
+            if fresh:
+                self._token = None
+            await self._ensure_token()
+            async with self._client.stream(
+                    "GET", f"{self._base}/media/{handle}/file",
+                    headers={"Authorization": f"Bearer {self._token}"},
+                    timeout=httpx.Timeout(30.0, read=300.0)) as resp:
+                if resp.status_code == 401 and not fresh:
+                    continue
+                if resp.status_code >= 400:
+                    body = (await resp.aread()).decode(errors="replace")[:300]
+                    raise GrampsError(f"GET /media/{handle}/file → {resp.status_code}: {body}")
+                digest = hashlib.md5(usedforsecurity=False)
+                async for chunk in resp.aiter_bytes():
+                    digest.update(chunk)
+                return digest.hexdigest()
+        raise GrampsError(f"GET /media/{handle}/file → 401")
+
+    async def store_checksum(self, media: dict) -> bool:
+        """Set a media object's checksum to the MD5 of its file; True when it changed"""
+        checksum = await self.media_md5(media["handle"])
+        if checksum == (media.get("checksum") or ""):
+            return False
+        media["checksum"] = checksum
+        await self.update_media(media["handle"], media)
+        return True
 
     async def update_place(self, handle: str, place_obj: dict) -> dict:
         resp = await self._request(

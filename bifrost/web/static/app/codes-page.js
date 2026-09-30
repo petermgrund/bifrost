@@ -52,8 +52,10 @@ const chip = (label, on, onClick) => html`<button class="chip ${on ? 'fill' : ''
   aria-pressed=${on ? 'true' : 'false'} @click=${onClick}>${label}</button>`;
 
 function blankForm(mode = 'mint') {
-  return { mode, code: '', note: '', notes: '', count: 1, reason: '', instance: '' };
+  return { mode, code: '', note: '', notes: '', count: 1, reason: '', instance: '', successor: '' };
 }
+
+const bare = (v) => v.replace(/[\s-]+/g, '').toUpperCase();
 
 const TYPES = { image: ['Image', 'Immich'], document: ['Document', 'Paperless'] };
 
@@ -211,7 +213,7 @@ class CodesPage extends BifrostElement {
 
   openEdit(r) {
     this.target = r;
-    this.form = { ...blankForm(), note: r.note || '', notes: r.notes || '' };
+    this.form = { ...blankForm(), note: r.note || '', notes: r.notes || '', successor: r.successor || '' };
     this.touched = false;
     this.formError = '';
     this.thumbGone = false;
@@ -343,9 +345,11 @@ class CodesPage extends BifrostElement {
     const r = this.target;
     const f = this.form;
     const out = {};
-    if (r.type) return out;
-    if (f.note !== (r.note || '')) out.note = f.note;
-    if (f.notes !== (r.notes || '')) out.notes = f.notes;
+    if (!r.type) {
+      if (f.note !== (r.note || '')) out.note = f.note;
+      if (f.notes !== (r.notes || '')) out.notes = f.notes;
+    }
+    if (r.status === 'withdrawn' && bare(f.successor) !== (r.successor || '')) out.successor = f.successor;
     return out;
   }
 
@@ -378,10 +382,40 @@ class CodesPage extends BifrostElement {
     this.saving = true;
     this.formError = '';
     try {
-      await post(`${API}/${encodeURIComponent(code)}/withdraw`, { reason: this.form.reason });
+      await post(`${API}/${encodeURIComponent(code)}/withdraw`,
+        { reason: this.form.reason, successor: this.form.successor });
       this.saving = false;
       this.closeDialog();
       this.say(`${code} withdrawn`);
+      this.load();
+    } catch (e) {
+      this.formError = why(e);
+    } finally {
+      this.saving = false;
+    }
+  }
+
+  openDelete(r) {
+    this.target = r;
+    this.formError = '';
+    this.dlg = 'delete';
+  }
+
+  openCode(code) {
+    const r = this.items.find((x) => x.code === code);
+    if (r) this.openEdit(r);
+  }
+
+  async submitDelete() {
+    const code = this.target.code;
+    if (this.saving) return;
+    this.saving = true;
+    this.formError = '';
+    try {
+      await api(`${API}/${encodeURIComponent(code)}`, { method: 'DELETE' });
+      this.saving = false;
+      this.closeDialog();
+      this.say(`${code} deleted`);
       this.load();
     } catch (e) {
       this.formError = why(e);
@@ -401,7 +435,8 @@ class CodesPage extends BifrostElement {
         @close=${() => { if (this.dlg) this.closeDialog(); }}>
         ${this.dlg === 'new' ? (this.minted ? this.renderMinted() : this.renderNewForm())
           : this.dlg === 'edit' ? this.renderEditForm()
-            : this.dlg === 'withdraw' ? this.renderWithdrawForm() : nothing}
+            : this.dlg === 'withdraw' ? this.renderWithdrawForm()
+              : this.dlg === 'delete' ? this.renderDeleteForm() : nothing}
       </dialog>
       <div class="snackbar ${this.toast ? 'active' : ''} ${this.toast?.failed ? 'error' : ''}"
         role="status" aria-live="polite">
@@ -479,7 +514,8 @@ class CodesPage extends BifrostElement {
       <td class="mono">${r.code}</td>
       <td>
         <span class="chip ${cls}">${label}</span>
-        ${r.attention ? html`<div class="small-text error-text">${r.attention}</div>` : nothing}
+        ${r.attention ? html`<i class="error-text" title=${r.attention} aria-label=${r.attention}>error</i>`
+          : nothing}
       </td>
       <td>${this.whatItIs(r)}</td>
       <td class="small-text" title=${minute(r.updated) || nothing}>${day(r.updated)}</td>
@@ -489,10 +525,24 @@ class CodesPage extends BifrostElement {
 
   whatItIs(r) {
     const main = r.title || r.note;
+    return main ? main : html`<span class="secondary-text">No description</span>`;
+  }
+
+  facts(r, type) {
+    const rows = [
+      type && ['Type', type],
+      type && ['Title', r.title || r.note || 'No title'],
+      r.withdrawn_reason && ['Withdrawn', r.withdrawn_reason],
+      r.predecessors.length && ['Replaces', r.predecessors.map((c, i) => html`${i ? ', ' : ''}<a
+        class="link mono" href="#" @click=${(e) => { e.preventDefault(); this.openCode(c); }}>${c}</a>`)],
+    ].filter(Boolean);
     return html`
-      ${main ? html`<div>${main}</div>` : html`<span class="secondary-text">No description</span>`}
-      ${r.withdrawn_reason
-        ? html`<div class="small-text secondary-text">Withdrawn: ${r.withdrawn_reason}</div>` : nothing}`;
+      ${rows.length ? html`<table>
+        <tbody>
+          ${rows.map(([k, v]) => html`<tr><td class="min secondary-text">${k}</td><td>${v}</td></tr>`)}
+        </tbody>
+      </table>` : nothing}
+      ${r.attention ? html`<p>${statusLine('error', r.attention)}</p>` : nothing}`;
   }
 
   instancesTable(r) {
@@ -642,14 +692,13 @@ class CodesPage extends BifrostElement {
       <div class="codes-head">
         <div class="max">
           <h5 id="codes-dialog-title">${type ? nothing : 'Edit '}<span class="mono">${r.code}</span></h5>
-          ${type ? html`<table>
-            <tbody>
-              <tr><td class="min secondary-text">Type</td><td>${type}</td></tr>
-              <tr><td class="min secondary-text">Title</td><td>${r.title || r.note || 'No title'}</td></tr>
-            </tbody>
-          </table>` : html`
+          ${this.facts(r, type)}
+          ${type ? nothing : html`
             ${this.noteField()}
             ${field('Notes', this.form.notes, (e) => this.setForm({ notes: e.target.value }), { rows: 3 })}`}
+          ${r.status === 'withdrawn' ? field('Successor', this.form.successor,
+            (e) => this.setForm({ successor: e.target.value }), { mono: true, upper: true, placeholder: ' ' })
+            : nothing}
         </div>
         ${r.gramps && !this.thumbGone ? html`<img class="codes-thumb" alt=""
           src="${API}/${encodeURIComponent(r.code)}/thumbnail"
@@ -659,10 +708,23 @@ class CodesPage extends BifrostElement {
       ${r.type === 'document' ? nothing : this.pencilingsTable(r)}
       ${this.history(r)}
       ${this.formError ? html`<p>${statusLine('error', this.formError)}</p>` : nothing}
-      <nav class="right-align">
-        ${type ? html`<button autofocus @click=${() => this.closeDialog()}>Close</button>` : html`
+      <nav>
+        ${r.deletable ? btn('Delete', this.saving, () => this.openDelete(r), 'border error-text') : nothing}
+        <div class="max"></div>
+        ${type && r.status !== 'withdrawn' ? html`<button autofocus @click=${() => this.closeDialog()}>Close</button>` : html`
           ${btn(dirty ? 'Cancel' : 'Close', this.saving, () => this.closeDialog(), 'border')}
           ${btn(this.saving ? 'Saving...' : 'Save', this.saving || !dirty, () => this.submitEdit())}`}
+      </nav>`;
+  }
+
+  renderDeleteForm() {
+    const r = this.target;
+    return html`
+      <h5 id="codes-dialog-title">Delete <span class="mono">${r.code}</span>?</h5>
+      ${this.formError ? html`<p>${statusLine('error', this.formError)}</p>` : nothing}
+      <nav class="right-align">
+        ${btn('Cancel', this.saving, () => this.openEdit(r), 'border')}
+        ${btn(this.saving ? 'Deleting...' : 'Delete', this.saving, () => this.submitDelete(), 'error')}
       </nav>`;
   }
 
@@ -676,6 +738,8 @@ class CodesPage extends BifrostElement {
         'This code is in use so no changes will affect Gramps, Paperless or Immich.')}</p>` : nothing}
       ${field('Reason', this.form.reason, (e) => this.setForm({ reason: e.target.value }),
         { placeholder: ' ', error: reasonError, onEnter: submit })}
+      ${field('Successor', this.form.successor, (e) => this.setForm({ successor: e.target.value }),
+        { mono: true, upper: true, placeholder: ' ', onEnter: submit })}
       ${this.formError ? html`<p>${statusLine('error', this.formError)}</p>` : nothing}
       <nav class="right-align">
         ${btn('Cancel', this.saving, () => this.closeDialog(), 'border')}

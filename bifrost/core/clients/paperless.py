@@ -157,6 +157,11 @@ class PaperlessClient:
         results = payload.get("results", []) if isinstance(payload, dict) else payload
         return results[0] if results else None
 
+    async def document_ids(self) -> set[int]:
+        """The id of every document"""
+        docs = await self._paginated("/api/documents/", params={"fields": "id", "page_size": 1000})
+        return {d["id"] for d in docs}
+
     async def list_documents(self, fields: str | None = None) -> list[dict]:
         """Every doc paginated"""
         params = {"fields": fields} if fields else None

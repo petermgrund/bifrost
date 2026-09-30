@@ -34,7 +34,7 @@ const SECTIONS = [
     body: html`<places-links-page></places-links-page>
       <div class="large-space"></div>
       <places-page></places-page>` },
-  { id: 'codes', title: 'Codes', desc: 'Manage GDA codes',
+  { id: 'codes', title: 'Codes', desc: 'Manage PID codes',
     body: html`<codes-page></codes-page>` },
 ];
 

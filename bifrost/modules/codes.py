@@ -1,19 +1,3 @@
-"""GDA codes: the Object ID ledger behind the Codes page
-
-A code (Object ID) has 6 characters from ids.CHARSET and is the archive's only
-citable identifier. It names an item (a photo with its back, a document, a
-saved file) or a group described as one (an album, a bundle of letters, a
-box's worth of loose prints). A code is never reused, changed or deleted:
-reserved_ids holds reservations, code_pencilings each time a code was penciled
-on its item (crossed_at = erased or written wrong), minted_media what sync
-created in Gramps, withdrawn_codes the retired ones, objects the description
-of any code, code_descriptions each change to it, code_notes its notes (moved
-to the photo's notes once an Immich asset takes the code) and code_instances
-the links and text naming other places it lives. Status is derived, never
-stored.
-Locations (B2.C3.F1, S1) are where a thing is kept, not codes.
-"""
-
 from __future__ import annotations
 
 import csv
@@ -39,11 +23,9 @@ ATTENTION = "attention"
 STATUSES = (RESERVED, PENCILED, IN_USE, WITHDRAWN)
 
 CSV_COLUMNS = (
-    "code", "status", "needs_attention", "type", "kind", "note", "title", "notes", "part_of",
-    "location",
-    "items_in_group", "in_gramps", "gramps_url", "paperless_docs", "paperless_urls",
-    "immich_assets", "immich_urls", "scans", "instances", "created", "penciled", "minted",
-    "withdrawn", "withdrawn_reason",
+    "code", "status", "needs_attention", "type", "note", "title", "in_gramps", "gramps_url",
+    "paperless_docs", "paperless_urls", "immich_assets", "immich_urls", "instances", "created",
+    "penciled", "minted", "withdrawn", "withdrawn_reason",
 )
 
 _LOCATION_RE = re.compile(
@@ -122,7 +104,11 @@ def _load(conn: sqlite3.Connection) -> dict:
         "notes": {},
         "instances": {},
         "pencilings": {},
+        "predecessors": {},
     }
+    for code, r in led["withdrawn"].items():
+        if r["successor"]:
+            led["predecessors"].setdefault(r["successor"], []).append(code)
     for r in conn.execute("SELECT * FROM code_descriptions ORDER BY changed_at, rowid"):
         led["descriptions"].setdefault(r["code"], []).append(r)
     for r in conn.execute("SELECT * FROM code_notes ORDER BY changed_at, rowid"):
@@ -245,8 +231,17 @@ def _instances(led: dict, code: str, row: dict) -> list[dict]:
     return out
 
 
+def _deletable(led: dict, code: str, live: set[str] | None) -> bool:
+    """Only reserved: never penciled, minted, scanned, withdrawn or in Gramps"""
+    res = led["reserved"].get(code)
+    return (res is not None and not res["minted_at"] and code not in led["minted"]
+            and code not in led["withdrawn"] and code not in led["scans"]
+            and code not in led["versions"] and not led["pencilings"].get(code)
+            and code not in (live or ()))
+
+
 def _row(led: dict, code: str, live: set[str] | None, urls: Urls,
-         titles: Mapping[str, str]) -> dict:
+         titles: Mapping[str, str], documents: set[str] | None) -> dict:
     res = led["reserved"].get(code)
     minted = led["minted"].get(code)
     obj = led["objects"].get(code)
@@ -256,16 +251,20 @@ def _row(led: dict, code: str, live: set[str] | None, urls: Urls,
     in_gramps = None if live is None else code in live
     history = _history(led, code)
 
-    attention = None
-    if status == IN_USE:
-        if not _in_ledger(led, code):
-            attention = "In Gramps, but not in bifrost's ledger"
-        elif in_gramps is False:
-            attention = "Minted, but its Gramps media is gone"
-
     paperless = [minted["source_id"]] if minted and minted["source_system"] == "paperless" else []
     paperless += [d for d in led["versions"].get(code, []) if d not in paperless]
+    deleted = [] if documents is None else [d for d in paperless if d not in documents]
+    paperless = [d for d in paperless if d not in deleted]
     immich = [minted["source_id"]] if minted and minted["source_system"] == "immich" else []
+
+    attention = None
+    if status == IN_USE:
+        missing = [name for name, gone in (("Gramps", in_gramps is False), ("Paperless", deleted))
+                   if gone]
+        if not _in_ledger(led, code):
+            attention = "In Gramps, but not in bifrost's ledger"
+        elif missing:
+            attention = f"Deleted from {' and '.join(missing)}"
 
     if obj is not None:
         kind, note = obj["kind"], obj["note"]
@@ -301,6 +300,9 @@ def _row(led: dict, code: str, live: set[str] | None, urls: Urls,
         "minted": (minted["minted_at"] if minted else None) or (res["minted_at"] if res else None),
         "withdrawn": gone["withdrawn_at"] if gone is not None else None,
         "withdrawn_reason": gone["reason"] if gone is not None else None,
+        "successor": gone["successor"] if gone is not None else None,
+        "predecessors": sorted(led["predecessors"].get(code, [])),
+        "deletable": _deletable(led, code, live),
         "updated": history[-1]["at"] if history else None,
         "history": history,
     }
@@ -310,9 +312,11 @@ def _row(led: dict, code: str, live: set[str] | None, urls: Urls,
 
 def rows(conn: sqlite3.Connection, live: set[str] | None, urls: Urls = Urls(),
          only: Iterable[str] | None = None,
-         titles: Mapping[str, str] | None = None) -> list[dict]:
+         titles: Mapping[str, str] | None = None,
+         documents: set[str] | None = None) -> list[dict]:
     """Every code, newest first. live=None means Gramps could not be read, so
-    'in use' rests on the ledger alone and missing media can't be flagged"""
+    'in use' rests on the ledger alone and missing media can't be flagged;
+    documents=None likewise for Paperless"""
     titles = titles or {}
     led = _load(conn)
     codes = set().union(*(led[k] for k in ("reserved", "minted", "objects", "withdrawn", "scans")))
@@ -320,7 +324,7 @@ def rows(conn: sqlite3.Connection, live: set[str] | None, urls: Urls = Urls(),
         codes |= {c for c in live if ids.MANUAL_ID_RE.match(c)}
     if only is not None:
         codes &= {normalize(c) for c in only}
-    out = [_row(led, c, live, urls, titles) for c in codes]
+    out = [_row(led, c, live, urls, titles, documents) for c in codes]
     # birth date (reserved or minted) newest first; codes with none, like the
     # retired 4-character ones, go last
     out.sort(key=lambda r: r["code"])
@@ -549,8 +553,23 @@ def cross_out_penciling(conn: sqlite3.Connection, raw: str | None, penciling_id:
     return code
 
 
-def withdraw(conn: sqlite3.Connection, raw: str | None, reason: str | None) -> str:
-    """Retire a code for good. Nothing is deleted; the code is never issued again"""
+def _successor(led: dict, code: str, raw: str | None) -> str | None:
+    """An existing code, other than this one and not withdrawn, that replaces it"""
+    successor = normalize(raw)
+    if not successor:
+        return None
+    if successor == code:
+        raise CodeError(400, f"{code} can't replace itself.")
+    if not _in_ledger(led, successor):
+        raise CodeError(400, f"Successor {successor} is not in the ledger.")
+    if successor in led["withdrawn"]:
+        raise CodeError(400, f"Successor {successor} is withdrawn.")
+    return successor
+
+
+def withdraw(conn: sqlite3.Connection, raw: str | None, reason: str | None,
+             successor: str | None = None) -> str:
+    """Retire a code for good, optionally naming the code that replaces it"""
     led = _load(conn)
     code = normalize(raw)
     text = " ".join((reason or "").split())
@@ -563,10 +582,29 @@ def withdraw(conn: sqlite3.Connection, raw: str | None, reason: str | None) -> s
         raise CodeError(409, f"{code} was already withdrawn on {gone['withdrawn_at'][:10]}: "
                              f"{gone['reason']}")
     _require_known(led, code)
+    replaced_by = _successor(led, code, successor)
     with conn:
         conn.execute(
-            "INSERT INTO withdrawn_codes (code, withdrawn_at, reason) VALUES (?, ?, ?)",
-            (code, _now(), text))
+            "INSERT INTO withdrawn_codes (code, withdrawn_at, reason, successor) VALUES (?, ?, ?, ?)",
+            (code, _now(), text, replaced_by))
+    return code
+
+
+def delete(conn: sqlite3.Connection, raw: str | None, live: Iterable[str] = (),
+           paperless: Mapping[str, list] | None = None) -> str:
+    """Remove a reservation nothing has used yet; the code may be issued again"""
+    led = _load(conn)
+    code = normalize(raw)
+    _require_known(led, code)
+    if not _deletable(led, code, set(live)) or code in (paperless or {}):
+        raise CodeError(409, f"{code} has been used, so it can only be withdrawn.")
+    if led["predecessors"].get(code):
+        raise CodeError(409, f"{code} replaces {', '.join(led['predecessors'][code])}.")
+    with conn:
+        conn.execute("DELETE FROM reserved_ids WHERE gramps_id=?", (code,))
+        for table, column in (("objects", "object_id"), ("code_descriptions", "code"),
+                              ("code_notes", "code"), ("code_instances", "code")):
+            conn.execute(f"DELETE FROM {table} WHERE {column}=?", (code,))
     return code
 
 
@@ -578,7 +616,8 @@ def _notes_text(raw: str | None) -> str:
 
 
 def update(conn: sqlite3.Connection, raw: str | None, changes: Mapping) -> str:
-    """Change a code's description (note, kind, part of, location) or notes; only given keys change"""
+    """Change a code's description (note, kind, part of, location), notes or successor;
+    only given keys change"""
     led = _load(conn)
     code = normalize(raw)
     _require_known(led, code)
@@ -606,6 +645,13 @@ def update(conn: sqlite3.Connection, raw: str | None, changes: Mapping) -> str:
         new["parent_id"] = _parent(led, changes["parent"], code)
     if "location" in changes:
         new["location"] = normalize_location(changes["location"])
+    successor, new_successor = None, False
+    if "successor" in changes:
+        withdrawn = led["withdrawn"].get(code)
+        if withdrawn is None:
+            raise CodeError(409, f"{code} is not withdrawn, so it has no successor.")
+        successor = _successor(led, code, changes["successor"])
+        new_successor = successor != withdrawn["successor"]
     notes = None
     if "notes" in changes:
         notes = _notes_text(changes["notes"])
@@ -614,10 +660,12 @@ def update(conn: sqlite3.Connection, raw: str | None, changes: Mapping) -> str:
             notes = None
         elif record:
             raise CodeError(409, f"{code} is in {record}, so its notes go there.")
-    if new == current and notes is None:
+    if new == current and notes is None and not new_successor:
         return code
     now = _now()
     with conn:
+        if new_successor:
+            conn.execute("UPDATE withdrawn_codes SET successor=? WHERE code=?", (successor, code))
         if new != current:
             conn.execute(
                 "INSERT INTO objects (object_id, kind, parent_id, location, note, updated_at) "
@@ -686,15 +734,14 @@ def to_csv(items: list[dict]) -> str:
     writer.writerow(CSV_COLUMNS)
     for r in items:
         writer.writerow([
-            r["code"], r["status"], r["attention"] or "", r["type"] or "", r["kind"],
-            r["note"] or "", r["title"] or "", r["notes"], r["parent"] or "", r["location"] or "",
-            r["children"] or "",
+            r["code"], r["status"], r["attention"] or "", r["type"] or "",
+            r["note"] or "", r["title"] or "",
             {True: "yes", False: "no", None: "unknown"}[r["gramps"]], r["gramps_url"] or "",
             " ".join(d["id"] for d in r["paperless"]),
             " ".join(d["url"] for d in r["paperless"] if d["url"]),
             " ".join(a["id"] for a in r["immich"]),
             " ".join(a["url"] for a in r["immich"] if a["url"]),
-            " ".join(r["scans"]), " | ".join(i["text"] for i in r["instances"] if i["id"]),
+            " | ".join(i["text"] for i in r["instances"] if i["id"]),
             r["created"] or "", " ".join(p["at"] for p in r["pencilings"] if not p["crossed"]),
             r["minted"] or "", r["withdrawn"] or "", r["withdrawn_reason"] or "",
         ])

@@ -86,6 +86,7 @@ app.mount("/static", _NoCacheStatic(directory=WEB_DIR / "static"), name="static"
 
 from .routes.ancestry import router as ancestry_router  # noqa: E402
 from .routes.citations import router as citations_router  # noqa: E402
+from .routes.codes import router as codes_router  # noqa: E402
 from .runs import ACTIVE  # noqa: E402
 from .routes.faces import router as faces_router  # noqa: E402
 from .routes.photos import router as photos_router  # noqa: E402
@@ -98,6 +99,7 @@ from .routes.transcribe import router as transcribe_router  # noqa: E402
 
 app.include_router(ancestry_router)
 app.include_router(citations_router)
+app.include_router(codes_router)
 app.include_router(faces_router)
 app.include_router(photos_router)
 app.include_router(places_router)

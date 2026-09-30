@@ -18,10 +18,12 @@ from .sync_paperless import format_gramps_date
 
 PAGE_SIZE = 24
 PRECISIONS = ("exact", "month", "year")
-MODIFIERS = ("regular", "about", "before", "after")
+MODIFIERS = ("regular", "about", "before", "after", "decade", "span")
+RANGES = ("decade", "span")
+SPAN_MAX = 999
 QUALITIES = ("regular", "estimated", "calculated")
 MODIFIER_TAGS = {"about": si.TAG_DATE_APPROXIMATE, "before": si.TAG_DATE_BEFORE,
-                 "after": si.TAG_DATE_AFTER}
+                 "after": si.TAG_DATE_AFTER, "decade": si.TAG_DATE_DECADE}
 QUALITY_TAGS = {"calculated": si.TAG_DATE_CALCULATED, "estimated": si.TAG_DATE_ESTIMATED}
 PRECISION_TAGS = {"year": si.TAG_DATE_YEAR, "month": si.TAG_DATE_MONTH}
 DATE_TAGS = set(MODIFIER_TAGS.values()) | set(QUALITY_TAGS.values()) | set(PRECISION_TAGS.values())
@@ -31,7 +33,7 @@ CANONICAL = {
     si.TAG_DATE_APPROXIMATE: "Date/Approximate", si.TAG_DATE_BEFORE: "Date/Before",
     si.TAG_DATE_AFTER: "Date/After", si.TAG_DATE_ESTIMATED: "Date/Estimated",
     si.TAG_DATE_CALCULATED: "Date/Calculated", si.TAG_DATE_YEAR: "Date/Year",
-    si.TAG_DATE_MONTH: "Date/Month",
+    si.TAG_DATE_MONTH: "Date/Month", si.TAG_DATE_DECADE: "Date/Decade",
 }
 _DATE_RE = re.compile(r"^\s*(\d{4})(?:-(\d{1,2})(?:-(\d{1,2}))?)?\s*$")
 
@@ -54,7 +56,9 @@ def parse_date_value(text: str) -> tuple[str, str] | None:
 
 
 def effective_precision(form: dict) -> str:
-    """About dates fall back to the month, as build_gramps_date does"""
+    """About dates fall back to the month, as build_gramps_date does; decades and spans are years"""
+    if form.get("modifier") in RANGES:
+        return "year"
     precision = form.get("precision") or "exact"
     if form.get("modifier") == "about" and precision == "exact":
         return "month"
@@ -63,6 +67,10 @@ def effective_precision(form: dict) -> str:
 
 def gramps_date(form: dict) -> dict:
     y, m, d = (int(x) for x in form["value"].split("-"))
+    quality = si._QUALITIES[form.get("quality") or "regular"]
+    if form.get("modifier") in RANGES:
+        span = (form.get("minus") or 0, form.get("plus") or 0)
+        return si.range_date(*si.year_range(form["modifier"], y, span), quality)
     precision = effective_precision(form)
     if precision == "year":
         d, m = 0, 0
@@ -70,7 +78,7 @@ def gramps_date(form: dict) -> dict:
         d = 0
     return {"_class": "Date", "dateval": [d, m, y, False],
             "modifier": si._MODIFIERS[form.get("modifier") or "regular"],
-            "quality": si._QUALITIES[form.get("quality") or "regular"], "text": ""}
+            "quality": quality, "text": ""}
 
 
 def date_display(form: dict | None) -> str:
@@ -84,7 +92,8 @@ def date_form(asset: dict) -> dict | None:
     if not dt_str:
         return None
     tags = si.tag_values(asset)
-    if si.TAG_SYNC_DATE not in tags and not tags & DATE_TAGS:
+    modifier, span = si.date_modifier(tags)
+    if si.TAG_SYNC_DATE not in tags and not tags & DATE_TAGS and not span:
         return None
     try:
         dt = datetime.fromisoformat(str(dt_str).replace("Z", "+00:00"))
@@ -93,9 +102,11 @@ def date_form(asset: dict) -> dict | None:
     form = {
         "value": dt.strftime("%Y-%m-%d"),
         "precision": next((p for p, t in PRECISION_TAGS.items() if t in tags), "exact"),
-        "modifier": next((m for m, t in MODIFIER_TAGS.items() if t in tags), "regular"),
+        "modifier": modifier,
         "quality": next((q for q, t in QUALITY_TAGS.items() if t in tags), "regular"),
     }
+    if span:
+        form["minus"], form["plus"] = span
     form["precision"] = effective_precision(form)
     form["display"] = date_display(form)
     return form
@@ -108,6 +119,8 @@ def date_tags(form: dict) -> set[str]:
         tag = table.get(form.get(key) or "")
         if tag:
             tags.add(tag)
+    if form.get("modifier") == "span":
+        tags.add(si.span_tag(form.get("minus") or 0, form.get("plus") or 0))
     return tags
 
 
@@ -133,6 +146,14 @@ def validate_form(form: dict) -> dict:
                              ("quality", QUALITIES)):
             if picked[key] not in allowed:
                 raise ValueError(f"bad {key} {picked[key]!r}")
+        if picked["modifier"] in RANGES:
+            picked["precision"] = "year"
+        if picked["modifier"] == "span":
+            for key in ("minus", "plus"):
+                value = d.get(key) or 0
+                if not isinstance(value, int) or not 0 <= value <= SPAN_MAX:
+                    raise ValueError(f"bad {key} {value!r}")
+                picked[key] = value
         out["date"] = {"value": parsed[0], **picked}
     return out
 
@@ -656,6 +677,32 @@ async def load(accounts: list[ImmichClient], conn: sqlite3.Connection, cfg: Sync
     }
 
 
+async def pending_changes(gramps: GrampsClient, accounts: list[ImmichClient],
+                          conn: sqlite3.Connection, cfg: SyncImmichConfig, asset_id: str) -> list[str]:
+    """What a sync would change in Gramps for a photo already there; [] when nothing"""
+    asset = await si._merged_one(accounts, asset_id)
+    client, _err = await si.owner_client(accounts, asset)
+    _versions, member_ids = await _stack_members(client, asset) if client else (None, [])
+    gid = registered_gid(conn, asset_id, member_ids)
+    if not gid:
+        return []
+    media = await gramps.get_media_by_gramps_id(gid)
+    if media is None:
+        return ["media"]
+    changes: set[str] = set()
+    async for ev in si.update_synced(gramps, accounts, conn, cfg, gid, asset, media, None,
+                                     False, None, si.new_counts()):
+        if ev.action == "would_update":
+            changes |= set((ev.data or {}).get("cols") or [ev.entity])
+    if client:
+        async for ev in si.link_asset_faces(gramps, client, asset, asset_id, media["handle"], gid,
+                                            si.person_links_map(conn), si.new_face_results(),
+                                            apply=False):
+            if ev.action in ("created", "updated"):
+                changes.add("faces")
+    return sorted(changes)
+
+
 async def save(accounts: list[ImmichClient], conn: sqlite3.Connection, cfg: SyncImmichConfig,
                asset_id: str, form: dict, link_on: bool,
                place_rows: dict[str, dict] | None = None) -> dict:
@@ -696,6 +743,7 @@ async def save(accounts: list[ImmichClient], conn: sqlite3.Connection, cfg: Sync
                                 cfg.sync_tag.lower(), cfg.note_sync_tag.lower()}
     if cfg.place_tag_prefix:
         managed |= {t for t in own if t.startswith(cfg.place_tag_prefix.lower() + "/")}
+    managed |= {t for t in own if si.is_span_tag(t)}
     add = {k: v for k, v in wanted.items() if k not in own}
     remove = (own & managed) - set(wanted)
 

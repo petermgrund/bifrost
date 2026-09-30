@@ -11,6 +11,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from ...core import settings as ui_settings
+from ...core.clients.gramps import GrampsError
 from ...core.clients.immich import ImmichError
 from ...modules import faces, photo_collections, photos, sync_immich
 from ...modules.sync_immich import SyncError
@@ -140,6 +141,8 @@ class DateBody(BaseModel):
     precision: str | None = None
     modifier: str | None = None
     quality: str | None = None
+    minus: int | None = None
+    plus: int | None = None
 
 
 class SyncBody(BaseModel):
@@ -173,13 +176,13 @@ async def save_photo(request: Request, asset_id: str, body: PhotoBody) -> dict:
         raise HTTPException(exc.status, exc.detail)
 
 
-async def _run_sync(request: Request, asset_id: str) -> dict:
+async def _run_sync(request: Request, asset_id: str, gramps_id: str | None = None) -> dict:
     st = _state(request)
     if not st.cfg.sync_immich.enabled:
         raise HTTPException(503, "the Immich sync is disabled in this instance (sync.immich.enabled)")
     accounts = _accounts_or_503(request)
     gen = sync_immich.sync_one_asset(st.gramps, accounts, st.conn, st.cfg.sync_immich,
-                                     asset_id, update=True)
+                                     asset_id, gramps_id=gramps_id, update=True)
     try:
         run_id, events = await record_run(st.conn, "photos.sync", gen)
     except SyncError as exc:
@@ -194,9 +197,28 @@ async def _run_sync(request: Request, asset_id: str) -> dict:
             "events": [e.__dict__ for e in events if e.kind == "item"], "photo": photo_rec}
 
 
+@router.get("/api/photo/{asset_id}/pending")
+async def pending(request: Request, asset_id: str) -> dict:
+    """What a sync would change in Gramps for a photo already there"""
+    st = _state(request)
+    try:
+        changes = await photos.pending_changes(st.gramps, _accounts_or_503(request), st.conn,
+                                               st.cfg.sync_immich, asset_id)
+    except SyncError as exc:
+        raise HTTPException(exc.status, exc.detail)
+    except (GrampsError, ImmichError) as exc:
+        raise HTTPException(502, str(exc)[:200])
+    return {"changes": changes}
+
+
+class SyncPhotoBody(BaseModel):
+    gramps_id: str | None = None
+
+
 @router.post("/api/photo/{asset_id}/sync")
-async def sync_photo(request: Request, asset_id: str) -> dict:
-    return await _run_sync(request, asset_id)
+async def sync_photo(request: Request, asset_id: str, body: SyncPhotoBody = SyncPhotoBody()) -> dict:
+    """Sync one photo; a new one can take a reserved or penciled code as its Gramps ID"""
+    return await _run_sync(request, asset_id, body.gramps_id)
 
 
 class VersionBody(BaseModel):

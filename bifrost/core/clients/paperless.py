@@ -98,6 +98,14 @@ class PaperlessClient:
                 return val
         return None
 
+    async def custom_field_values(self, field_id: int) -> dict[int, object]:
+        """{doc id: value} of one custom field, for every document that carries it"""
+        docs = await self._paginated("/api/documents/", params={
+            "custom_fields__id__all": field_id, "fields": "id,custom_fields",
+            "page_size": 100})
+        return {d["id"]: v for d in docs
+                if (v := self.custom_field_value(d, field_id)) is not None}
+
     async def patch_custom_fields(self, doc_id: int, custom_fields: list[dict]) -> None:
         await self._request(
             "PATCH", f"/api/documents/{doc_id}/",

@@ -8,6 +8,7 @@ import './faces-page.js';
 import './faces-backfill-page.js';
 import './places-page.js';
 import './ancestry-links-page.js';
+import './codes-page.js';
 
 const SECTIONS = [
   { id: 'sync', title: 'Sync',
@@ -20,7 +21,7 @@ const SECTIONS = [
       <div class="large-space"></div>
       <ancestry-links-page></ancestry-links-page>` },
   { id: 'photos', title: 'Photos', desc: 'Curate Immich photos for Gramps: titles, dates, places, people and notes',
-    body: html`<a class="button" href="/photos"><i>photo_library</i><span>Open Photos</span></a>` },
+    body: html`<a class="button" href="/photos"><span>Open Photos</span></a>` },
   { id: 'transcribe', title: 'Transcribe', desc: 'Manage OCR for Paperless docs',
     body: html`<transcribe-page></transcribe-page>` },
   { id: 'reprocess', title: 'Reprocess', desc: 'Rebuild a Paperless doc so all pages are the same width',
@@ -33,6 +34,8 @@ const SECTIONS = [
     body: html`<places-links-page></places-links-page>
       <div class="large-space"></div>
       <places-page></places-page>` },
+  { id: 'codes', title: 'Codes', desc: 'Manage GDA codes',
+    body: html`<codes-page></codes-page>` },
 ];
 
 class BifrostApp extends BifrostElement {

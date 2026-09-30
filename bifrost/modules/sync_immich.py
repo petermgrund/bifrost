@@ -14,6 +14,7 @@ from ..core.clients import GrampsClient, ImmichClient
 from ..core.clients.immich import ImmichError
 from ..core.config import SyncImmichConfig
 from ..core.events import SyncEvent
+from . import codes
 from .citations import next_sequential_id
 from .sync_paperless import build_note_obj, format_gramps_date
 
@@ -31,6 +32,9 @@ TAG_DATE_ESTIMATED = "date/estimated"
 TAG_DATE_CALCULATED = "date/calculated"
 TAG_DATE_YEAR = "date/year"
 TAG_DATE_MONTH = "date/month"
+TAG_DATE_DECADE = "date/decade"
+TAG_DATE_SPAN = "date/span"
+_SPAN_TAG_RE = re.compile(r"^date/span/-(\d{1,3})\+(\d{1,3})$")
 METADATA_KEY = "bifrost"
 NOTE_TYPE = "Media Note"
 _URL_LINE_RE = re.compile(r"^https?://\S+$")
@@ -43,22 +47,57 @@ def tag_values(asset: dict) -> set[str]:
     return {t["value"].lower() for t in asset.get("tags") or [] if t.get("value")}
 
 
-_TAG_CONFLICT_GROUPS = (
-    {TAG_DATE_APPROXIMATE, TAG_DATE_BEFORE, TAG_DATE_AFTER},
-    {TAG_DATE_ESTIMATED, TAG_DATE_CALCULATED},
-    {TAG_DATE_YEAR, TAG_DATE_MONTH},
-)
+def is_span_tag(tag: str) -> bool:
+    return bool(_SPAN_TAG_RE.match(tag))
+
+
+def span_tag(minus: int, plus: int) -> str:
+    """'date/span/-10+5' for ten years before the date and five after"""
+    return f"{TAG_DATE_SPAN}/-{minus}+{plus}"
+
+
+def _tag_group(tag: str) -> str | None:
+    if tag in (TAG_DATE_APPROXIMATE, TAG_DATE_BEFORE, TAG_DATE_AFTER, TAG_DATE_DECADE) \
+            or is_span_tag(tag):
+        return "modifier"
+    if tag in (TAG_DATE_ESTIMATED, TAG_DATE_CALCULATED):
+        return "quality"
+    if tag in (TAG_DATE_YEAR, TAG_DATE_MONTH):
+        return "precision"
+    return None
 
 
 def merge_tag_values(owner_tags: set[str], other_tags: set[str]) -> set[str]:
     """owner wins inside each date group"""
-    merged = set(owner_tags)
-    for tag in other_tags:
-        group = next((g for g in _TAG_CONFLICT_GROUPS if tag in g), None)
-        if group and owner_tags & group:
-            continue
-        merged.add(tag)
-    return merged
+    owned = {_tag_group(t) for t in owner_tags}
+    return set(owner_tags) | {t for t in other_tags
+                              if _tag_group(t) is None or _tag_group(t) not in owned}
+
+
+def date_modifier(tags: set[str]) -> tuple[str, tuple[int, int] | None]:
+    """The date type an asset's tags name, with a span's years before and after"""
+    for name, tag in (("about", TAG_DATE_APPROXIMATE), ("before", TAG_DATE_BEFORE),
+                      ("after", TAG_DATE_AFTER), ("decade", TAG_DATE_DECADE)):
+        if tag in tags:
+            return name, None
+    for tag in sorted(tags):
+        m = _SPAN_TAG_RE.match(tag)
+        if m:
+            return "span", (int(m.group(1)), int(m.group(2)))
+    return "regular", None
+
+
+def year_range(modifier: str, year: int, span: tuple[int, int] | None) -> tuple[int, int]:
+    """First and last year of a decade (1945 -> 1940, 1949) or a span around the year"""
+    if modifier == "decade":
+        return year - year % 10, year - year % 10 + 9
+    minus, plus = span or (0, 0)
+    return year - minus, year + plus
+
+
+def range_date(start: int, stop: int, quality: int) -> dict:
+    return {"_class": "Date", "dateval": [0, 0, start, False, 0, 0, stop, False],
+            "modifier": _MODIFIERS["range"], "quality": quality, "text": ""}
 
 
 def build_gramps_date(asset: dict) -> dict | None:
@@ -73,14 +112,7 @@ def build_gramps_date(asset: dict) -> dict | None:
         return None
 
     tags = tag_values(asset)
-    if TAG_DATE_APPROXIMATE in tags:
-        modifier = _MODIFIERS["about"]
-    elif TAG_DATE_BEFORE in tags:
-        modifier = _MODIFIERS["before"]
-    elif TAG_DATE_AFTER in tags:
-        modifier = _MODIFIERS["after"]
-    else:
-        modifier = _MODIFIERS["regular"]
+    name, span = date_modifier(tags)
 
     if TAG_DATE_CALCULATED in tags:
         quality = _QUALITIES["calculated"]
@@ -88,6 +120,10 @@ def build_gramps_date(asset: dict) -> dict | None:
         quality = _QUALITIES["estimated"]
     else:
         quality = _QUALITIES["regular"]
+
+    if name in ("decade", "span"):
+        return range_date(*year_range(name, dt.year, span), quality)
+    modifier = _MODIFIERS[name]
 
     if TAG_DATE_YEAR in tags:
         day, month = 0, 0
@@ -543,6 +579,8 @@ async def sync_one_asset(
             gid = gramps_id.strip().upper()
             if not ids.MANUAL_ID_RE.match(gid):
                 raise SyncError(400, f"invalid gramps_id {gramps_id!r} (6 chars, safe alphabet)")
+            if why := ids.guard_reason(gid):
+                raise SyncError(400, f"gramps_id {gid} {why}, so it is never issued")
             if gid in live_ids:
                 raise SyncError(400, f"gramps_id {gid} already exists in Gramps")
             if gid in ids.all_ids_ever_seen(conn, open_reservations=False):
@@ -579,6 +617,8 @@ async def sync_one_asset(
                 ids.register_minted(conn, gid, "immich", asset_id, title, _now())
             except ids.IdReused as exc:
                 raise SyncError(409, f"media {gid} created in Gramps but not registered: {exc}")
+        if gramps_id:
+            bring_code_notes(conn, asset_id, gid)
         created = True
         yield SyncEvent(
             kind="item", entity="media", action="created", source_id=asset_id,
@@ -822,6 +862,21 @@ async def write_link_record(
     except ImmichError as exc:
         return f"link record write failed: {exc.message}"
     return None
+
+
+def bring_code_notes(conn: sqlite3.Connection, asset_id: str, gramps_id: str) -> None:
+    """Add the notes written for a reserved code to the notes of the photo that takes it"""
+    text = codes.notes_of(conn, gramps_id)
+    row = note_for(conn, asset_id, gramps_id)
+    current = (row["text"] if row else "").strip()
+    if not text or text in current:
+        return
+    with conn:
+        conn.execute(
+            "INSERT INTO photo_notes (asset_id, gramps_id, text, updated_at) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(asset_id) DO UPDATE SET text=excluded.text, "
+            "gramps_id=excluded.gramps_id, updated_at=excluded.updated_at",
+            (asset_id, gramps_id, f"{current}\n\n{text}" if current else text, _now()))
 
 
 def note_for(conn: sqlite3.Connection, asset_id: str, gramps_id: str | None) -> sqlite3.Row | None:

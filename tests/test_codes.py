@@ -76,7 +76,7 @@ def test_objects_kind_is_item_or_group(conn):
 
 
 def test_withdrawn_table_is_the_authority(conn):
-    conn.execute("INSERT INTO withdrawn_codes VALUES ('WDRN22', 't', 'test')")
+    conn.execute("INSERT INTO withdrawn_codes (code, withdrawn_at, reason) VALUES ('WDRN22', 't', 'test')")
     assert "WDRN22" in ids.all_ids_ever_seen(conn)
     assert ids.LEGACY_IDS <= ids.all_ids_ever_seen(conn)
     # the constant is only the seed: the table decides
@@ -111,7 +111,7 @@ def test_open_reservation_with_a_scan_stays_claimable(conn):
     conn.execute("INSERT INTO reserved_ids (gramps_id, created_at) VALUES ('PHKN3D', 't')")
     conn.execute("INSERT INTO scan_register (scan_no, object_id) VALUES ('a000278', 'PHKN3D')")
     conn.execute("INSERT INTO objects (object_id) VALUES ('RSVD22')")
-    conn.execute("INSERT INTO withdrawn_codes VALUES ('PENCHD', 't', 'mistake')")
+    conn.execute("INSERT INTO withdrawn_codes (code, withdrawn_at, reason) VALUES ('PENCHD', 't', 'mistake')")
     claimable = ids.all_ids_ever_seen(conn, open_reservations=False)
     assert {"PHKN3D", "RSVD22"} & claimable == set()
     assert {"PENCHD", "SCAN22", GONE} <= claimable
@@ -121,7 +121,7 @@ def test_open_reservation_with_a_scan_stays_claimable(conn):
 # ---- minting
 
 def test_mint_never_returns_a_used_withdrawn_or_guarded_code(conn, script_ids):
-    conn.execute("INSERT INTO withdrawn_codes VALUES ('WDRN22', 't', 'test')")
+    conn.execute("INSERT INTO withdrawn_codes (code, withdrawn_at, reason) VALUES ('WDRN22', 't', 'test')")
     conn.execute("INSERT INTO objects (object_id) VALUES ('DESC22')")
     script_ids(GONE, MNTD22, "RSVD22", "PENCHD", "SCAN22", "WDRN22", "DESC22", "GRMP22",
                "PPR222", "222222", "B2C3F4", "README", "FRESH2", "FRESH3")
@@ -219,7 +219,7 @@ def test_status_derivation(conn):
     assert rows[MNTD22]["status"] == "in use" and rows[MNTD22]["attention"] is None
     assert rows["MARKED"]["status"] == "in use"
     assert rows[GONE]["status"] == "in use"
-    assert rows[GONE]["attention"] == "Minted, but its Gramps media is gone"
+    assert rows[GONE]["attention"] == "Deleted from Gramps"
     assert rows["GRMP22"]["status"] == "in use" and "not in bifrost's ledger" in rows["GRMP22"]["attention"]
     assert "O0001" not in rows  # a Gramps default id is not a code
     assert rows["JYMZ"]["status"] == "withdrawn"
@@ -227,6 +227,25 @@ def test_status_derivation(conn):
     assert rows[MNTD22]["immich"] == [{"id": "asset-1", "url": "https://img.example/photos/asset-1"}]
     assert [d["id"] for d in rows[GONE]["paperless"]] == ["101", "99"]
     assert rows[GONE]["gramps_url"] is None
+
+
+def test_deleted_paperless_documents_drop_out(conn):
+    def row(live, documents):
+        return {r["code"]: r for r in codes.rows(conn, live, URLS, documents=documents)}[GONE]
+    assert [d["id"] for d in row({MNTD22}, {"99"})["paperless"]] == ["99"]
+    assert row({MNTD22}, {"99"})["attention"] == "Deleted from Gramps and Paperless"
+    assert row({MNTD22, GONE}, {"99"})["attention"] == "Deleted from Paperless"
+    assert row({MNTD22, GONE}, {"99", "101"})["attention"] is None
+    gone = row({MNTD22, GONE}, set())
+    assert gone["paperless"] == [] and [i["where"] for i in gone["instances"]] == ["Gramps"]
+    assert row({MNTD22}, None)["attention"] == "Deleted from Gramps"
+
+
+def test_a_withdrawn_code_does_not_link_its_deleted_document(conn):
+    codes.withdraw(conn, GONE, "deleted in gramps and paperless")
+    row = {r["code"]: r for r in codes.rows(conn, {MNTD22}, URLS, documents=set())}[GONE]
+    assert (row["status"], row["attention"], row["instances"]) == ("withdrawn", None, [])
+    assert row["withdrawn_reason"] == "deleted in gramps and paperless"
 
 
 def test_unknown_gramps_leaves_the_ledger_status(conn):
@@ -592,14 +611,20 @@ class CodesGramps:
 
 
 class CodesPaperless:
-    def __init__(self, values=None, down=False):
+    def __init__(self, values=None, down=False, docs=(7, 99, 101)):
         self.values, self.down = values or {7: "PPR222", 8: "  "}, down
+        self.docs = set(docs)
 
     async def custom_field_values(self, field_id):
         assert field_id == 12
         if self.down:
             raise PaperlessError("GET /api/documents/ → 503: unavailable")
         return dict(self.values)
+
+    async def document_ids(self):
+        if self.down:
+            raise PaperlessError("GET /api/documents/ → 503: unavailable")
+        return set(self.docs)
 
 
 def make_app(conn, gramps=None, paperless=None):
@@ -634,6 +659,15 @@ def test_api_list_filters(conn):
     got = call(app, "GET", "/codes/api/list", params={"status": "in use", "q": "mario"}).json()
     assert [r["code"] for r in got["items"]] == [MNTD22] and got["counts"]["all"] == 1
     assert call(app, "GET", "/codes/api/list", params={"status": "lost"}).status_code == 400
+
+
+def test_api_list_checks_paperless_documents(conn):
+    body = call(make_app(conn, paperless=CodesPaperless(docs=(99,))), "GET", "/codes/api/list").json()
+    row = {r["code"]: r for r in body["items"]}[GONE]
+    assert [d["id"] for d in row["paperless"]] == ["99"]
+    assert row["attention"] == "Deleted from Gramps and Paperless"
+    body = call(make_app(conn, paperless=CodesPaperless(down=True)), "GET", "/codes/api/list").json()
+    assert [d["id"] for d in {r["code"]: r for r in body["items"]}[GONE]["paperless"]] == ["101", "99"]
 
 
 def test_api_list_answers_without_gramps(conn):
@@ -889,3 +923,89 @@ def test_migration_19_moves_the_description_log(tmp_path):
         ("EDIT22", "2026-09-02T10:00:00", "Second words")]
     assert conn.execute("SELECT COUNT(*) FROM code_notes").fetchone()[0] == 0
     conn.close()
+
+
+# ---- successors and deleting unused reservations
+
+def test_a_withdrawn_code_names_its_successor(conn):
+    codes.withdraw(conn, "rsvd22", "penciled on the wrong print", successor="pen-chd")
+    rows = by_code(conn)
+    assert rows["RSVD22"]["successor"] == "PENCHD" and rows["PENCHD"]["predecessors"] == ["RSVD22"]
+    codes.update(conn, "RSVD22", {"successor": MNTD22})
+    rows = by_code(conn)
+    assert rows["RSVD22"]["successor"] == MNTD22
+    assert rows["PENCHD"]["predecessors"] == [] and rows[MNTD22]["predecessors"] == ["RSVD22"]
+    codes.update(conn, "RSVD22", {"successor": ""})
+    assert by_code(conn)["RSVD22"]["successor"] is None
+
+
+@pytest.mark.parametrize("successor,msg", [
+    ("RSVD22", "can't replace itself"), ("NOPE22", "not in the ledger"), ("JYMZ", "is withdrawn")])
+def test_successor_refusals(conn, successor, msg):
+    with pytest.raises(codes.CodeError, match=msg) as exc:
+        codes.withdraw(conn, "RSVD22", "wrong print", successor=successor)
+    assert exc.value.status == 400
+    assert by_code(conn)["RSVD22"]["status"] == "reserved"
+
+
+def test_only_withdrawn_codes_have_successors(conn):
+    with pytest.raises(codes.CodeError, match="not withdrawn") as exc:
+        codes.update(conn, "RSVD22", {"successor": "PENCHD"})
+    assert exc.value.status == 409
+
+
+def test_deleting_an_unused_reservation(conn, script_ids):
+    codes.update(conn, "RSVD22", {"note": "Loose print", "notes": "Box 3"})
+    codes.add_instance(conn, "RSVD22", "https://example.org/x")
+    assert by_code(conn)["RSVD22"]["deletable"] is True
+    assert codes.delete(conn, "rsvd22", live={MNTD22}, paperless={}) == "RSVD22"
+    assert "RSVD22" not in by_code(conn)
+    for table, column in (("reserved_ids", "gramps_id"), ("objects", "object_id"),
+                          ("code_descriptions", "code"), ("code_notes", "code"),
+                          ("code_instances", "code")):
+        assert conn.execute(f"SELECT COUNT(*) FROM {table} WHERE {column}='RSVD22'").fetchone()[0] == 0
+    script_ids("RSVD22")
+    assert codes.mint(conn, kind="item", note=None) == ["RSVD22"]
+
+
+def test_used_codes_are_not_deletable(conn):
+    codes.mark_penciled(conn, "RSVD22")
+    first = by_code(conn)["RSVD22"]["pencilings"][0]["id"]
+    codes.cross_out_penciling(conn, "RSVD22", first)
+    rows = by_code(conn, live={MNTD22, "GRMP22"})
+    assert [c for c, r in rows.items() if r["deletable"]] == []
+    for code in ("RSVD22", "PENCHD", MNTD22, GONE, "JYMZ", "SCAN22"):
+        with pytest.raises(codes.CodeError) as exc:
+            codes.delete(conn, code, live={MNTD22}, paperless={})
+        assert exc.value.status == 409
+    with pytest.raises(codes.CodeError) as exc:
+        codes.delete(conn, "NOPE22")
+    assert exc.value.status == 404
+
+
+def test_deleting_refuses_codes_held_elsewhere(conn):
+    conn.execute("INSERT INTO reserved_ids (gramps_id, created_at) VALUES ('FREE22', 't')")
+    for live, paperless in (({"FREE22"}, {}), (set(), {"FREE22": [7]})):
+        with pytest.raises(codes.CodeError, match="can only be withdrawn"):
+            codes.delete(conn, "FREE22", live=live, paperless=paperless)
+    codes.withdraw(conn, "PENCHD", "wrong print", successor="FREE22")
+    with pytest.raises(codes.CodeError, match="replaces PENCHD"):
+        codes.delete(conn, "FREE22", live=set(), paperless={})
+
+
+def test_api_delete_and_successor(conn):
+    app = make_app(conn)
+    r = call(app, "POST", "/codes/api/PENCHD/withdraw", json={"reason": "wrong print", "successor": "mntd22"})
+    assert r.status_code == 200 and r.json()["item"]["successor"] == MNTD22
+    r = call(app, "PATCH", "/codes/api/PENCHD", json={"successor": ""})
+    assert r.status_code == 200 and r.json()["item"]["successor"] is None
+    assert call(app, "DELETE", "/codes/api/RSVD22").json() == {"deleted": "RSVD22"}
+    assert call(app, "DELETE", f"/codes/api/{MNTD22}").status_code == 409
+    down = make_app(conn, gramps=CodesGramps(down=True))
+    assert call(down, "DELETE", "/codes/api/SCAN22").status_code == 503
+
+
+def test_csv_leaves_out_groups_locations_scans_and_notes(conn):
+    header = next(csv.reader(io.StringIO(codes.to_csv(codes.rows(conn, {MNTD22}, URLS))[1:])))
+    assert not {"kind", "part_of", "location", "items_in_group", "notes", "scans"} & set(header)
+    assert {"note", "title", "instances", "created"} <= set(header)

@@ -264,6 +264,10 @@ MIGRATIONS: list[str] = [
     );
     CREATE INDEX code_notes_code ON code_notes (code, changed_at);
     """,
+    # 20 GDA codes: the code that replaces a withdrawn one
+    """
+    ALTER TABLE withdrawn_codes ADD COLUMN successor TEXT;
+    """,
 ]
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import date
 
@@ -35,6 +36,15 @@ async def _live(st) -> tuple[dict[str, str] | None, str | None]:
     except Exception as exc:  # noqa: BLE001
         log.warning("codes: Gramps media ids unavailable: %s", exc)
         return None, str(exc)[:200]
+
+
+async def _documents(st) -> set[str] | None:
+    """Every Paperless document id, or None when Paperless can't be read"""
+    try:
+        return {str(i) for i in await st.paperless.document_ids()}
+    except Exception as exc:  # noqa: BLE001
+        log.warning("codes: Paperless document ids unavailable: %s", exc)
+        return None
 
 
 async def _taken(st) -> tuple[set[str], dict[str, list[int]]]:
@@ -82,9 +92,10 @@ async def list_codes(request: Request, status: str = "", q: str = "") -> dict:
         wanted = codes.status_filter(status)
     except ValueError as exc:
         raise HTTPException(400, str(exc))
-    titles, gramps_error = await _live(st)
+    (titles, gramps_error), documents = await asyncio.gather(_live(st), _documents(st))
     live = None if titles is None else set(titles)
-    items = codes.search(codes.rows(st.conn, live, _urls(st.cfg), titles=titles), q)
+    items = codes.search(codes.rows(st.conn, live, _urls(st.cfg), titles=titles,
+                                    documents=documents), q)
     return {
         "gramps": "unknown" if live is None else "ok",
         "gramps_error": gramps_error,
@@ -157,9 +168,10 @@ async def open_codes(request: Request) -> dict:
 @router.get("/api/export.csv")
 async def export_csv(request: Request) -> Response:
     st = _state(request)
-    titles, _error = await _live(st)
+    (titles, _error), documents = await asyncio.gather(_live(st), _documents(st))
     live = None if titles is None else set(titles)
-    body = codes.to_csv(codes.rows(st.conn, live, _urls(st.cfg), titles=titles))
+    body = codes.to_csv(codes.rows(st.conn, live, _urls(st.cfg), titles=titles,
+                                   documents=documents))
     name = f"gda-codes-{date.today().isoformat()}.csv"
     return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
                     headers={"Content-Disposition": f'attachment; filename="{name}"'})
@@ -187,13 +199,14 @@ async def cross_out(request: Request, code: str, penciling_id: int) -> dict:
 
 class WithdrawBody(BaseModel):
     reason: str = ""
+    successor: str | None = None
 
 
 @router.post("/api/{code}/withdraw")
 async def withdraw(request: Request, code: str, body: WithdrawBody) -> dict:
     st = _state(request)
     try:
-        code = codes.withdraw(st.conn, code, body.reason)
+        code = codes.withdraw(st.conn, code, body.reason, body.successor)
     except codes.CodeError as exc:
         raise _refuse(exc)
     return {"item": _item(st, code)}
@@ -202,6 +215,7 @@ async def withdraw(request: Request, code: str, body: WithdrawBody) -> dict:
 class PatchBody(BaseModel):
     note: str | None = None
     notes: str | None = None
+    successor: str | None = None
     kind: str | None = None
     parent: str | None = None
     location: str | None = None
@@ -215,6 +229,18 @@ async def patch(request: Request, code: str, body: PatchBody) -> dict:
     except codes.CodeError as exc:
         raise _refuse(exc)
     return {"item": _item(st, code)}
+
+
+@router.delete("/api/{code}")
+async def delete(request: Request, code: str) -> dict:
+    """Remove a reservation nothing has used yet"""
+    st = _state(request)
+    try:
+        live, paperless = await _taken(st)
+        code = codes.delete(st.conn, code, live, paperless)
+    except codes.CodeError as exc:
+        raise _refuse(exc)
+    return {"deleted": code}
 
 
 class InstanceBody(BaseModel):

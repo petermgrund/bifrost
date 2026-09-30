@@ -293,6 +293,26 @@ dialog.style-table-dialog table input:focus-visible {
 dialog.style-link-dialog {
   inline-size: min(34rem, 94vw);
 }
+table.codes-table { table-layout: fixed; inline-size: 100%; min-inline-size: 45rem; }
+table.codes-table col.col-code { inline-size: 6.5rem; }
+table.codes-table col.col-status { inline-size: 9rem; }
+table.codes-table col.col-updated { inline-size: 7.5rem; }
+table.codes-table col.col-actions { inline-size: 7.5rem; }
+table.codes-table td { overflow-wrap: anywhere; }
+.codes-actions { display: grid; grid-template-columns: repeat(3, 2rem); }
+dialog.codes-dialog {
+  inline-size: min(40rem, 94vw);
+}
+dialog.codes-dialog table td { block-size: auto; padding-block: 0.25rem; }
+dialog.codes-dialog td.codes-wrap { overflow-wrap: anywhere; }
+.codes-head { display: flex; gap: 1rem; align-items: flex-start; }
+.codes-head > .max { flex: 1; min-inline-size: 0; }
+.codes-thumb {
+  flex: none;
+  max-inline-size: 7rem;
+  max-block-size: 7rem;
+  border-radius: 0.5rem;
+}
 .style-preview {
   block-size: 75vh;
   max-block-size: none;

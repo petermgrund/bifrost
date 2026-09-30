@@ -99,15 +99,21 @@ def format_gramps_date(date_obj: dict | None) -> str:
     day, month, year = dv[0], dv[1], dv[2]
     if year == 0 and month == 0 and day == 0:
         return "(none)"
-    if day == 0 and month == 0:
-        date_str = f"{year}"
-    elif day == 0:
-        date_str = f"{year}-{month:02d}"
-    else:
-        date_str = f"{year}-{month:02d}-{day:02d}"
-    mod = {1: "Before ", 2: "After ", 3: "About "}.get(date_obj.get("modifier", 0), "")
     qual = {1: "Est. ", 2: "Calc. "}.get(date_obj.get("quality", 0), "")
-    return f"{qual}{mod}{date_str}"
+    modifier = date_obj.get("modifier", 0)
+    if modifier in (4, 5) and len(dv) >= 7:
+        first, last = _ymd(day, month, year), _ymd(dv[4], dv[5], dv[6])
+        return f"{qual}Between {first} and {last}" if modifier == 4 else f"{qual}From {first} to {last}"
+    mod = {1: "Before ", 2: "After ", 3: "About "}.get(modifier, "")
+    return f"{qual}{mod}{_ymd(day, month, year)}"
+
+
+def _ymd(day: int, month: int, year: int) -> str:
+    if day == 0 and month == 0:
+        return f"{year}"
+    if day == 0:
+        return f"{year}-{month:02d}"
+    return f"{year}-{month:02d}-{day:02d}"
 
 
 def content_hash(content: str) -> str:

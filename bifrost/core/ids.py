@@ -9,18 +9,36 @@ CHARSET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 
 MANUAL_ID_RE = re.compile(rf"^[{CHARSET}]{{6}}$")
 
-# pre-scheme 4-char codes (archivesspace/registry/ids.txt), closed list
+# pre-scheme 4-char codes (archivesspace/registry/ids.txt), closed list. Migration 15
+# seeds withdrawn_codes with them; from then on that table is the authority
 LEGACY_IDS = frozenset({"C8T5", "J82D", "JYMZ", "6H2P", "G8NQ"})
+
+# an undotted location mark (B2C3F4 = box 2, compartment 3, folder 1; S1 = shelf 1).
+# Anchored: real ids that merely start with B or S and a digit, like B36Z55, pass
+LOCATION_SHAPE_RE = re.compile(r"^[BS][1-9][0-9]*(C[1-9][0-9]*)?(F[1-9][0-9]*)?$")
+STOP_WORDS = frozenset({"README", "SCHEME"})
 
 
 class IdReused(sqlite3.IntegrityError):
     """A minted id is already in the register"""
 
 
+def guard_reason(code: str) -> str | None:
+    """Why an otherwise well-formed id must never be issued, or None"""
+    if re.fullmatch(r"[0-9]+", code):
+        return "is all digits, like a Paperless document number"
+    if LOCATION_SHAPE_RE.match(code):
+        dotted = re.sub(r"(?<=[0-9])(?=[CF])", ".", code)
+        return f"looks like the location mark {dotted}"
+    if code in STOP_WORDS:
+        return "is a reserved word"
+    return None
+
+
 def generate_gramps_id(existing: set[str], length: int = 6) -> str:
     for _ in range(1000):
         candidate = "".join(secrets.choice(CHARSET) for _ in range(length))
-        if candidate not in existing:
+        if candidate not in existing and not guard_reason(candidate):
             existing.add(candidate)
             return candidate
     raise RuntimeError("Failed to generate gramps_id")
@@ -41,18 +59,25 @@ def all_ids_ever_seen(
 
     live Gramps media ids, every reservation in any state, every register row
     (also when its media is gone from Gramps), scan-register object ids,
-    Paperless gramps_id field values and the legacy codes.
-    open_reservations=False leaves out reservations not minted yet, so a
+    described objects, Paperless gramps_id field values and withdrawn codes.
+    open_reservations=False leaves out reservations not minted (or withdrawn)
+    yet, even when a scan or a description already points at them, so a
     manual id can claim its own reservation
     """
     queries = (
         "SELECT gramps_id FROM minted_media",
         "SELECT object_id FROM scan_register WHERE object_id IS NOT NULL",
-        "SELECT gramps_id FROM reserved_ids"
-        + ("" if open_reservations else " WHERE minted_at IS NOT NULL"),
+        "SELECT gramps_id FROM reserved_ids",
+        "SELECT object_id FROM objects",
+        "SELECT code FROM withdrawn_codes",
     )
-    stored = (r[0] for q in queries for r in conn.execute(q))
-    return {str(v).strip().upper() for v in (*LEGACY_IDS, *stored, *live, *paperless)
+    stored = {r[0] for q in queries for r in conn.execute(q)}
+    if not open_reservations:
+        stored -= {r[0] for r in conn.execute(
+            "SELECT gramps_id FROM reserved_ids WHERE minted_at IS NULL "
+            "AND gramps_id NOT IN (SELECT gramps_id FROM minted_media) "
+            "AND gramps_id NOT IN (SELECT code FROM withdrawn_codes)")}
+    return {str(v).strip().upper() for v in (*stored, *live, *paperless)
             if v and str(v).strip()}
 
 

@@ -188,6 +188,82 @@ MIGRATIONS: list[str] = [
         WHERE r.collection_id = collection_items.collection_id AND r.asset_id = collection_items.asset_id);
     DROP TABLE slot_ranks;
     """,
+    # 15 Permanent codes
+    """
+    CREATE TABLE objects (
+        object_id  TEXT PRIMARY KEY,
+        kind       TEXT NOT NULL DEFAULT 'item' CHECK (kind IN ('item','group')),
+        parent_id  TEXT,
+        location   TEXT,
+        note       TEXT,
+        updated_at TEXT
+    );
+
+    CREATE TABLE withdrawn_codes (
+        code         TEXT PRIMARY KEY,
+        withdrawn_at TEXT NOT NULL,
+        reason       TEXT NOT NULL
+    );
+
+    WITH retired(code) AS (VALUES ('C8T5'), ('J82D'), ('JYMZ'), ('6H2P'), ('G8NQ'))
+    INSERT INTO withdrawn_codes (code, withdrawn_at, reason)
+    SELECT code, strftime('%Y-%m-%dT%H:%M:%S', 'now'),
+           'retired 4-character code from the August 2026 media-ui minter'
+    FROM retired;
+    """,
+    # 16 Permanent code description change
+    """
+    CREATE TABLE code_notes (
+        code       TEXT NOT NULL,
+        changed_at TEXT NOT NULL,
+        note       TEXT
+    );
+    CREATE INDEX code_notes_code ON code_notes (code, changed_at);
+
+    INSERT INTO code_notes (code, changed_at, note)
+    SELECT o.object_id, o.updated_at, o.note FROM objects o
+    WHERE o.updated_at IS NOT NULL
+      AND o.note IS NOT (SELECT r.note FROM reserved_ids r WHERE r.gramps_id = o.object_id);
+    """,
+    # 17 Permanent code links
+    """
+    CREATE TABLE code_instances (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        code       TEXT NOT NULL,
+        kind       TEXT NOT NULL CHECK (kind IN ('url','text')),
+        value      TEXT NOT NULL,
+        added_at   TEXT NOT NULL,
+        removed_at TEXT
+    );
+    CREATE INDEX code_instances_code ON code_instances (code);
+    """,
+    # 18 Permanent code penciling
+    """
+    CREATE TABLE code_pencilings (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        code        TEXT NOT NULL,
+        penciled_at TEXT NOT NULL,
+        crossed_at  TEXT
+    );
+    CREATE INDEX code_pencilings_code ON code_pencilings (code);
+
+    INSERT INTO code_pencilings (code, penciled_at)
+    SELECT gramps_id, assigned_at FROM reserved_ids
+    WHERE assigned_at IS NOT NULL ORDER BY assigned_at;
+    """,
+    # 19 Permanent code notes
+    """
+    ALTER TABLE code_notes RENAME TO code_descriptions;
+    DROP INDEX code_notes_code;
+    CREATE INDEX code_descriptions_code ON code_descriptions (code, changed_at);
+
+    CREATE TABLE code_notes (
+        code       TEXT NOT NULL,
+        changed_at TEXT NOT NULL,
+        text       TEXT NOT NULL
+    );
+    CREATE INDEX code_notes_code ON code_notes (code, changed_at);
+    """,
 ]
 
 

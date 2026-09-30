@@ -1,7 +1,7 @@
 <script>
-  import { Button, Checkbox, Field, Input, Label, Select, Text, Textarea } from '@immich/ui';
-  import { mdiClose, mdiMapMarkerOff, mdiMapMarkerPlusOutline } from '@mdi/js';
-  import { MODIFIER, MONTH_OPTIONS, QUALITY, dateOf, dateParts, dateProblem, grampsDate, placeItem } from '../lib/format.js';
+  import { Badge, Checkbox, Field, Input, Label, Select, Text, Textarea } from '@immich/ui';
+  import { mdiMapMarkerOff, mdiMapMarkerPlusOutline } from '@mdi/js';
+  import { MODIFIER, MONTH_OPTIONS, QUALITY, RANGES, dateOf, dateProblem, grampsDate, placeItem } from '../lib/format.js';
   import { store } from '../lib/store.svelte.js';
   import PickerPopover from './PickerPopover.svelte';
   import Segmented from './Segmented.svelte';
@@ -12,7 +12,6 @@
 
   const problem = $derived(dateProblem(form.date));
   const date = $derived(dateOf(form.date));
-  const immichDate = $derived(rec.tagged_date ? grampsDate(rec.tagged_date) : rec.immich_date);
   const inGramps = $derived(!!rec.gramps);
   const off = $derived(!inGramps && !form.sync.media);
   const syncBoxes = $derived([
@@ -43,22 +42,15 @@
   function setModifier(value) {
     form.date.modifier = value;
     if (value === 'about') form.date.day = '';
+    if (RANGES.includes(value)) {
+      form.date.month = '0';
+      form.date.day = '';
+    }
   }
 
   function setMonth(value) {
     form.date.month = value;
     if (value === '0') form.date.day = '';
-  }
-
-  function useImmichDate() {
-    if (rec.tagged_date) {
-      form.date = dateParts(rec.tagged_date);
-      return;
-    }
-    const [year, month, day] = rec.immich_date.split('-');
-    form.date.year = year;
-    form.date.month = String(+month);
-    form.date.day = form.date.modifier === 'about' ? '' : String(+day);
   }
 
   function clearDate() {
@@ -77,21 +69,35 @@
     <Label label="Date" size="small" />
     <Segmented label="Date type" options={MODIFIER} value={form.date.modifier} onChange={setModifier} />
     <div
-      class="grid grid-cols-[4.5rem_minmax(0,1fr)_3.5rem] gap-2 @sm:grid-cols-[4.5rem_minmax(0,1.2fr)_3.5rem_minmax(0,1fr)]"
+      class={[
+        'grid gap-2',
+        form.date.modifier === 'span'
+          ? 'grid-cols-[4.5rem_4.5rem_4.5rem] @sm:grid-cols-[4.5rem_4.5rem_4.5rem_minmax(0,1fr)]'
+          : 'grid-cols-[4.5rem_minmax(0,1fr)_3.5rem] @sm:grid-cols-[4.5rem_minmax(0,1.2fr)_3.5rem_minmax(0,1fr)]',
+      ]}
     >
       <Field label="Year" invalid={!!problem && !/^\d{4}$/.test(form.date.year.trim())}>
         <Input bind:value={form.date.year} inputmode="numeric" maxlength={4} placeholder="YYYY" class="font-mono" />
       </Field>
-      <Field label="Month">
-        <Select options={MONTH_OPTIONS} value={form.date.month} onChange={setMonth} />
-      </Field>
-      <Field
-        label="Day"
-        disabled={form.date.month === '0' || form.date.modifier === 'about'}
-        invalid={!!problem && !!form.date.day.trim()}
-      >
-        <Input bind:value={form.date.day} inputmode="numeric" maxlength={2} placeholder="DD" class="font-mono" />
-      </Field>
+      {#if form.date.modifier === 'span'}
+        <Field label="− years" invalid={!!problem && !/^\d{0,3}$/.test(form.date.minus.trim())}>
+          <Input bind:value={form.date.minus} inputmode="numeric" maxlength={3} placeholder="0" class="font-mono" />
+        </Field>
+        <Field label="+ years" invalid={!!problem && !/^\d{0,3}$/.test(form.date.plus.trim())}>
+          <Input bind:value={form.date.plus} inputmode="numeric" maxlength={3} placeholder="0" class="font-mono" />
+        </Field>
+      {:else}
+        <Field label="Month" disabled={form.date.modifier === 'decade'}>
+          <Select options={MONTH_OPTIONS} value={form.date.month} onChange={setMonth} />
+        </Field>
+        <Field
+          label="Day"
+          disabled={form.date.month === '0' || form.date.modifier === 'about' || form.date.modifier === 'decade'}
+          invalid={!!problem && !!form.date.day.trim()}
+        >
+          <Input bind:value={form.date.day} inputmode="numeric" maxlength={2} placeholder="DD" class="font-mono" />
+        </Field>
+      {/if}
       <Field label="Quality" class="col-span-3 @sm:col-span-1">
         <Select options={QUALITY} value={form.date.quality} onChange={(v) => (form.date.quality = v)} />
       </Field>
@@ -99,16 +105,16 @@
     {#if problem}
       <Text size="small" color="danger">{problem}</Text>
     {:else if date}
-      <div class="flex items-center justify-between gap-2">
-        <span class="text-dark font-mono text-sm font-bold">{grampsDate(date)}</span>
-        <Button size="small" variant="ghost" color="secondary" leadingIcon={mdiClose} onclick={clearDate}>
-          Clear date
-        </Button>
-      </div>
-    {:else if immichDate && !form.date.year}
-      <button type="button" class="text-primary w-fit text-sm font-medium hover:underline" onclick={useImmichDate}>
-        Use Immich's {immichDate}
-      </button>
+      <Badge
+        color="primary"
+        shape="round"
+        size="small"
+        class="self-start font-mono font-normal"
+        translations={{ close: 'Clear date' }}
+        onClose={clearDate}
+      >
+        {grampsDate(date)}
+      </Badge>
     {/if}
   </div>
 

@@ -7,6 +7,7 @@
   import { dateProblem, formFrom, formKey, payload, savedForm } from '../lib/format.js';
   import { loadCollections, recordChanged } from '../lib/store.svelte.js';
   import AddVersionDialog from './AddVersionDialog.svelte';
+  import CodeChoiceModal from './CodeChoiceModal.svelte';
   import CollectionsTab from './CollectionsTab.svelte';
   import DetailsTab from './DetailsTab.svelte';
   import Lightbox from './Lightbox.svelte';
@@ -25,6 +26,9 @@
   let lightbox = $state(null);
   let adding = $state(null);
   let content = $state(null);
+  let choosing = $state(null);
+  let pending = $state(false);
+  let pendingFor = 0;
 
   const undecided = $derived(!!rec && !rec.dated && !rec.gramps && !!rec.tagged_date);
   const unsaved = $derived(!!form && (formKey(form) !== saved || undecided));
@@ -48,6 +52,23 @@
     const id = assetId;
     untrack(() => load(id));
   });
+
+  $effect(() => {
+    const r = rec;
+    untrack(() => checkPending(r));
+  });
+
+  async function checkPending(r) {
+    const token = ++pendingFor;
+    pending = false;
+    if (!r?.gramps) return;
+    try {
+      const p = await get(`/photos/api/photo/${r.asset_id}/pending`);
+      if (token === pendingFor) pending = p.changes.length > 0;
+    } catch {
+      if (token === pendingFor) pending = true;
+    }
+  }
 
   function setForm(f) {
     form = f;
@@ -118,10 +139,31 @@
 
   async function sync() {
     if (!rec || busy || unsaved || !syncable) return;
+    if (!rec.gramps) {
+      busy = 'sync';
+      status = { kind: 'busy', msg: 'Looking up reserved codes' };
+      try {
+        const open = (await get('/codes/api/open')).items;
+        status = null;
+        if (open.length) {
+          choosing = open;
+          return;
+        }
+      } catch (e) {
+        fail(e);
+        return;
+      } finally {
+        busy = '';
+      }
+    }
+    await runSync(null);
+  }
+
+  async function runSync(grampsId) {
     busy = 'sync';
-    status = { kind: 'busy', msg: 'Syncing to Gramps' };
+    status = { kind: 'busy', msg: grampsId ? `Syncing to Gramps as ${grampsId}` : 'Syncing to Gramps' };
     try {
-      const r = await post(`/photos/api/photo/${rec.asset_id}/sync`, {});
+      const r = await post(`/photos/api/photo/${rec.asset_id}/sync`, grampsId ? { gramps_id: grampsId } : {});
       applyRecord(r.photo);
       synced(r);
     } catch (e) {
@@ -348,7 +390,7 @@
                   </Tabs.Trigger>
                 {/each}
               </Tabs.List>
-              <Tabs.Content value="details" class="immich-scrollbar min-h-0 flex-1 overflow-y-auto pt-4 pe-1">
+              <Tabs.Content value="details" class="immich-scrollbar -mx-1 min-h-0 flex-1 overflow-y-auto px-1 pt-4">
                 <DetailsTab {rec} bind:form />
               </Tabs.Content>
               <Tabs.Content value="versions" class="min-h-0 flex-1 pt-4">
@@ -366,13 +408,21 @@
               </Tabs.Content>
               <Tabs.Content value="people" class="immich-scrollbar min-h-0 flex-1 overflow-y-auto pt-4">
                 {#if rec.people.length}
-                  <ul class="flex flex-col">
+                  <ul class="grid grid-cols-[repeat(auto-fill,minmax(10rem,1fr))] gap-3">
                     {#each rec.people as p (p.id)}
-                      <li class="border-b py-2 last:border-b-0 dark:border-white/10">
-                        <p class="text-sm">{p.name || '(unnamed)'}</p>
-                        {#if !p.linked}
-                          <p class="text-xs text-gray-600 dark:text-gray-400">Not linked to a Gramps person yet</p>
-                        {/if}
+                      <li class="flex min-w-0 items-center gap-3">
+                        <img
+                          src="/faces/api/person-thumbnail/{p.id}"
+                          alt=""
+                          loading="lazy"
+                          class="size-12 shrink-0 rounded-full bg-gray-200 object-cover dark:bg-gray-700"
+                        />
+                        <div class="min-w-0">
+                          <p class="truncate text-sm">{p.name || '(unnamed)'}</p>
+                          {#if !p.linked}
+                            <p class="text-xs text-gray-600 dark:text-gray-400">Not linked</p>
+                          {/if}
+                        </div>
                       </li>
                     {/each}
                   </ul>
@@ -380,7 +430,7 @@
                   <Text size="small" color="muted">No faces.</Text>
                 {/if}
               </Tabs.Content>
-              <Tabs.Content value="collections" class="immich-scrollbar min-h-0 flex-1 overflow-y-auto pt-4">
+              <Tabs.Content value="collections" class="immich-scrollbar -mx-1 min-h-0 flex-1 overflow-y-auto px-1 pt-4">
                 <CollectionsTab {rec} {busy} onAdd={addToCollection} onRemove={removeFromCollection} onGo={onClose} />
               </Tabs.Content>
             </Tabs.Root>
@@ -409,7 +459,7 @@
           >
             Save
           </Button>
-          <Button leadingIcon={mdiSync} disabled={unsaved || !syncable || !!busy} onclick={sync}>Sync to Gramps</Button>
+          <Button leadingIcon={mdiSync} disabled={unsaved || !syncable || !!busy || (!!rec.gramps && !pending)} onclick={sync}>Sync to Gramps</Button>
         </footer>
       {/if}
     </Dialog.Content>
@@ -417,6 +467,16 @@
 </Dialog.Root>
 
 <Lightbox item={lightbox} onClose={() => (lightbox = null)} />
+
+{#if choosing}
+  <CodeChoiceModal
+    codes={choosing}
+    onClose={(choice) => {
+      choosing = null;
+      if (choice !== undefined) runSync(choice);
+    }}
+  />
+{/if}
 
 {#if adding && rec}
   <AddVersionDialog

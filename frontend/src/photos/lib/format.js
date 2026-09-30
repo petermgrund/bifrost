@@ -5,7 +5,10 @@ export const MODIFIER = [
   { value: 'about', label: 'About' },
   { value: 'before', label: 'Before' },
   { value: 'after', label: 'After' },
+  { value: 'decade', label: 'Decade' },
+  { value: 'span', label: 'Span' },
 ];
+export const RANGES = ['decade', 'span'];
 export const QUALITY = [
   { value: 'regular', label: 'Regular' },
   { value: 'estimated', label: 'Estimated' },
@@ -26,7 +29,16 @@ export function dateParts(d) {
     day: d && d.precision === 'exact' ? String(Number(d.value.slice(8, 10))) : '',
     modifier: d?.modifier || 'regular',
     quality: d?.quality || 'regular',
+    minus: d?.minus ? String(d.minus) : '',
+    plus: d?.plus ? String(d.plus) : '',
   };
+}
+
+const years = (v) => +(v.trim() || 0);
+
+export function yearRange(modifier, year, minus = 0, plus = 0) {
+  const start = modifier === 'decade' ? year - (year % 10) : year - minus;
+  return [start, modifier === 'decade' ? start + 9 : year + plus];
 }
 
 export function dateProblem(p) {
@@ -34,7 +46,10 @@ export function dateProblem(p) {
   const day = p.day.trim();
   if (!year) return day || p.month !== '0' ? 'Add a year' : '';
   if (!/^\d{4}$/.test(year) || +year < 1) return 'The year needs four digits';
-  if (!day) return '';
+  if (p.modifier === 'span' && ![p.minus, p.plus].every((v) => /^\d{0,3}$/.test(v.trim()))) {
+    return 'Years before and after need whole numbers';
+  }
+  if (RANGES.includes(p.modifier) || !day) return '';
   const last = new Date(+year, +p.month, 0).getDate();
   if (!/^\d{1,2}$/.test(day) || +day < 1 || +day > last) return `${MONTHS[+p.month - 1]} ${year} has no day ${day}`;
   return '';
@@ -43,6 +58,10 @@ export function dateProblem(p) {
 export function dateOf(p) {
   const year = p.year.trim();
   if (!year || dateProblem(p)) return null;
+  if (RANGES.includes(p.modifier)) {
+    const d = { value: `${year}-01-01`, precision: 'year', modifier: p.modifier, quality: p.quality };
+    return p.modifier === 'span' ? { ...d, minus: years(p.minus), plus: years(p.plus) } : d;
+  }
   const month = +p.month;
   const day = month && p.modifier !== 'about' ? +(p.day.trim() || 0) : 0;
   const pad = (n) => String(n || 1).padStart(2, '0');
@@ -57,9 +76,13 @@ export function dateOf(p) {
 export function grampsDate(d) {
   if (!d) return '';
   const [y, m] = d.value.split('-');
+  const qual = { estimated: 'Est. ', calculated: 'Calc. ' }[d.quality] || '';
+  if (RANGES.includes(d.modifier)) {
+    const [start, stop] = yearRange(d.modifier, +y, d.minus || 0, d.plus || 0);
+    return `${qual}Between ${start} and ${stop}`;
+  }
   const date = d.precision === 'year' ? y : d.precision === 'month' ? `${y}-${m}` : d.value;
   const mod = { before: 'Before ', after: 'After ', about: 'About ' }[d.modifier] || '';
-  const qual = { estimated: 'Est. ', calculated: 'Calc. ' }[d.quality] || '';
   return `${qual}${mod}${date}`;
 }
 
@@ -99,7 +122,8 @@ export function savedForm(rec) {
 
 export function formKey(f) {
   const d = f.date;
-  const date = [d.year.trim(), d.month, d.day.trim(), d.modifier, d.quality];
+  const span = d.modifier === 'span' ? [years(d.minus), years(d.plus)] : [];
+  const date = [d.year.trim(), d.month, d.day.trim(), d.modifier, d.quality, ...span];
   return JSON.stringify([f.title.trim(), f.notes.trim(), f.place?.id || null, date, f.sync]);
 }
 

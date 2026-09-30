@@ -165,6 +165,11 @@ class GrampsClient:
         items = await self._paged("/media/", keys="gramps_id")
         return {m["gramps_id"] for m in items if m.get("gramps_id")}
 
+    async def media_descriptions(self) -> dict[str, str]:
+        """{gramps_id: desc} of every media object"""
+        items = await self._paged("/media/", keys="gramps_id,desc")
+        return {m["gramps_id"]: m.get("desc") or "" for m in items if m.get("gramps_id")}
+
     async def create_media(self, media_obj: dict) -> dict:
         resp = await self._request(
             "POST", "/objects",

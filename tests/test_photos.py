@@ -86,6 +86,78 @@ class TestDateForms:
             photos.validate_form({"date": {"value": "1923", "modifier": "circa"}})
 
 
+class TestDecadesAndSpans:
+    def test_forms_from_tags(self):
+        form = photos.date_form(tagged("a1", "Sync/Date", "Date/Decade", "Date/Year",
+                                       when="1945-06-15T12:00:00Z"))
+        assert (form["modifier"], form["precision"], form["display"]) == (
+            "decade", "year", "Between 1940 and 1949")
+        form = photos.date_form(tagged("a1", "Date/Span/-10+5", "Date/Estimated",
+                                       when="1945-06-15T12:00:00Z"))
+        assert (form["modifier"], form["minus"], form["plus"], form["display"]) == (
+            "span", 10, 5, "Est. Between 1935 and 1950")
+
+    @pytest.mark.parametrize("tag,first,last", [("Date/Decade", 1940, 1949),
+                                                ("Date/Span/-10+5", 1935, 1950),
+                                                ("Date/Span/-0+0", 1945, 1945)])
+    def test_gramps_gets_a_range_from_the_sync_and_the_editor(self, tag, first, last):
+        a = tagged("a1", "Sync/Date", tag, "Date/Year", when="1945-06-15T12:00:00Z")
+        d = sync_immich.build_gramps_date(a)
+        assert d == {"_class": "Date", "dateval": [0, 0, first, False, 0, 0, last, False],
+                     "modifier": 4, "quality": 0, "text": ""}
+        assert photos.gramps_date(photos.date_form(a)) == d
+
+    def test_tags(self):
+        base = {"value": "1945-01-01", "precision": "year", "quality": "regular"}
+        assert photos.date_tags({**base, "modifier": "decade"}) == {"date/decade", "date/year"}
+        assert photos.date_tags({**base, "modifier": "span", "minus": 10, "plus": 5}) == {
+            "date/span/-10+5", "date/year"}
+        assert photos.spelled("date/span/-10+5", CFG) == "Date/Span/-10+5"
+        assert photos.spelled("date/decade", CFG) == "Date/Decade"
+
+    def test_validate(self):
+        out = photos.validate_form({"date": {"value": "1945", "modifier": "span", "minus": 10, "plus": 5}})
+        assert out["date"] == {"value": "1945-01-01", "precision": "year", "modifier": "span",
+                               "quality": "regular", "minus": 10, "plus": 5}
+        out = photos.validate_form({"date": {"value": "1945-06-15", "modifier": "decade"}})
+        assert (out["date"]["precision"], "minus" in out["date"]) == ("year", False)
+        for bad in ({"minus": -1}, {"plus": 1000}, {"plus": "5"}):
+            with pytest.raises(ValueError, match="bad (minus|plus)"):
+                photos.validate_form({"date": {"value": "1945", "modifier": "span", **bad}})
+
+    def test_the_save_body_keeps_the_span_years(self):
+        from bifrost.web.routes.photos import PhotoBody
+        body = PhotoBody.model_validate(
+            {"date": {"value": "1945-01-01", "modifier": "span", "minus": 10, "plus": 5}})
+        out = photos.validate_form({"date": dict(body.date)})
+        assert (out["date"]["minus"], out["date"]["plus"]) == (10, 5)
+
+    def test_owner_date_type_wins_over_a_partner_span(self):
+        assert sync_immich.merge_tag_values(
+            {"date/span/-10+5"}, {"date/approximate", "date/span/-1+1", "sync/gramps"}) == {
+            "date/span/-10+5", "sync/gramps"}
+        assert sync_immich.merge_tag_values(
+            {"date/decade"}, {"date/span/-1+1"}) == {"date/decade"}
+
+    def test_saving_a_new_span_replaces_the_old_one(self, conn):
+        a = tagged("a1", "Date/Span/-10+5", "Date/Year", when="1945-06-15T12:00:00Z")
+        im = FakeImmich(assets={"a1": a})
+        im.extra_tags = {"date/span/-10+5": {"id": "t-span", "name": "-10+5", "value": "Date/Span/-10+5"},
+                         "date/year": {"id": "t-year", "name": "Year", "value": "Date/Year"}}
+        form = {"date": {"value": "1945", "modifier": "span", "minus": 5, "plus": 5}, "sync": {}}
+        rec = run(photos.save([im], conn, CFG, "a1", form, link_on=False))
+        assert im.upserted == ["Date/Span/-5+5"]
+        assert [t for t, _ in im.untagged_assets] == ["t-span"]
+        assert rec["date"]["display"] == "Between 1940 and 1950"
+
+    def test_display_of_ranges_made_in_gramps(self):
+        fmt = sync_immich.format_gramps_date
+        assert fmt({"dateval": [0, 6, 1940, False, 0, 0, 1949, False], "modifier": 4}) == \
+            "Between 1940-06 and 1949"
+        assert fmt({"dateval": [0, 0, 1940, False, 0, 0, 1949, False], "modifier": 5,
+                    "quality": 2}) == "Calc. From 1940 to 1949"
+
+
 class TestDescriptions:
     def test_split_trailing_url(self):
         assert sync_immich.split_description("Easter 1966\nhttps://g/media/ABC123") == (
@@ -289,6 +361,39 @@ class TestNoteSync:
         row = conn.execute("SELECT gramps_id, note_handle FROM photo_notes WHERE asset_id='a1'").fetchone()
         assert row["gramps_id"] == gr.created[0]["gramps_id"] and row["note_handle"]
         assert im.metadata["a1"]["bifrost"]["notes"] == "Written before the sync"
+
+
+class TestPendingSync:
+    def _media(self, desc="T"):
+        return {"gramps_id": "ABC123", "handle": "h1", "desc": desc, "path": "immich/img.jpg",
+                "attribute_list": [sync_immich._attr("Immich ID", "a1")], "note_list": []}
+
+    def pending(self, im, gr, conn):
+        return run(photos.pending_changes(gr, [im], conn, CFG, "a1"))
+
+    def test_in_step_with_gramps(self, conn):
+        mint(conn, "ABC123", "a1")
+        im = FakeImmich(assets={"a1": tagged("a1", "ID/ABC123")})
+        assert self.pending(im, FakeGramps({"ABC123": self._media()}), conn) == []
+
+    def test_a_saved_title_waits_for_the_sync(self, conn):
+        mint(conn, "ABC123", "a1")
+        im = FakeImmich(assets={"a1": tagged("a1", "ID/ABC123", "Sync/Description", desc="Easter 1966")})
+        assert self.pending(im, FakeGramps({"ABC123": self._media()}), conn) == ["title"]
+        assert self.pending(im, FakeGramps({"ABC123": self._media("Easter 1966")}), conn) == []
+
+    def test_a_saved_note_waits_for_the_sync(self, conn):
+        mint(conn, "ABC123", "a1")
+        photos.set_note(conn, "a1", "ABC123", "From grandma's album")
+        im = FakeImmich(assets={"a1": tagged("a1", "Sync/Note", "ID/ABC123")})
+        gr = FakeGramps({"ABC123": self._media()})
+        assert self.pending(im, gr, conn) == ["note"]
+        run_scan(im, gr, conn, apply=True, cfg=CFG)
+        assert self.pending(im, gr, conn) == []
+
+    def test_a_photo_outside_gramps_has_nothing_pending(self, conn):
+        im = FakeImmich(assets={"a1": tagged("a1", "Sync/Gramps")})
+        assert self.pending(im, FakeGramps(), conn) == []
 
 
 class TestLinkRecord:

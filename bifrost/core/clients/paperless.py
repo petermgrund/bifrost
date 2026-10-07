@@ -148,11 +148,13 @@ class PaperlessClient:
             "custom_field_query": json.dumps([field_id, "exact", value]), "fields": "id"})
         return [d["id"] for d in resp.json().get("results", [])]
 
-    async def search_documents(self, query: str, limit: int = 10) -> list[dict]:
-        """Docs whose title contains the query, most recently changed first"""
+    async def search_documents(self, query: str, limit: int = 10, field_id: int = 0) -> list[dict]:
+        """Docs whose title, or else a custom field, contains the query; most recently changed first"""
         params = {"page_size": limit, "ordering": "-modified",
-                  "fields": "id,title,created,mime_type,page_count"}
-        if query:
+                  "fields": "id,title,created,mime_type,page_count,custom_fields"}
+        if query and field_id:
+            params["custom_field_query"] = json.dumps([field_id, "icontains", query])
+        elif query:
             params["title__icontains"] = query
         resp = await self._request("GET", "/api/documents/", params=params)
         return resp.json().get("results", [])

@@ -50,23 +50,30 @@ async def list_tables(request: Request) -> dict:
 
 @router.get("/api/documents")
 async def search_documents(request: Request, q: str = "", limit: int = 10) -> list[dict]:
-    """Title search; a number also finds that document id"""
+    """Documents whose Gramps ID or title contains the query, Gramps ID matches first"""
     st = _state(request)
     q = q.strip()
     limit = max(1, min(limit, 30))
-    found: list[dict] = []
+    field = st.cfg.sync_paperless.gramps_id_field_id
     try:
-        if q.lstrip("#").isdigit():
-            try:
-                found.append(await st.paperless.get_document(int(q.lstrip("#"))))
-            except PaperlessError as exc:
-                if exc.status != 404:
-                    raise
-        seen = {d["id"] for d in found}
-        found += [d for d in await st.paperless.search_documents(q, limit) if d["id"] not in seen]
+        if q and field and q.isalnum():
+            by_pid, by_title = await asyncio.gather(
+                st.paperless.search_documents(q, limit, field), st.paperless.search_documents(q, limit))
+        else:
+            by_pid, by_title = [], await st.paperless.search_documents(q, limit)
     except PaperlessError as exc:
         raise HTTPException(502, f"Paperless unavailable: {exc}") from exc
-    return [{"id": d["id"], "title": d.get("title") or f"#{d['id']}",
+    found, seen = [], set()
+    for d in by_pid + by_title:
+        if d["id"] not in seen:
+            seen.add(d["id"])
+            found.append(d)
+
+    def pid(doc: dict) -> str:
+        value = st.paperless.custom_field_value(doc, field) if field else None
+        return codes.normalize(str(value)) if value else ""
+
+    return [{"id": d["id"], "title": d.get("title") or f"#{d['id']}", "pid": pid(d),
              "created": d.get("created"), "mime": d.get("mime_type")} for d in found[:limit]]
 
 
@@ -202,6 +209,14 @@ async def put_grid(request: Request, doc_id: int, page: int, body: GridBody) -> 
         raise HTTPException(409, "The table was changed in another window") from exc
 
 
+@router.delete("/api/doc/{doc_id}/page/{page}")
+async def delete_grid(request: Request, doc_id: int, page: int) -> dict:
+    """Delete the page's table; its notes stay"""
+    if not tables.delete_table(_state(request).conn, doc_id, page):
+        raise HTTPException(404, "this page has no table")
+    return {"deleted": True}
+
+
 class TranscribeBody(BaseModel):
     rows: list[str] | None = None
 
@@ -286,18 +301,18 @@ async def export_csv(request: Request, doc_id: int, page: int) -> Response:
                     headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
-@router.get("/at/{address}")
-async def open_address(request: Request, address: str):
-    """Open the page an address points into, with its cells selected"""
+@router.get("/at/{pinpoint}")
+async def open_pinpoint(request: Request, pinpoint: str):
+    """Open the page a pinpoint points into, with its cells selected"""
     st = _state(request)
-    addr = tables.parse_address(address)
-    if addr is None:
-        raise HTTPException(404, f"'{address}' is not a cell address")
-    doc_id = await tables.find_doc(st.paperless, st.conn, st.cfg.sync_paperless.gramps_id_field_id, addr["code"])
+    pin = tables.parse_pinpoint(pinpoint)
+    if pin is None:
+        raise HTTPException(404, f"'{pinpoint}' is not a pinpoint")
+    doc_id = await tables.find_doc(st.paperless, st.conn, st.cfg.sync_paperless.gramps_id_field_id, pin["code"])
     if doc_id is None:
-        raise HTTPException(404, f"no Paperless document has the code {addr['code']}")
-    frag = tables.address_fragment(addr)
-    return RedirectResponse(f"/tables/{doc_id}?page={addr['page']}" + (f"#{frag}" if frag else ""), status_code=302)
+        raise HTTPException(404, f"no Paperless document has the PID {pin['code']}")
+    frag = tables.pinpoint_fragment(pin)
+    return RedirectResponse(f"/tables/{doc_id}?page={pin['page']}" + (f"#{frag}" if frag else ""), status_code=302)
 
 
 @router.get("/{doc_id}", response_class=HTMLResponse)

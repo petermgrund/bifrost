@@ -2,6 +2,7 @@
 
 import asyncio
 import io
+import json
 
 import pytest
 from PIL import Image
@@ -138,9 +139,16 @@ class TestStorage:
         tables.save_table(conn, 8, 2, grid(), 0)
         with pytest.raises(tables.Conflict):
             tables.delete_table(conn, 8, 2, 5)
-        tables.delete_table(conn, 8, 2, 1)
+        assert tables.delete_table(conn, 8, 2, 1) is True
         assert tables.get_table(conn, 8, 2) is None
         tables.save_table(conn, 8, 2, grid(), 0)
+
+    def test_delete_without_a_rev_keeps_the_notes(self, conn):
+        tables.save_table(conn, 8, 1, grid(), 0)
+        tables.add_note(conn, 8, 1, 0.5, 0.5, "stays")
+        assert tables.delete_table(conn, 8, 1) is True
+        assert tables.delete_table(conn, 8, 1) is False
+        assert [n["text"] for n in tables.list_notes(conn, 8, 1)] == ["stays"]
 
     def test_list_counts_lines_columns_and_values(self, conn):
         tables.save_table(conn, 8, 1, grid(cells={"r0": {"c0": "a", "c1": "b"}, "r1": {"c0": "c"}}), 0, "T")
@@ -388,7 +396,7 @@ class TestPeople:
         assert [c.get("person") for c in cols] == [None, True, None]
 
 
-class TestAddresses:
+class TestPinpoints:
     @pytest.mark.parametrize("text,expected", [
         ("69T5AU.L2.C6", ("69T5AU", 1, 2, 2, 6)),
         (" 69t5au.p2.l14 ", ("69T5AU", 2, 14, 14, None)),
@@ -397,18 +405,18 @@ class TestAddresses:
         ("69T5AU", ("69T5AU", 1, None, None, None)),
     ])
     def test_parse(self, text, expected):
-        a = tables.parse_address(text)
+        a = tables.parse_pinpoint(text)
         assert (a["code"], a["page"], a["line"], a["last"], a["col"]) == expected
 
     @pytest.mark.parametrize("text", ["", "69T5AU.X1", "69T5AU.C0", "69T5AU..L2", "69T5AU.L2.P1", "SIX"])
-    def test_not_addresses(self, text):
-        assert tables.parse_address(text) is None
+    def test_not_pinpoints(self, text):
+        assert tables.parse_pinpoint(text) is None
 
     def test_fragments_mirror_the_suffix(self):
-        assert tables.address_fragment(tables.parse_address("69T5AU.P2.L1-5")) == "L1-5"
-        assert tables.address_fragment(tables.parse_address("69T5AU.L14.C6")) == "L14.C6"
-        assert tables.address_fragment(tables.parse_address("69T5AU.C6")) == "C6"
-        assert tables.address_fragment(tables.parse_address("69T5AU")) == ""
+        assert tables.pinpoint_fragment(tables.parse_pinpoint("69T5AU.P2.L1-5")) == "L1-5"
+        assert tables.pinpoint_fragment(tables.parse_pinpoint("69T5AU.L14.C6")) == "L14.C6"
+        assert tables.pinpoint_fragment(tables.parse_pinpoint("69T5AU.C6")) == "C6"
+        assert tables.pinpoint_fragment(tables.parse_pinpoint("69T5AU")) == ""
 
     def test_columns_keep_printed_numbers(self):
         raw = grid()
@@ -433,3 +441,23 @@ class TestAddresses:
         assert hit.asked == [(1, "69T5AU")]
         assert asyncio.run(tables.find_doc(Paperless([]), conn, 1, "69T5AU")) == 8
         assert asyncio.run(tables.find_doc(Paperless([]), conn, 0, "ZZZZZZ")) is None
+
+
+def test_document_search_queries_the_gramps_id_field_or_the_title():
+    import httpx
+    from bifrost.core.clients.paperless import PaperlessClient
+    seen = []
+
+    def serve(request):
+        seen.append(dict(request.url.params))
+        return httpx.Response(200, json={"results": []})
+
+    client = PaperlessClient("http://paperless", "t")
+    client._client = httpx.AsyncClient(transport=httpx.MockTransport(serve))
+    asyncio.run(client.search_documents("9t5", 5, field_id=3))
+    asyncio.run(client.search_documents("census", 5))
+    asyncio.run(client.search_documents("", 5))
+    assert json.loads(seen[0]["custom_field_query"]) == [3, "icontains", "9t5"]
+    assert "title__icontains" not in seen[0]
+    assert seen[1]["title__icontains"] == "census" and "custom_field_query" not in seen[1]
+    assert "title__icontains" not in seen[2] and "custom_fields" in seen[2]["fields"]

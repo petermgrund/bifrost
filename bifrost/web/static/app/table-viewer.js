@@ -671,7 +671,7 @@ class TableViewer extends BifrostElement {
     return [a, b];
   }
 
-  // ---- citable addresses: CODE[.Pn].Ln[-m][.Cn]
+  // ---- pinpoints: PID[.Pn].Ln[-m][.Cn]
 
   colNo(i) { return this.grid.cols[i].no || i + 1; }
 
@@ -690,7 +690,7 @@ class TableViewer extends BifrostElement {
     return [...parts, ...(col === null ? [] : [`C${col}`])].join('.');
   }
 
-  address() {
+  pinpoint() {
     const s = this.selection();
     if (!s || !this.info?.code) return '';
     return [this.info.code, ...(this.info.pages > 1 ? [`P${this.page}`] : []), this.suffix(s)].join('.');
@@ -1524,8 +1524,8 @@ class TableViewer extends BifrostElement {
       </button>` : nothing}
       ${g && rows && this.mode === 'view' ? html`<button class="border" ?disabled=${!!this.busy}
         @click=${() => this.clearRows()}><i>backspace</i><span>Clear</span></button>` : nothing}
-      ${this.address() ? html`<button class="border tbl-address" title="Copy" @click=${() => this.copyText(this.address())}>
-        <span class="mono">${this.address()}</span><i>content_copy</i></button>` : nothing}
+      ${this.pinpoint() ? html`<button class="border tbl-pinpoint" title="Copy pinpoint" @click=${() => this.copyText(this.pinpoint())}>
+        <span class="mono">${this.pinpoint()}</span><i>content_copy</i></button>` : nothing}
       ${g && this.rev ? html`<a class="button circle transparent" href="${this.gridUrl}/export.csv" download
         aria-label="Download CSV" title="Download CSV"><i>download</i></a>` : nothing}
       ${i.paperless_url ? html`<a class="button circle transparent" href=${i.paperless_url} target="_blank"

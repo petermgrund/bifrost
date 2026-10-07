@@ -550,8 +550,8 @@ table-viewer { flex: 1; min-block-size: 0; display: flex; flex-direction: column
   border-radius: 0.5rem;
 }
 .tbl-toggles { display: flex; flex-direction: column; }
-.tbl-address { gap: 0.375rem; }
-.tbl-address > .mono { font-size: 0.8125rem; letter-spacing: 0.02em; }
+.tbl-pinpoint { gap: 0.375rem; }
+.tbl-pinpoint > .mono { font-size: 0.8125rem; letter-spacing: 0.02em; }
 .tbl-note-tip { max-inline-size: 20rem; }
 .tbl-note-text { white-space: pre-wrap; }
 .tbl-pop {

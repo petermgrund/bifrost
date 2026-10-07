@@ -808,12 +808,9 @@ class TableViewer extends BifrostElement {
   }
 
   tipLines(row, col) {
-    const c = this.grid.cols[col];
     const [v, t] = [this.value(row, col), this.value(row, col, 'trans')];
-    const lines = this.shown === 'orig' ? [[c.name, v]]
-      : this.shown === 'trans' ? [[c.trans || c.name, t || v]]
-        : [[c.name, v], ...(t ? [[c.trans || c.name, t]] : [])];
-    return lines.filter(([name, value]) => name || value);
+    const lines = this.shown === 'orig' ? [v] : this.shown === 'trans' ? [t || v] : [v, t !== v ? t : ''];
+    return lines.filter(Boolean);
   }
 
   // ---- people
@@ -1711,8 +1708,7 @@ class TableViewer extends BifrostElement {
     const flip = b.r + 12 + 280 > this.vp[0];
     const x = flip ? `right:${this.vp[0] - b.l + 12}px` : `left:${b.r + 12}px`;
     return html`<div class="tbl-tip ${flip ? 'flip' : ''}" style="${x};top:${(b.t + b.b) / 2}px">
-      ${lines.map(([name, value], i) => html`<div class=${i ? 'tbl-sub' : ''}>${name
-        ? html`<span>${name}${value ? ': ' : ''}</span>` : nothing}${value ? html`<strong>${value}</strong>` : nothing}</div>`)}
+      ${lines.map((value, i) => html`<div class=${i ? 'tbl-sub' : ''}><strong>${value}</strong></div>`)}
       ${person ? html`<div class="tbl-person">${this.avatar(person)}${this.personText(person)}</div>` : nothing}
     </div>`;
   }
@@ -1756,14 +1752,14 @@ class TableViewer extends BifrostElement {
     if (!this.draft || !this.cur || this.mode !== 'view') return nothing;
     const { row, col } = this.cur;
     const b = this.cellBox(row, col);
-    const c = this.grid.cols[col];
     const line = this.grid.first_line + row;
     const found = this.draft.person ? 0 : Math.min(this.pResults?.length || 0, 5);
     const width = Math.min(Math.max(b.r - b.l, 300), this.vp[0] - 16);
     const height = this.fields.length * 60 + (this.pOpen ? 60 + found * 48 : 0) + 16;
     const left = G.clamp(b.l, 8, this.vp[0] - width - 8);
     const top = b.b + height + 8 < this.vp[1] ? b.b + 6 : Math.max(HEAD_H + 4, b.t - height - 6);
-    const label = (f) => `${f === 'orig' ? c.name || `C${this.colNo(col)}` : c.trans || 'Translation'}, R${line}`;
+    const at = this.suffix({ line, last: line, col: this.colNo(col) });
+    const label = (f) => (f === this.fields[0] ? at : 'Translation');
     return html`<div class="tbl-pop tbl-editor" style="left:${left}px;top:${top}px;width:${width}px"
       @pointerdown=${stop} @dblclick=${stop} @wheel=${stop} @focusout=${(e) => this.editorOut(e)}>
       ${this.fields.map((f) => html`<div class="field label textarea border small no-margin">

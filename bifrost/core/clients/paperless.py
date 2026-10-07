@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import httpx
 
 
@@ -139,6 +141,12 @@ class PaperlessClient:
     async def thumbnail(self, doc_id: int) -> tuple[bytes, str]:
         resp = await self._request("GET", f"/api/documents/{doc_id}/thumb/")
         return resp.content, resp.headers.get("content-type", "image/webp").split(";")[0].strip()
+
+    async def documents_with_value(self, field_id: int, value: str) -> list[int]:
+        """Ids of documents whose custom field equals the value exactly"""
+        resp = await self._request("GET", "/api/documents/", params={
+            "custom_field_query": json.dumps([field_id, "exact", value]), "fields": "id"})
+        return [d["id"] for d in resp.json().get("results", [])]
 
     async def search_documents(self, query: str, limit: int = 10) -> list[dict]:
         """Docs whose title contains the query, most recently changed first"""

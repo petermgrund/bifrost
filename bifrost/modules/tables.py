@@ -23,6 +23,12 @@ VALUE_MAX = 2000
 NOTE_MAX = 10000
 LINE_LIMIT = 99999
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,24}$")
+_HANDLE_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+_GRAMPS_ID_RE = re.compile(r"^[A-Za-z]{0,2}\d+$")
+_WORD_RE = re.compile(r"[^\W_]+(?:['-][^\W_]+)*")
+_ADDRESS_RE = re.compile(
+    r"^(?P<code>[A-Z0-9]{4,8})(?:\.P(?P<page>[1-9]\d*))?"
+    r"(?:\.L(?P<line>\d+)(?:-(?P<last>\d+))?)?(?:\.C(?P<col>[1-9]\d*))?$")
 
 RASTER_MIMES = {"image/jpeg", "image/png", "image/webp", "image/gif", "image/tiff", "image/bmp"}
 BROWSER_MIMES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
@@ -108,6 +114,11 @@ def _lines(raw, key: str, limit: int, what: str, named: bool = False) -> list[di
         if named:
             line["name"] = " ".join(str(item.get("name") or "").split())[:NAME_MAX]
             line["trans"] = " ".join(str(item.get("trans") or "").split())[:NAME_MAX]
+            if item.get("person") is True:
+                line["person"] = True
+            no = item.get("no")
+            if isinstance(no, int) and not isinstance(no, bool) and 1 <= no <= 9999:
+                line["no"] = no
         line[key] = pos
         out.append(line)
     return out
@@ -136,6 +147,24 @@ def _values(raw, row_ids: set[str], col_ids: set[str], what: str) -> dict[str, d
     return out
 
 
+def valid_handle(handle) -> bool:
+    return isinstance(handle, str) and bool(_HANDLE_RE.match(handle))
+
+
+def _links(raw, row_ids: set[str], col_ids: set[str]) -> dict[str, dict[str, str]]:
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise GridError("the person links are not an object")
+    out: dict[str, dict[str, str]] = {}
+    for rid, vals in raw.items():
+        if rid in row_ids and isinstance(vals, dict):
+            row = {cid: h for cid, h in vals.items() if cid in col_ids and valid_handle(h)}
+            if row:
+                out[rid] = row
+    return out
+
+
 def normalize_grid(raw) -> dict:
     """A clean copy of a client's grid, or GridError"""
     if not isinstance(raw, dict):
@@ -160,6 +189,34 @@ def normalize_grid(raw) -> dict:
         "group_col": group if group in col_ids else None,
         "cells": _values(raw.get("cells"), row_ids, col_ids, "cells"),
         "trans": _values(raw.get("trans"), row_ids, col_ids, "translations"),
+        "people": _links(raw.get("people"), row_ids, col_ids),
+    }
+
+
+# ---- Gramps people linked to cells
+
+def people_rules(query: str) -> dict | None:
+    """Gramps filter rules for a name query: every word must be in one of the person's names"""
+    words = _WORD_RE.findall(query)[:4]
+    words = [w for w in words if len(w) > 1] or words[:1]
+    if not words:
+        return None
+    if len(words) == 1 and _GRAMPS_ID_RE.match(words[0]):
+        return {"function": "or", "rules": [{"name": "SearchName", "values": words},
+                                            {"name": "RegExpIdOf", "values": words}]}
+    return {"function": "and", "rules": [{"name": "SearchName", "values": [w]} for w in words]}
+
+
+def person_summary(person: dict) -> dict:
+    """Given name first, birth and death dates, and whether Gramps has a picture of them"""
+    prof = person.get("profile") or {}
+    parts = (prof.get(k, "").strip() for k in ("name_given", "name_surname", "name_suffix"))
+    return {
+        "handle": person["handle"], "gramps_id": person.get("gramps_id", ""),
+        "name": " ".join(p for p in parts if p) or prof.get("name_display") or person.get("gramps_id", ""),
+        "birth": (prof.get("birth") or {}).get("date", ""),
+        "death": (prof.get("death") or {}).get("date", ""),
+        "photo": bool(person.get("media_list")),
     }
 
 
@@ -183,6 +240,46 @@ def to_csv(grid: dict) -> str:
             line += [vals.get(c["id"], ""), tvals.get(c["id"], "")] if translated else [vals.get(c["id"], "")]
         out.writerow(line)
     return buf.getvalue()
+
+
+# ---- citable addresses: CODE[.Pn].Ln[-m][.Cn]
+
+def parse_address(text: str) -> dict | None:
+    """'69t5au.p2.l1-5' -> {'code': '69T5AU', 'page': 2, 'line': 1, 'last': 5, 'col': None}"""
+    m = _ADDRESS_RE.match(re.sub(r"\s+", "", text or "").upper())
+    if not m:
+        return None
+    line = int(m["line"]) if m["line"] else None
+    last = int(m["last"]) if m["last"] else line
+    if line is not None and last < line:
+        line, last = last, line
+    return {"code": m["code"], "page": int(m["page"] or 1), "line": line, "last": last,
+            "col": int(m["col"]) if m["col"] else None}
+
+
+def address_fragment(addr: dict) -> str:
+    """The viewer's #fragment for an address: 'L1-5.C6'"""
+    parts = []
+    if addr["line"] is not None:
+        parts.append(f"L{addr['line']}" + (f"-{addr['last']}" if addr["last"] != addr["line"] else ""))
+    if addr["col"] is not None:
+        parts.append(f"C{addr['col']}")
+    return ".".join(parts)
+
+
+async def find_doc(paperless: PaperlessClient, conn: sqlite3.Connection,
+                   field_id: int, code: str) -> int | None:
+    """The Paperless document carrying the code, or the one Bifrost minted it for"""
+    if field_id:
+        try:
+            found = await paperless.documents_with_value(field_id, code)
+        except Exception:  # noqa: BLE001
+            found = []
+        if found:
+            return found[0]
+    row = conn.execute("SELECT source_id FROM minted_media WHERE gramps_id=? AND source_system='paperless'",
+                       (code,)).fetchone()
+    return int(row["source_id"]) if row and str(row["source_id"]).isdigit() else None
 
 
 # ---- geometry, in page fractions
@@ -263,6 +360,27 @@ def delete_table(conn: sqlite3.Connection, doc_id: int, page: int, base_rev: int
         if current != base_rev:
             raise Conflict(current)
         conn.execute("DELETE FROM doc_tables WHERE paperless_id=? AND page=?", (doc_id, page))
+
+
+def doc_options(conn: sqlite3.Connection, doc_id: int) -> dict:
+    """The document's viewer options; translations default to on when any page has some"""
+    row = conn.execute("SELECT options FROM doc_options WHERE paperless_id=?", (doc_id,)).fetchone()
+    stored = json.loads(row["options"]) if row else {}
+    if "translations" not in stored:
+        stored["translations"] = any(
+            grid.get("trans") or any(c.get("trans") for c in grid["cols"])
+            for grid in (json.loads(r["grid"]) for r in conn.execute(
+                "SELECT grid FROM doc_tables WHERE paperless_id=?", (doc_id,))))
+    return {"translations": bool(stored["translations"])}
+
+
+def set_doc_options(conn: sqlite3.Connection, doc_id: int, translations: bool) -> dict:
+    with conn:
+        conn.execute(
+            "INSERT INTO doc_options (paperless_id, options) VALUES (?, ?)"
+            " ON CONFLICT(paperless_id) DO UPDATE SET options=excluded.options",
+            (doc_id, json.dumps({"translations": bool(translations)})))
+    return doc_options(conn, doc_id)
 
 
 def table_pages(conn: sqlite3.Connection, doc_id: int) -> list[int]:

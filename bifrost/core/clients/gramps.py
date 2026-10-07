@@ -119,6 +119,38 @@ class GrampsClient:
         resp = await self._request("GET", f"/people/{handle}")
         return resp.json()
 
+    async def find_people(self, rules: dict | None, limit: int = 20, sort: str = "name") -> list[dict]:
+        """People matching Gramps filter rules, each with its profile (name, birth, death)"""
+        params = {"pagesize": limit, "page": 1, "sort": sort, "profile": "self",
+                  "keys": "handle,gramps_id,profile,media_list"}
+        if rules:
+            params["rules"] = json.dumps(rules)
+        resp = await self._request("GET", "/people/", params=params)
+        items = resp.json()
+        return items if isinstance(items, list) else []
+
+    async def person_profile(self, handle: str) -> dict | None:
+        """One person with its profile, or None when Gramps has no such handle"""
+        resp = await self._request(
+            "GET", f"/people/{handle}", ok_404=True,
+            params={"profile": "self", "keys": "handle,gramps_id,profile,media_list"})
+        return None if resp.status_code == 404 else resp.json()
+
+    async def person_photo(self, handle: str, size: int = 64) -> tuple[bytes, str] | None:
+        """The person's first picture as a square thumbnail, cropped to its region"""
+        resp = await self._request("GET", f"/people/{handle}", ok_404=True,
+                                   params={"keys": "media_list"})
+        refs = [] if resp.status_code == 404 else resp.json().get("media_list") or []
+        if not refs:
+            return None
+        rect = refs[0].get("rect") or []
+        crop = "/cropped/" + "/".join(str(int(v)) for v in rect) if len(rect) == 4 and any(rect) else ""
+        img = await self._request("GET", f"/media/{refs[0]['ref']}{crop}/thumbnail/{size}",
+                                  ok_404=True, params={"square": "true"})
+        if img.status_code == 404:
+            return None
+        return img.content, img.headers.get("Content-Type", "image/jpeg")
+
     async def update_person(self, handle: str, person_obj: dict) -> dict:
         resp = await self._request(
             "PUT", f"/people/{handle}",

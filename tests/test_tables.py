@@ -79,6 +79,13 @@ class TestNormalize:
         with pytest.raises(tables.GridError, match="translations are not an object"):
             tables.normalize_grid(grid(trans=["x"]))
 
+    def test_person_links_keep_only_known_cells_and_handles(self):
+        raw = grid(people={"r0": {"c0": "2b95ac4660404d47", "c1": "bad handle!", "zz": "abc"},
+                           "gone": {"c0": "abc"}, "r1": {"c2": 7}})
+        assert tables.normalize_grid(raw)["people"] == {"r0": {"c0": "2b95ac4660404d47"}}
+        with pytest.raises(tables.GridError, match="person links"):
+            tables.normalize_grid(grid(people=["x"]))
+
     def test_unknown_group_column_is_dropped(self):
         assert tables.normalize_grid(grid(group_col="nope"))["group_col"] is None
 
@@ -141,6 +148,14 @@ class TestStorage:
         assert tables.table_pages(conn, 8) == [1, 3]
         item = next(i for i in tables.list_tables(conn) if i["page"] == 1)
         assert (item["lines"], item["columns"], item["filled"]) == (4, 3, 3)
+
+    def test_translations_option_follows_the_data_until_set(self, conn):
+        assert tables.doc_options(conn, 8) == {"translations": False}
+        tables.save_table(conn, 8, 2, grid(trans={"r0": {"c0": "Wife"}}), 0)
+        assert tables.doc_options(conn, 8) == {"translations": True}
+        assert tables.set_doc_options(conn, 8, False) == {"translations": False}
+        assert tables.doc_options(conn, 8) == {"translations": False}
+        assert tables.doc_options(conn, 9) == {"translations": False}
 
     def test_csv_has_line_numbers_and_column_names(self):
         g = grid(ncols=2, nrows=2, first_line=51, cells={"r1": {"c1": "Farmer"}})
@@ -333,3 +348,88 @@ class TestTranscription:
 
         readings, errors = asyncio.run(tables.transcribe(Gemini("400: API key not valid"), img, g, None))
         assert readings == {} and errors == ["400: API key not valid"]
+
+
+class TestPeople:
+    def test_every_word_of_a_census_name_must_match(self):
+        assert tables.people_rules("Lindqvist, Anders") == {"function": "and", "rules": [
+            {"name": "SearchName", "values": ["Lindqvist"]}, {"name": "SearchName", "values": ["Anders"]}]}
+
+    def test_initials_are_dropped_unless_alone(self):
+        rules = tables.people_rules("A. Lindqvist")["rules"]
+        assert [r["values"] for r in rules] == [["Lindqvist"]]
+        assert tables.people_rules("A")["rules"] == [{"name": "SearchName", "values": ["A"]}]
+
+    def test_an_id_also_matches_gramps_ids(self):
+        rules = tables.people_rules(" I9003 ")
+        assert rules["function"] == "or"
+        assert {r["name"] for r in rules["rules"]} == {"SearchName", "RegExpIdOf"}
+
+    def test_empty_queries_have_no_rules(self):
+        assert tables.people_rules("----- ,") is None
+
+    def test_person_summary_puts_the_given_name_first(self):
+        person = {"handle": "h1", "gramps_id": "I9002", "media_list": [{"ref": "m1"}], "profile": {
+            "name_display": "Lindqvist, Maria", "name_given": "Maria", "name_surname": "Lindqvist",
+            "name_suffix": "", "birth": {"date": "1872-07-07", "place_name": "Vimmerby"},
+            "death": {"date": "1955-01-19"}}}
+        assert tables.person_summary(person) == {
+            "handle": "h1", "gramps_id": "I9002", "name": "Maria Lindqvist", "birth": "1872-07-07",
+            "death": "1955-01-19", "photo": True}
+        bare = tables.person_summary({"handle": "h2", "gramps_id": "I1", "profile": {"name_display": "X, Y"}})
+        assert (bare["name"], bare["photo"], bare["birth"]) == ("X, Y", False, "")
+        assert tables.person_summary({"handle": "h3", "gramps_id": "I3"})["name"] == "I3"
+
+    def test_people_columns_are_flagged_only_when_set(self):
+        raw = grid()
+        raw["cols"][1]["person"] = True
+        raw["cols"][2]["person"] = "yes"
+        cols = tables.normalize_grid(raw)["cols"]
+        assert [c.get("person") for c in cols] == [None, True, None]
+
+
+class TestAddresses:
+    @pytest.mark.parametrize("text,expected", [
+        ("69T5AU.L2.C6", ("69T5AU", 1, 2, 2, 6)),
+        (" 69t5au.p2.l14 ", ("69T5AU", 2, 14, 14, None)),
+        ("69T5AU.L5-1", ("69T5AU", 1, 1, 5, None)),
+        ("69T5AU.C12", ("69T5AU", 1, None, None, 12)),
+        ("69T5AU", ("69T5AU", 1, None, None, None)),
+    ])
+    def test_parse(self, text, expected):
+        a = tables.parse_address(text)
+        assert (a["code"], a["page"], a["line"], a["last"], a["col"]) == expected
+
+    @pytest.mark.parametrize("text", ["", "69T5AU.X1", "69T5AU.C0", "69T5AU..L2", "69T5AU.L2.P1", "SIX"])
+    def test_not_addresses(self, text):
+        assert tables.parse_address(text) is None
+
+    def test_fragments_mirror_the_suffix(self):
+        assert tables.address_fragment(tables.parse_address("69T5AU.P2.L1-5")) == "L1-5"
+        assert tables.address_fragment(tables.parse_address("69T5AU.L14.C6")) == "L14.C6"
+        assert tables.address_fragment(tables.parse_address("69T5AU.C6")) == "C6"
+        assert tables.address_fragment(tables.parse_address("69T5AU")) == ""
+
+    def test_columns_keep_printed_numbers(self):
+        raw = grid()
+        raw["cols"][1]["no"] = 12
+        raw["cols"][2]["no"] = True
+        assert [c.get("no") for c in tables.normalize_grid(raw)["cols"]] == [None, 12, None]
+
+    def test_find_doc_asks_paperless_then_the_register(self, conn):
+        class Paperless:
+            def __init__(self, hits):
+                self.hits, self.asked = hits, []
+
+            async def documents_with_value(self, field_id, value):
+                self.asked.append((field_id, value))
+                return self.hits
+
+        with conn:
+            conn.execute("INSERT INTO minted_media (gramps_id, source_system, source_id, minted_at)"
+                         " VALUES ('69T5AU', 'paperless', '8', 'now')")
+        hit = Paperless([42])
+        assert asyncio.run(tables.find_doc(hit, conn, 1, "69T5AU")) == 42
+        assert hit.asked == [(1, "69T5AU")]
+        assert asyncio.run(tables.find_doc(Paperless([]), conn, 1, "69T5AU")) == 8
+        assert asyncio.run(tables.find_doc(Paperless([]), conn, 0, "ZZZZZZ")) is None

@@ -1,6 +1,7 @@
 import { BifrostElement, html, nothing, api, searchField, spinner, statusLine } from './core.js';
 
 const API = '/tables/api';
+const ADDRESS = /^[A-Z0-9]{4,8}(?:\.P\d+)?(?:\.L\d+(?:-\d+)?(?:\.C\d+)?|\.C\d+|(?<=\.P\d+))$/;
 const pad = (n) => String(n).padStart(2, '0');
 const count = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
@@ -70,20 +71,29 @@ class TablesPage extends BifrostElement {
     location.href = `/tables/${id}${page > 1 ? `?page=${page}` : ''}`;
   }
 
+  pick(it) {
+    if (it.address) location.href = `/tables/at/${encodeURIComponent(it.address)}`;
+    else this.open(it.id);
+  }
+
   render() {
-    const items = this.results.map((d) => ({
-      id: d.id, label: d.title, thumb: `${API}/thumb/${d.id}`,
-      sub: `#${d.id}${d.created ? ` · ${d.created.slice(0, 10)}` : ''}`,
-    }));
+    const typed = this.q.replace(/\s+/g, '').toUpperCase();
+    const items = [
+      ...(ADDRESS.test(typed) ? [{ address: typed, label: typed, icon: 'location_on', mono: true }] : []),
+      ...this.results.map((d) => ({
+        id: d.id, label: d.title, thumb: `${API}/thumb/${d.id}`,
+        sub: `#${d.id}${d.created ? ` · ${d.created.slice(0, 10)}` : ''}`,
+      })),
+    ];
     return html`
       <nav class="wrap">
         ${searchField({
     placeholder: 'Open a Paperless document', value: this.q, items, active: this.hi, width: 'large',
     onInput: (e) => this.queueSearch(e.target.value),
-    onPick: (it) => this.open(it.id),
+    onPick: (it) => this.pick(it),
     onEnter: () => {
-      const it = items[this.hi] ?? (items.length === 1 ? items[0] : null);
-      if (it) this.open(it.id);
+      const it = items[this.hi] ?? (items[0]?.address || items.length === 1 ? items[0] : null);
+      if (it) this.pick(it);
     },
     onMove: (d) => { if (items.length) this.hi = (this.hi + d + items.length) % items.length; },
     empty: 'No matches',

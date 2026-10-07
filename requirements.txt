@@ -4,3 +4,5 @@ httpx
 jinja2
 pyyaml
 pypdf
+pypdfium2
+pillow

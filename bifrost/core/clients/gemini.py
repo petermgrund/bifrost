@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import json
 
 import httpx
 
@@ -11,6 +12,13 @@ API_BASE = "https://generativelanguage.googleapis.com/v1beta"
 
 class GeminiError(Exception):
     pass
+
+
+def _message(resp: httpx.Response) -> str:
+    try:
+        return str(resp.json()["error"]["message"])
+    except (ValueError, KeyError, TypeError):
+        return resp.text[:400]
 
 
 class GeminiClient:
@@ -40,16 +48,37 @@ class GeminiClient:
         thinking_budget: int | None = None,
     ) -> str:
         """Transcribe a document file (image or PDF) to plain text."""
+        return await self._generate([(data, mime)], prompt, {}, thinking_budget)
+
+    async def generate_json(
+        self, files: list[tuple[bytes, str]], prompt: str, schema: dict,
+        thinking_budget: int | None = None,
+    ) -> dict:
+        """Answer about the files as JSON shaped by an OpenAPI-style schema"""
+        text = await self._generate(
+            files, prompt,
+            {"responseMimeType": "application/json", "responseSchema": schema},
+            thinking_budget)
+        try:
+            return json.loads(text)
+        except ValueError as exc:
+            raise GeminiError(f"response is not JSON: {text[:200]}") from exc
+
+    async def _generate(
+        self, files: list[tuple[bytes, str]], prompt: str, extra_cfg: dict,
+        thinking_budget: int | None,
+    ) -> str:
         body: dict = {
             "contents": [{"parts": [
                 {"text": prompt},
-                {"inlineData": {"mimeType": mime,
-                                "data": base64.b64encode(data).decode()}},
+                *({"inlineData": {"mimeType": mime,
+                                  "data": base64.b64encode(data).decode()}}
+                  for data, mime in files),
             ]}],
         }
         # with thinking on the budget is shared so this must comfortably
         # exceed thinking + the document's text
-        gen_cfg: dict = {"maxOutputTokens": 65536}
+        gen_cfg: dict = {"maxOutputTokens": 65536, **extra_cfg}
         if thinking_budget is not None:
             gen_cfg["thinkingConfig"] = {"thinkingBudget": thinking_budget}
         body["generationConfig"] = gen_cfg
@@ -57,7 +86,7 @@ class GeminiClient:
             f"{API_BASE}/models/{self._model}:generateContent",
             params={"key": self._key}, json=body)
         if resp.status_code >= 400:
-            raise GeminiError(f"{resp.status_code}: {resp.text[:400]}")
+            raise GeminiError(f"{resp.status_code}: {_message(resp)}")
         payload = resp.json()
         cands = payload.get("candidates") or []
         if not cands:

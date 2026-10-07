@@ -26,7 +26,7 @@ _ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,24}$")
 _HANDLE_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _GRAMPS_ID_RE = re.compile(r"^[A-Za-z]{0,2}\d+$")
 _WORD_RE = re.compile(r"[^\W_]+(?:['-][^\W_]+)*")
-_ADDRESS_RE = re.compile(
+_PINPOINT_RE = re.compile(
     r"^(?P<code>[A-Z0-9]{4,8})(?:\.P(?P<page>[1-9]\d*))?"
     r"(?:\.L(?P<line>\d+)(?:-(?P<last>\d+))?)?(?:\.C(?P<col>[1-9]\d*))?$")
 
@@ -242,11 +242,11 @@ def to_csv(grid: dict) -> str:
     return buf.getvalue()
 
 
-# ---- citable addresses: CODE[.Pn].Ln[-m][.Cn]
+# ---- pinpoints: PID[.Pn].Ln[-m][.Cn]
 
-def parse_address(text: str) -> dict | None:
+def parse_pinpoint(text: str) -> dict | None:
     """'69t5au.p2.l1-5' -> {'code': '69T5AU', 'page': 2, 'line': 1, 'last': 5, 'col': None}"""
-    m = _ADDRESS_RE.match(re.sub(r"\s+", "", text or "").upper())
+    m = _PINPOINT_RE.match(re.sub(r"\s+", "", text or "").upper())
     if not m:
         return None
     line = int(m["line"]) if m["line"] else None
@@ -257,19 +257,19 @@ def parse_address(text: str) -> dict | None:
             "col": int(m["col"]) if m["col"] else None}
 
 
-def address_fragment(addr: dict) -> str:
-    """The viewer's #fragment for an address: 'L1-5.C6'"""
+def pinpoint_fragment(pin: dict) -> str:
+    """The viewer's #fragment for a pinpoint: 'L1-5.C6'"""
     parts = []
-    if addr["line"] is not None:
-        parts.append(f"L{addr['line']}" + (f"-{addr['last']}" if addr["last"] != addr["line"] else ""))
-    if addr["col"] is not None:
-        parts.append(f"C{addr['col']}")
+    if pin["line"] is not None:
+        parts.append(f"L{pin['line']}" + (f"-{pin['last']}" if pin["last"] != pin["line"] else ""))
+    if pin["col"] is not None:
+        parts.append(f"C{pin['col']}")
     return ".".join(parts)
 
 
 async def find_doc(paperless: PaperlessClient, conn: sqlite3.Connection,
                    field_id: int, code: str) -> int | None:
-    """The Paperless document carrying the code, or the one Bifrost minted it for"""
+    """The Paperless document carrying the PID, or the one Bifrost minted it for"""
     if field_id:
         try:
             found = await paperless.documents_with_value(field_id, code)
@@ -352,14 +352,16 @@ def save_table(conn: sqlite3.Connection, doc_id: int, page: int, grid: dict,
     return {"grid": grid, "rev": current + 1, "updated_at": now}
 
 
-def delete_table(conn: sqlite3.Connection, doc_id: int, page: int, base_rev: int) -> None:
+def delete_table(conn: sqlite3.Connection, doc_id: int, page: int, base_rev: int | None = None) -> bool:
+    """Remove the page's table, if it is still at base_rev when one is given; its notes stay"""
     with conn:
         row = conn.execute(
             "SELECT rev FROM doc_tables WHERE paperless_id=? AND page=?", (doc_id, page)).fetchone()
         current = row["rev"] if row else 0
-        if current != base_rev:
+        if base_rev is not None and current != base_rev:
             raise Conflict(current)
-        conn.execute("DELETE FROM doc_tables WHERE paperless_id=? AND page=?", (doc_id, page))
+        return conn.execute("DELETE FROM doc_tables WHERE paperless_id=? AND page=?",
+                            (doc_id, page)).rowcount > 0
 
 
 def doc_options(conn: sqlite3.Connection, doc_id: int) -> dict:

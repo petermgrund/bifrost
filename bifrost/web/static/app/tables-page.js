@@ -1,7 +1,7 @@
-import { BifrostElement, html, nothing, api, searchField, spinner, statusLine } from './core.js';
+import { BifrostElement, html, nothing, api, searchField, spinner, statusLine, btn } from './core.js';
 
 const API = '/tables/api';
-const ADDRESS = /^[A-Z0-9]{4,8}(?:\.P\d+)?(?:\.L\d+(?:-\d+)?(?:\.C\d+)?|\.C\d+|(?<=\.P\d+))$/;
+const PINPOINT = /^[A-Z0-9]{4,8}(?:\.P\d+)?(?:\.L\d+(?:-\d+)?(?:\.C\d+)?|\.C\d+|(?<=\.P\d+))$/;
 const pad = (n) => String(n).padStart(2, '0');
 const count = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
@@ -17,6 +17,8 @@ class TablesPage extends BifrostElement {
     q: { state: true },
     results: { state: true },
     hi: { state: true },
+    doomed: { state: true },
+    deleting: { state: true },
   };
 
   constructor() {
@@ -26,6 +28,8 @@ class TablesPage extends BifrostElement {
     this.q = '';
     this.results = [];
     this.hi = -1;
+    this.doomed = null;
+    this.deleting = false;
     this._seq = 0;
   }
 
@@ -72,17 +76,17 @@ class TablesPage extends BifrostElement {
   }
 
   pick(it) {
-    if (it.address) location.href = `/tables/at/${encodeURIComponent(it.address)}`;
+    if (it.pinpoint) location.href = `/tables/at/${encodeURIComponent(it.pinpoint)}`;
     else this.open(it.id);
   }
 
   render() {
     const typed = this.q.replace(/\s+/g, '').toUpperCase();
     const items = [
-      ...(ADDRESS.test(typed) ? [{ address: typed, label: typed, icon: 'location_on', mono: true }] : []),
+      ...(PINPOINT.test(typed) ? [{ pinpoint: typed, label: typed, icon: 'location_on', mono: true }] : []),
       ...this.results.map((d) => ({
         id: d.id, label: d.title, thumb: `${API}/thumb/${d.id}`,
-        sub: `#${d.id}${d.created ? ` · ${d.created.slice(0, 10)}` : ''}`,
+        sub: [d.pid, d.created?.slice(0, 10)].filter(Boolean).join(' · '),
       })),
     ];
     return html`
@@ -92,7 +96,7 @@ class TablesPage extends BifrostElement {
     onInput: (e) => this.queueSearch(e.target.value),
     onPick: (it) => this.pick(it),
     onEnter: () => {
-      const it = items[this.hi] ?? (items[0]?.address || items.length === 1 ? items[0] : null);
+      const it = items[this.hi] ?? (items[0]?.pinpoint || items.length === 1 ? items[0] : null);
       if (it) this.pick(it);
     },
     onMove: (d) => { if (items.length) this.hi = (this.hi + d + items.length) % items.length; },
@@ -121,8 +125,39 @@ class TablesPage extends BifrostElement {
           <div class="small-text secondary-text">${this.facts(t)}</div>
         </div>
         <span class="small-text secondary-text">${day(t.updated_at)}</span>
+        ${t.table ? html`<button class="circle transparent" title="Delete table" aria-label="Delete table"
+          @click=${(e) => { e.stopPropagation(); this.doomed = t; }}><i>delete</i></button>` : nothing}
       </li>`)}
-    </ul>`;
+    </ul>
+    <dialog class="tbl-dialog" @close=${() => { this.doomed = null; }}>
+      ${this.doomed ? html`<h5>Delete this table?</h5>
+        <p>${this.doomed.title || `#${this.doomed.doc_id}`}${this.doomed.page > 1 ? `, page ${this.doomed.page}` : ''}</p>
+        <nav class="right-align">
+          ${btn('Cancel', this.deleting, () => { this.doomed = null; }, 'border')}
+          ${btn(this.deleting ? 'Deleting...' : 'Delete', this.deleting, () => this.deleteTable(), 'error')}
+        </nav>` : nothing}
+    </dialog>`;
+  }
+
+  updated() {
+    const dlg = this.querySelector('dialog.tbl-dialog');
+    if (dlg && this.doomed && !dlg.open) dlg.showModal();
+    else if (dlg && !this.doomed && dlg.open) dlg.close();
+  }
+
+  async deleteTable() {
+    const t = this.doomed;
+    this.deleting = true;
+    try {
+      await api(`${API}/doc/${t.doc_id}/page/${t.page}`, { method: 'DELETE' });
+      this.doomed = null;
+      await this.load();
+    } catch (e) {
+      this.loadError = e.message;
+      this.doomed = null;
+    } finally {
+      this.deleting = false;
+    }
   }
 }
 customElements.define('tables-page', TablesPage);

@@ -295,6 +295,13 @@ MIGRATIONS: list[str] = [
     );
     CREATE INDEX page_notes_page ON page_notes (paperless_id, page);
     """,
+    # 23 per-document viewer options
+    """
+    CREATE TABLE doc_options (
+        paperless_id INTEGER PRIMARY KEY,
+        options      TEXT NOT NULL
+    );
+    """,
 ]
 
 

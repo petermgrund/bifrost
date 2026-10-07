@@ -1,5 +1,5 @@
 import { svg } from 'lit';
-import { BifrostElement, html, nothing, api, post, spinner } from './core.js';
+import { BifrostElement, html, nothing, api, post, spinner, statusLine } from './core.js';
 import * as G from './table-geom.js';
 
 const API = '/tables/api';
@@ -10,10 +10,26 @@ const HISTORY = 100;
 const STEPS = [1, 2, 5, 10, 20, 50, 100];
 
 const LANGS = [['orig', 'Original'], ['trans', 'Translation'], ['both', 'Both']];
+const SIZES_ITSELF = CSS.supports('field-sizing', 'content');
 const LANG_KEY = 'bifrost-tables-lang';
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 const pad = (n) => String(n).padStart(2, '0');
+const year = (date) => /\d{4}/.exec(date || '')?.[0] || '';
+const DITTO = /^\s*(?:[-–—_"'″〃.]+|(?:do|ditto)\b\.?)\s*/i;
+
+function put(map, rid, cid, value) {
+  return { ...(map || {}), [rid]: { ...(map?.[rid] || {}), [cid]: value } };
+}
+
+function drop(map, rid, cid) {
+  const out = { ...(map || {}) };
+  const row = { ...(out[rid] || {}) };
+  delete row[cid];
+  if (Object.keys(row).length) out[rid] = row;
+  else delete out[rid];
+  return out;
+}
 const editable = (t) => t?.matches?.('input, textarea, select, [contenteditable]');
 const stop = (e) => e.stopPropagation();
 
@@ -60,6 +76,7 @@ class TableViewer extends BifrostElement {
     hover: { state: true },
     cur: { state: true },
     sel: { state: true },
+    selCol: { state: true },
     draft: { state: true },
     lang: { state: true },
     notes: { state: true },
@@ -78,6 +95,12 @@ class TableViewer extends BifrostElement {
     toast: { state: true },
     dlg: { state: true },
     copyList: { state: true },
+    people: { state: true },
+    pOpen: { state: true },
+    pq: { state: true },
+    pResults: { state: true },
+    pHi: { state: true },
+    pError: { state: true },
   };
 
   constructor() {
@@ -96,6 +119,7 @@ class TableViewer extends BifrostElement {
     this.hover = null;
     this.cur = null;
     this.sel = new Set();
+    this.selCol = null;
     this.anchor = null;
     this.draft = null;
     this.field = 'orig';
@@ -117,6 +141,14 @@ class TableViewer extends BifrostElement {
     this.toast = null;
     this.dlg = null;
     this.copyList = [];
+    this.people = {};
+    this.pOpen = false;
+    this.pq = '';
+    this.pEdited = false;
+    this.pResults = null;
+    this.pHi = 0;
+    this.pError = '';
+    this.peopleSeq = 0;
     this.past = [];
     this.future = [];
     this.gesture = null;
@@ -124,7 +156,7 @@ class TableViewer extends BifrostElement {
     this.chain = Promise.resolve();
     this.onKey = (e) => this.key(e);
     this.onHide = () => this.flushNow();
-    this.onHash = () => this.lineFromHash();
+    this.onHash = () => this.applyHash();
   }
 
   connectedCallback() {
@@ -163,7 +195,7 @@ class TableViewer extends BifrostElement {
 
   async loadPage() {
     Object.assign(this, {
-      grid: null, rev: 0, past: [], future: [], hover: null, cur: null, sel: new Set(), anchor: null,
+      grid: null, rev: 0, past: [], future: [], hover: null, cur: null, sel: new Set(), selCol: null, anchor: null,
       draft: null, picked: null, renaming: null, linesDraft: null, imgSize: null, imgError: '',
       conflict: false, saveError: '', tool: 'select', notes: [], noteHover: null, noteEdit: null,
       placing: false,
@@ -178,8 +210,9 @@ class TableViewer extends BifrostElement {
       return;
     }
     this.mode = this.grid || this.notes.length ? 'view' : 'layout';
+    this.loadPeople();
     if (this.imgSize) this.fit();
-    this.lineFromHash();
+    this.applyHash();
   }
 
   async goPage(n) {
@@ -197,7 +230,7 @@ class TableViewer extends BifrostElement {
   imgLoaded(e) {
     this.imgSize = [e.target.naturalWidth, e.target.naturalHeight];
     this.fit();
-    this.lineFromHash();
+    this.applyHash();
   }
 
   updated(changed) {
@@ -208,7 +241,7 @@ class TableViewer extends BifrostElement {
         this.vp = [width, height];
         if (this.wantFit) {
           this.fit();
-          this.lineFromHash();
+          this.applyHash();
         }
       });
       this.resizer.observe(vp);
@@ -216,7 +249,10 @@ class TableViewer extends BifrostElement {
     const editKey = this.draft && this.cur ? `${this.cur.row}:${this.cur.col}` : null;
     if (editKey !== this.editKey) {
       this.editKey = editKey;
-      if (editKey) this.focusEditor();
+      if (editKey) {
+        for (const box of this.querySelectorAll('.tbl-editor textarea')) this.grow(box);
+        this.focusEditor();
+      }
     }
     if (changed.has('renaming') && this.renaming !== null) {
       const input = this.querySelector(`.tbl-rename input[data-field="${this.renameField}"]`);
@@ -231,13 +267,17 @@ class TableViewer extends BifrostElement {
       box?.setSelectionRange(box.value.length, box.value.length);
     }
     const dlg = this.querySelector('dialog.tbl-dialog');
-    if (dlg && this.dlg && !dlg.open) dlg.showModal();
-    else if (dlg && !this.dlg && dlg.open) dlg.close();
+    if (dlg && this.dlg && !dlg.open) {
+      dlg.showModal();
+      const input = dlg.querySelector('input');
+      input?.focus();
+      input?.select();
+    } else if (dlg && !this.dlg && dlg.open) dlg.close();
   }
 
   focusEditor() {
-    const input = this.querySelector(`.tbl-editor input[data-field="${this.field}"]`)
-      || this.querySelector('.tbl-editor input');
+    const input = this.querySelector(`.tbl-editor [data-field="${this.field}"]`)
+      || this.querySelector('.tbl-editor textarea');
     if (!input) return;
     input.focus();
     if (this.typed) input.setSelectionRange(input.value.length, input.value.length);
@@ -273,6 +313,10 @@ class TableViewer extends BifrostElement {
   }
 
   fit() {
+    if (!this.vp[0] && this.viewport) {
+      const { width, height } = this.viewport.getBoundingClientRect();
+      if (width) this.vp = [width, height];
+    }
     this.wantFit = !this.imgSize || !this.vp[0];
     if (this.wantFit) return;
     const [w, h] = this.imgSize;
@@ -386,6 +430,7 @@ class TableViewer extends BifrostElement {
     if (!g || (this.cur && (this.cur.row >= g.rows.length || this.cur.col >= g.cols.length))) this.cur = null;
     this.hover = null;
     this.queueSave();
+    this.loadPeople();
   }
 
   queueSave() {
@@ -457,26 +502,63 @@ class TableViewer extends BifrostElement {
       else delete out[rid];
       next = { ...next, [key]: out };
     }
+    const had = next.people?.[rid]?.[cid] || null;
+    if (vals.person !== undefined && (vals.person || null) !== had) {
+      next = { ...next, people: vals.person ? put(next.people, rid, cid, vals.person) : drop(next.people, rid, cid) };
+    } else if (vals.person === undefined && vals.orig !== undefined && !vals.orig.trim() && had) {
+      next = { ...next, people: drop(next.people, rid, cid) };
+    }
     if (next !== g) this.commit(next);
   }
 
-  get fields() { return this.lang === 'both' ? ['orig', 'trans'] : [this.lang]; }
+  get shown() { return this.info?.translations ? this.lang : 'orig'; }
+
+  get fields() { return this.shown === 'both' ? ['orig', 'trans'] : [this.shown]; }
+
+  get order() { return this.pOpen && !this.draft?.person ? [...this.fields, 'person'] : this.fields; }
 
   startEdit(text) {
     if (!this.cur || this.busy) return;
-    const { row, col } = this.cur;
     this.field = this.fields[0];
     this.typed = text !== undefined;
-    const draft = { orig: this.value(row, col), trans: this.value(row, col, 'trans') };
-    if (this.typed) draft[this.field] = text;
+    this.openDraft(text);
+  }
+
+  openDraft(text) {
+    const { row, col } = this.cur;
+    const draft = { orig: this.value(row, col), trans: this.value(row, col, 'trans'), person: this.linked(row, col) };
+    if (text !== undefined) draft[this.field] = text;
     this.draft = draft;
+    this.pOpen = !!(this.grid.cols[col].person || draft.person);
+    this.pEdited = false;
+    this.pq = this.personQuery(row, col, draft.orig);
+    this.pResults = null;
+    this.pError = '';
+    if (this.pOpen && !draft.person) this.findPeople();
   }
 
   commitEdit() {
     if (!this.draft || !this.cur) return;
     const draft = this.draft;
     this.draft = null;
-    this.setCell(this.cur.row, this.cur.col, Object.fromEntries(this.fields.map((f) => [f, draft[f]])));
+    clearTimeout(this.pTimer);
+    this.setCell(this.cur.row, this.cur.col,
+      { ...Object.fromEntries(this.fields.map((f) => [f, draft[f]])), person: draft.person || null });
+  }
+
+  draftInput(f, e) {
+    this.draft[f] = e.target.value;
+    this.grow(e.target);
+    if (f === 'orig' && this.pOpen && !this.draft.person && !this.pEdited) {
+      this.pq = this.personQuery(this.cur.row, this.cur.col, e.target.value);
+      this.queueFind();
+    }
+  }
+
+  grow(el) {
+    if (SIZES_ITSELF) return;
+    el.style.blockSize = 'auto';
+    el.style.blockSize = `${el.scrollHeight}px`;
   }
 
   step({ row, col }, dr, dc, wrap) {
@@ -502,16 +584,36 @@ class TableViewer extends BifrostElement {
       this.draft = null;
       return;
     }
-    const inside = this.lang === 'both' && e.key === 'Tab' && (field === 'orig') !== e.shiftKey;
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      this.openPersonRow();
+      return;
+    }
+    if (field === 'person' && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+      const n = this.pResults?.length || 0;
+      if (n) {
+        e.preventDefault();
+        this.pHi = (this.pHi + (e.key === 'ArrowDown' ? 1 : -1) + n) % n;
+      }
+      return;
+    }
+    if (e.key === 'Enter' && field !== 'person' && (e.shiftKey || e.altKey)) return;
+    const order = this.order;
+    const at = order.indexOf(field);
+    const inside = e.key === 'Tab' && (e.shiftKey ? at > 0 : at < order.length - 1);
     if ((e.key !== 'Enter' && e.key !== 'Tab') || inside) return;
     e.preventDefault();
-    const back = e.shiftKey ? -1 : 1;
-    const next = e.key === 'Enter' ? this.step(this.cur, back, 0, false) : this.step(this.cur, 0, back, true);
+    if (field === 'person' && e.key === 'Enter' && this.pResults?.length) {
+      this.pickPerson(this.pResults[Math.min(this.pHi, this.pResults.length - 1)], false);
+    }
+    const next = e.key === 'Enter' ? this.step(this.cur, 1, 0, false) : this.step(this.cur, 0, e.shiftKey ? -1 : 1, true);
     this.commitEdit();
     if (!next) return;
     this.moveTo(next);
-    this.field = e.key === 'Tab' && this.lang === 'both' ? (e.shiftKey ? 'trans' : 'orig') : field;
-    this.draft = { orig: this.value(next.row, next.col), trans: this.value(next.row, next.col, 'trans') };
+    this.field = e.key === 'Enter' ? (field === 'person' ? this.fields[0] : field)
+      : e.shiftKey ? this.fields[this.fields.length - 1] : this.fields[0];
+    this.typed = false;
+    this.openDraft();
   }
 
   editorOut(e) {
@@ -520,6 +622,7 @@ class TableViewer extends BifrostElement {
 
   selectRows(js) {
     const g = this.grid;
+    this.selCol = null;
     this.sel = new Set(js.map((j) => g.rows[j].id));
     this.anchor = js.length ? js[js.length - 1] : null;
     this.syncHash();
@@ -527,6 +630,7 @@ class TableViewer extends BifrostElement {
 
   pickRow(j, e) {
     const g = this.grid;
+    this.selCol = null;
     const id = g.rows[j].id;
     if (e.shiftKey && this.anchor !== null) {
       const [a, b] = [Math.min(this.anchor, j), Math.max(this.anchor, j)];
@@ -544,7 +648,7 @@ class TableViewer extends BifrostElement {
 
   clearRows() {
     const g = this.grid;
-    const keys = this.fields.map((f) => (f === 'orig' ? 'cells' : 'trans'));
+    const keys = this.fields.flatMap((f) => (f === 'orig' ? ['cells', 'people'] : ['trans']));
     if (![...this.sel].some((id) => keys.some((k) => g[k]?.[id]))) return;
     const next = { ...g };
     for (const k of keys) {
@@ -567,23 +671,87 @@ class TableViewer extends BifrostElement {
     return [a, b];
   }
 
-  syncHash() {
+  // ---- citable addresses: CODE[.Pn].Ln[-m][.Cn]
+
+  colNo(i) { return this.grid.cols[i].no || i + 1; }
+
+  selection() {
     const g = this.grid;
-    const j = g ? g.rows.findIndex((r) => this.sel.has(r.id)) : -1;
+    if (!g) return null;
+    if (this.selCol !== null) return { line: null, last: null, col: this.colNo(this.selCol) };
+    const js = g.rows.map((r, j) => (this.sel.has(r.id) ? j : -1)).filter((j) => j >= 0);
+    if (!js.length || js[js.length - 1] - js[0] !== js.length - 1) return null;
+    const col = js.length === 1 && this.cur?.row === js[0] ? this.colNo(this.cur.col) : null;
+    return { line: g.first_line + js[0], last: g.first_line + js[js.length - 1], col };
+  }
+
+  suffix({ line, last, col }) {
+    const parts = line === null ? [] : [`L${line}${last !== line ? `-${last}` : ''}`];
+    return [...parts, ...(col === null ? [] : [`C${col}`])].join('.');
+  }
+
+  address() {
+    const s = this.selection();
+    if (!s || !this.info?.code) return '';
+    return [this.info.code, ...(this.info.pages > 1 ? [`P${this.page}`] : []), this.suffix(s)].join('.');
+  }
+
+  syncHash() {
+    const s = this.selection();
     const url = new URL(location.href);
-    url.hash = j >= 0 ? `line=${g.first_line + j}` : '';
+    url.hash = s ? this.suffix(s) : '';
     history.replaceState(null, '', url);
   }
 
-  lineFromHash() {
-    const m = /line=(-?\d+)/.exec(location.hash);
+  applyHash() {
     const g = this.grid;
-    if (!m || !g || !this.imgSize) return;
-    const j = Number(m[1]) - g.first_line;
-    if (j < 0 || j >= g.rows.length) return;
-    this.cur = { row: j, col: 0 };
-    this.selectRows([j]);
-    this.ensureVisible(j, 0);
+    if (!g || !this.imgSize) return;
+    const frag = decodeURIComponent(location.hash.slice(1));
+    const old = /^line=(\d+)$/.exec(frag);
+    const m = old ? [frag, old[1]] : /^(?:L(\d+)(?:-(\d+))?)?(?:\.?C(\d+))?$/i.exec(frag);
+    if (!m || (!m[1] && !m[3])) return;
+    const col = m[3] ? g.cols.findIndex((_, i) => this.colNo(i) === Number(m[3])) : -1;
+    if (!m[1]) {
+      if (col >= 0 && this.selCol !== col) this.selectColumn(col);
+      return;
+    }
+    const [a, b] = [Number(m[1]), Number(m[2] || m[1])].map((n) => n - g.first_line);
+    const [lo, hi] = [Math.max(0, Math.min(a, b)), Math.min(g.rows.length - 1, Math.max(a, b))];
+    if (lo > hi) return;
+    this.selCol = null;
+    this.cur = col >= 0 && lo === hi ? { row: lo, col } : null;
+    this.selectRows(Array.from({ length: hi - lo + 1 }, (_, k) => lo + k));
+    this.ensureVisible(lo, Math.max(col, 0));
+  }
+
+  selectColumn(i) {
+    this.commitEdit();
+    this.selCol = this.selCol === i ? null : i;
+    this.cur = null;
+    this.sel = new Set();
+    this.anchor = null;
+    this.syncHash();
+    if (this.selCol !== null) this.ensureColVisible(i);
+  }
+
+  async copyText(text) {
+    let ok = false;
+    try {
+      await navigator.clipboard.writeText(text);
+      ok = true;
+    } catch { }
+    if (!ok) {
+      const ta = Object.assign(document.createElement('textarea'), { value: text, readOnly: true });
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      const back = document.activeElement;
+      document.body.append(ta);
+      ta.select();
+      try { ok = document.execCommand('copy'); } catch { }
+      ta.remove();
+      back?.focus?.();
+    }
+    this.say(ok ? `Copied ${text}` : `Could not copy ${text}`, !ok);
   }
 
   async transcribe() {
@@ -619,19 +787,135 @@ class TableViewer extends BifrostElement {
     } catch { }
   }
 
+  async setTranslations(on) {
+    this.commitEdit();
+    this.commitRename();
+    try {
+      const opts = await api(`${API}/doc/${this.doc}/options`, {
+        method: 'PUT', body: JSON.stringify({ translations: on }),
+      });
+      this.info = { ...this.info, ...opts };
+    } catch (e) {
+      this.say(why(e), true);
+    }
+  }
+
   colNames(c) {
-    if (this.lang === 'orig') return [c.name, ''];
-    if (this.lang === 'trans') return [c.trans || c.name, ''];
-    return [c.name, c.trans && c.trans !== c.name ? c.trans : ''];
+    const name = c.name || `C${this.colNo(this.grid.cols.indexOf(c))}`;
+    if (this.shown === 'orig') return [name, ''];
+    if (this.shown === 'trans') return [c.trans || name, ''];
+    return [name, c.trans && c.trans !== c.name ? c.trans : ''];
   }
 
   tipLines(row, col) {
     const c = this.grid.cols[col];
     const [v, t] = [this.value(row, col), this.value(row, col, 'trans')];
-    const lines = this.lang === 'orig' ? [[c.name, v]]
-      : this.lang === 'trans' ? [[c.trans || c.name, t || v]]
+    const lines = this.shown === 'orig' ? [[c.name, v]]
+      : this.shown === 'trans' ? [[c.trans || c.name, t || v]]
         : [[c.name, v], ...(t ? [[c.trans || c.name, t]] : [])];
     return lines.filter(([name, value]) => name || value);
+  }
+
+  // ---- people
+
+  linked(row, col) {
+    const g = this.grid;
+    return g.people?.[g.rows[row].id]?.[g.cols[col].id] || null;
+  }
+
+  async loadPeople() {
+    const handles = [...new Set(Object.values(this.grid?.people || {}).flatMap((r) => Object.values(r)))]
+      .filter((h) => !this.people[h]);
+    if (!handles.length) return;
+    try {
+      const found = await api(`${API}/people/lookup?handles=${handles.join(',')}`);
+      this.people = { ...this.people, ...Object.fromEntries(found.map((p) => [p.handle, p])) };
+    } catch { }
+  }
+
+  personQuery(row, col, cellText = this.value(row, col)) {
+    const words = (t) => t.replace(DITTO, '').replace(/[^\p{L}\p{N}'\- ]+/gu, ' ').replace(/\s+/g, ' ').trim();
+    const text = cellText.split('\n')[0];
+    if (!DITTO.test(text)) return words(text);
+    for (let r = row - 1; r >= 0; r--) {
+      const above = this.value(r, col);
+      if (!above || DITTO.test(above)) continue;
+      const surname = above.includes(',') ? above.split(',')[0] : above.trim().split(/\s+/).pop();
+      return words(`${surname} ${text.replace(DITTO, '')}`);
+    }
+    return words(text);
+  }
+
+  personText(p) {
+    if (p.missing) return html`<div class="tbl-who max"><div>Deleted from Gramps</div></div>`;
+    const [b, d] = [year(p.birth), year(p.death)];
+    return html`<div class="tbl-who max"><div>${p.name}</div>
+      ${b || d ? html`<div class="small-text secondary-text">${b}–${d}</div>` : nothing}</div>`;
+  }
+
+  avatar(p) {
+    return p.photo
+      ? html`<img class="tbl-avatar" src="${API}/people/${p.handle}/photo" alt="" loading="lazy">`
+      : html`<i class="tbl-avatar">${p.missing ? 'person_off' : 'person'}</i>`;
+  }
+
+  openPersonRow() {
+    if (!this.draft) this.startEdit();
+    if (!this.draft) return;
+    this.pOpen = true;
+    if (this.draft.person) return;
+    if (this.pResults === null) this.findPeople();
+    this.field = 'person';
+    this.updateComplete.then(() => this.querySelector('.tbl-editor [data-field="person"]')?.select());
+  }
+
+  queueFind() {
+    clearTimeout(this.pTimer);
+    this.pTimer = setTimeout(() => this.findPeople(), 250);
+  }
+
+  async findPeople() {
+    const seq = ++this.peopleSeq;
+    try {
+      const found = await api(`${API}/people?q=${encodeURIComponent(this.pq.trim())}&limit=5`);
+      if (seq !== this.peopleSeq) return;
+      this.pResults = found;
+      this.pError = '';
+      this.people = { ...this.people, ...Object.fromEntries(found.map((p) => [p.handle, p])) };
+    } catch (e) {
+      if (seq !== this.peopleSeq) return;
+      this.pResults = [];
+      this.pError = why(e);
+    }
+    this.pHi = 0;
+  }
+
+  personInput(e) {
+    this.pq = e.target.value;
+    this.pEdited = true;
+    this.queueFind();
+  }
+
+  pickPerson(person, refocus = true) {
+    this.people = { ...this.people, [person.handle]: person };
+    this.draft = { ...this.draft, person: person.handle };
+    if (refocus) {
+      this.field = this.fields[0];
+      this.updateComplete.then(() => this.querySelector(`.tbl-editor [data-field="${this.field}"]`)?.focus());
+    }
+  }
+
+  unpickPerson() {
+    this.draft = { ...this.draft, person: null };
+    this.pEdited = false;
+    this.pq = this.personQuery(this.cur.row, this.cur.col, this.draft.orig);
+    this.findPeople();
+    this.updateComplete.then(() => this.querySelector('.tbl-editor [data-field="person"]')?.focus());
+  }
+
+  togglePersonCol(i) {
+    const g = this.grid;
+    this.commit({ ...g, cols: g.cols.map((c, k) => (k === i ? { ...c, person: !c.person } : c)) });
   }
 
   // ---- notes
@@ -747,7 +1031,8 @@ class TableViewer extends BifrostElement {
     }
     this.picked = null;
     this.commit({
-      ...g, cells: merge(g.cells), trans: merge(g.trans), [kind === 'col' ? 'cols' : 'rows']: rest,
+      ...g, cells: merge(g.cells), trans: merge(g.trans), people: merge(g.people),
+      [kind === 'col' ? 'cols' : 'rows']: rest,
       group_col: kind === 'col' && g.group_col === gone.id ? keep.id : g.group_col,
     });
   }
@@ -760,7 +1045,7 @@ class TableViewer extends BifrostElement {
     const rows = Array.from({ length: count }, (_, i) => ({ id: g.rows[i]?.id || uid(), v: [i / count, i / count] }));
     const ids = new Set(rows.map((r) => r.id));
     const keep = (map = {}) => Object.fromEntries(Object.entries(map).filter(([rid]) => ids.has(rid)));
-    this.commit({ ...g, rows, cells: keep(g.cells), trans: keep(g.trans) });
+    this.commit({ ...g, rows, cells: keep(g.cells), trans: keep(g.trans), people: keep(g.people) });
   }
 
   setFirstLine(raw) {
@@ -770,11 +1055,13 @@ class TableViewer extends BifrostElement {
     this.commit({ ...g, first_line: G.clamp(n, -99999, 99999) });
   }
 
+  get renameFields() { return this.info.translations ? ['name', 'trans', 'no'] : ['name', 'no']; }
+
   startRename(i, field = 'name') {
     if (this.renaming !== null) this.commitRename();
     const c = this.grid.cols[i];
     this.renameField = field;
-    this.renameDraft = { name: c.name, trans: c.trans || '' };
+    this.renameDraft = { name: c.name, trans: c.trans || '', no: String(this.colNo(i)) };
     this.renaming = i;
     this.ensureColVisible(i);
   }
@@ -784,11 +1071,21 @@ class TableViewer extends BifrostElement {
     if (i === null) return;
     this.renaming = null;
     const g = this.grid;
+    const c = g?.cols[i];
+    if (!c) return;
     const tidy = (t) => t.replace(/\s+/g, ' ').trim();
     const [name, trans] = [tidy(this.renameDraft.name), tidy(this.renameDraft.trans)];
-    const c = g?.cols[i];
-    if (c && (c.name !== name || (c.trans || '') !== trans)) {
-      this.commit({ ...g, cols: g.cols.map((x, k) => (k === i ? { ...x, name, trans } : x)) });
+    let no = parseInt(this.renameDraft.no, 10);
+    const taken = g.cols.findIndex((_, k) => k !== i && this.colNo(k) === no);
+    if (!(no >= 1 && no <= 9999) || taken >= 0) {
+      if (taken >= 0) this.say(`C${no} is already ${g.cols[taken].name || `column ${taken + 1}`}`, true);
+      no = this.colNo(i);
+    }
+    const next = { ...c, name, trans };
+    if (no === i + 1) delete next.no;
+    else next.no = no;
+    if (c.name !== name || (c.trans || '') !== trans || (c.no || 0) !== (next.no || 0)) {
+      this.commit({ ...g, cols: g.cols.map((x, k) => (k === i ? next : x)) });
     }
   }
 
@@ -799,13 +1096,15 @@ class TableViewer extends BifrostElement {
       this.renaming = null;
       return;
     }
-    const inside = e.key === 'Tab' && (field === 'name') !== e.shiftKey;
+    const order = this.renameFields;
+    const at = order.indexOf(field);
+    const inside = e.key === 'Tab' && (e.shiftKey ? at > 0 : at < order.length - 1);
     if ((e.key !== 'Enter' && e.key !== 'Tab') || inside) return;
     e.preventDefault();
     const next = this.renaming + (e.shiftKey ? -1 : 1);
     this.commitRename();
     if (e.key === 'Tab' && next >= 0 && next < this.grid.cols.length) {
-      this.startRename(next, e.shiftKey ? 'trans' : 'name');
+      this.startRename(next, e.shiftKey ? order[order.length - 1] : 'name');
     }
   }
 
@@ -921,7 +1220,7 @@ class TableViewer extends BifrostElement {
     try {
       const src = (await api(`${API}/doc/${t.doc_id}/page/${t.page}`)).grid;
       if (!src) return;
-      this.commit({ ...src, frame: this.grid?.frame || src.frame, cells: {}, trans: {} });
+      this.commit({ ...src, frame: this.grid?.frame || src.frame, cells: {}, trans: {}, people: {} });
       this.tool = 'select';
     } catch (e) {
       this.say(why(e), true);
@@ -1092,10 +1391,16 @@ class TableViewer extends BifrostElement {
       this.selectRows(this.grid.rows.map((_, j) => j));
       return;
     }
+    if (mod && k.toLowerCase() === 'k' && this.cur) {
+      e.preventDefault();
+      this.openPersonRow();
+      return;
+    }
     if (mod || e.altKey) return;
     const arrows = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
     if (k === 'Escape') {
       this.cur = null;
+      this.selCol = null;
       this.selectRows([]);
     } else if (!this.cur) {
       if (k in arrows) {
@@ -1197,7 +1502,10 @@ class TableViewer extends BifrostElement {
         <button class="${this.mode === 'layout' ? 'active' : ''}" ?disabled=${!!this.busy}
           @click=${() => this.setMode('layout')}><i>grid_on</i><span>Layout</span></button>
       </nav>
-      ${g ? html`<nav class="group connected">${LANGS.map(([id, label]) => html`<button
+      ${g ? html`<button class="circle ${this.info.translations ? 'fill' : 'transparent'}"
+        aria-pressed=${this.info.translations ? 'true' : 'false'} title="Translations" aria-label="Translations"
+        @click=${() => this.setTranslations(!this.info.translations)}><i>translate</i></button>` : nothing}
+      ${g && this.info.translations ? html`<nav class="group connected">${LANGS.map(([id, label]) => html`<button
         class="${this.lang === id ? 'active' : ''}" @click=${() => this.setLang(id)}>${label}</button>`)}</nav>` : nothing}
       ${this.mode === 'view' && this.imgSize ? html`<button class="${this.placing ? '' : 'border'}"
         aria-pressed=${this.placing ? 'true' : 'false'} @click=${() => { this.placing = !this.placing; }}>
@@ -1216,6 +1524,8 @@ class TableViewer extends BifrostElement {
       </button>` : nothing}
       ${g && rows && this.mode === 'view' ? html`<button class="border" ?disabled=${!!this.busy}
         @click=${() => this.clearRows()}><i>backspace</i><span>Clear</span></button>` : nothing}
+      ${this.address() ? html`<button class="border tbl-address" title="Copy" @click=${() => this.copyText(this.address())}>
+        <span class="mono">${this.address()}</span><i>content_copy</i></button>` : nothing}
       ${g && this.rev ? html`<a class="button circle transparent" href="${this.gridUrl}/export.csv" download
         aria-label="Download CSV" title="Download CSV"><i>download</i></a>` : nothing}
       ${i.paperless_url ? html`<a class="button circle transparent" href=${i.paperless_url} target="_blank"
@@ -1272,7 +1582,7 @@ class TableViewer extends BifrostElement {
       const [[x0, y0], [x1, y1]] = this.drawRect;
       out.push(poly([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], 't-draw', 1.5));
     }
-    if (g) out.push(this.mode === 'view' ? this.viewMarks(poly) : this.layoutMarks(poly, xy, px));
+    if (g) out.push(this.mode === 'view' ? this.viewMarks(poly, px) : this.layoutMarks(poly, xy, px));
     if (this.mode === 'view') out.push(this.noteMarks(px));
     return html`<svg class="tbl-svg" width=${w} height=${h} viewBox="0 0 ${w} ${h}">${out}</svg>`;
   }
@@ -1287,10 +1597,11 @@ class TableViewer extends BifrostElement {
     return marks;
   }
 
-  viewMarks(poly) {
+  viewMarks(poly, px) {
     const g = this.grid;
     const P = G.points(g);
     const n = g.cols.length;
+    const [w, h] = this.imgSize;
     const band = (j) => [P[j][0], P[j][n], P[j + 1][n], P[j + 1][0]];
     const cell = (j, i) => [P[j][i], P[j][i + 1], P[j + 1][i + 1], P[j + 1][i]];
     const out = [];
@@ -1298,11 +1609,26 @@ class TableViewer extends BifrostElement {
     const group = focus === undefined ? null : this.groupOf(focus);
     if (group) for (let j = group[0]; j < group[1]; j++) out.push(poly(band(j), 't-group'));
     g.rows.forEach((r, j) => { if (this.sel.has(r.id)) out.push(poly(band(j), 't-sel')); });
+    if (this.selCol !== null) {
+      const [i, m] = [this.selCol, g.rows.length];
+      out.push(poly([P[0][i], P[0][i + 1], P[m][i + 1], P[m][i]], 't-sel'));
+    }
     if (this.hover) {
       out.push(poly(band(this.hover.row), 't-hover'));
       out.push(poly(cell(this.hover.row, this.hover.col), 't-cell', 2));
     }
     if (this.cur) out.push(poly(cell(this.cur.row, this.cur.col), 't-cursor', 2.5));
+    const rowAt = new Map(g.rows.map((r, j) => [r.id, j]));
+    const colAt = new Map(g.cols.map((c, i) => [c.id, i]));
+    const a = 9 * px;
+    for (const [rid, links] of Object.entries(g.people || {})) {
+      for (const cid of Object.keys(links)) {
+        const [j, i] = [rowAt.get(rid), colAt.get(cid)];
+        if (j === undefined || i === undefined) continue;
+        const [x, y] = P[j][i + 1];
+        out.push(poly([[x, y], [x - a / w, y], [x, y + a / h]], 't-link'));
+      }
+    }
     return out;
   }
 
@@ -1339,7 +1665,7 @@ class TableViewer extends BifrostElement {
   renderHead() {
     const g = this.grid;
     const xs = this.colXs();
-    const hot = this.mode === 'view' ? this.focusCell()?.col : this.renaming;
+    const hot = this.mode === 'view' ? this.focusCell()?.col ?? this.selCol : this.renaming;
     return html`<div class="tbl-head" @pointerdown=${stop}>
       ${g.cols.map((c, i) => {
         const [l, r] = [xs[i], xs[i + 1]];
@@ -1347,7 +1673,7 @@ class TableViewer extends BifrostElement {
         const [top, sub] = this.colNames(c);
         return html`<div class="tbl-col ${i === hot ? 'hot' : ''}" style="left:${l}px;width:${r - l}px"
           title=${[c.name, c.trans].filter(Boolean).join(' / ') || nothing}
-          @click=${() => { if (this.mode === 'layout') this.startRename(i); }}>
+          @click=${() => (this.mode === 'layout' ? this.startRename(i) : this.selectColumn(i))}>
           <span>${top}</span>${sub ? html`<span class="tbl-sub">${sub}</span>` : nothing}</div>`;
       })}
     </div>`;
@@ -1378,13 +1704,16 @@ class TableViewer extends BifrostElement {
     if (this.mode !== 'view' || !this.hover || this.draft || this.placing || this.gesture?.moved) return nothing;
     const { row, col } = this.hover;
     const lines = this.tipLines(row, col);
-    if (!lines.length) return nothing;
+    const handle = this.linked(row, col);
+    const person = handle && this.people[handle];
+    if (!lines.length && !person) return nothing;
     const b = this.cellBox(row, col);
     const flip = b.r + 12 + 280 > this.vp[0];
     const x = flip ? `right:${this.vp[0] - b.l + 12}px` : `left:${b.r + 12}px`;
     return html`<div class="tbl-tip ${flip ? 'flip' : ''}" style="${x};top:${(b.t + b.b) / 2}px">
       ${lines.map(([name, value], i) => html`<div class=${i ? 'tbl-sub' : ''}>${name
         ? html`<span>${name}${value ? ': ' : ''}</span>` : nothing}${value ? html`<strong>${value}</strong>` : nothing}</div>`)}
+      ${person ? html`<div class="tbl-person">${this.avatar(person)}${this.personText(person)}</div>` : nothing}
     </div>`;
   }
 
@@ -1427,22 +1756,55 @@ class TableViewer extends BifrostElement {
     if (!this.draft || !this.cur || this.mode !== 'view') return nothing;
     const { row, col } = this.cur;
     const b = this.cellBox(row, col);
-    const fields = this.fields;
-    const width = Math.min(Math.max(b.r - b.l, 240), this.vp[0] - 16);
-    const height = fields.length * 56 + 12;
+    const c = this.grid.cols[col];
+    const line = this.grid.first_line + row;
+    const found = this.draft.person ? 0 : Math.min(this.pResults?.length || 0, 5);
+    const width = Math.min(Math.max(b.r - b.l, 300), this.vp[0] - 16);
+    const height = this.fields.length * 60 + (this.pOpen ? 60 + found * 48 : 0) + 16;
     const left = G.clamp(b.l, 8, this.vp[0] - width - 8);
     const top = b.b + height + 8 < this.vp[1] ? b.b + 6 : Math.max(HEAD_H + 4, b.t - height - 6);
-    const c = this.grid.cols[col];
-    const label = (f) => (f === 'orig' ? c.name || `Column ${col + 1}` : c.trans || 'Translation');
+    const label = (f) => `${f === 'orig' ? c.name || `C${this.colNo(col)}` : c.trans || 'Translation'}, R${line}`;
     return html`<div class="tbl-pop tbl-editor" style="left:${left}px;top:${top}px;width:${width}px"
       @pointerdown=${stop} @dblclick=${stop} @wheel=${stop} @focusout=${(e) => this.editorOut(e)}>
-      ${fields.map((f) => html`<div class="field label border small no-margin">
-        <input type="text" placeholder=" " data-field=${f} .value=${this.draft[f]}
-          @input=${(e) => { this.draft[f] = e.target.value; }}
-          @keydown=${(e) => this.editorKey(e, f)}>
-        <label>${label(f)} · ${this.grid.first_line + row}</label>
+      ${this.fields.map((f) => html`<div class="field label textarea border small no-margin">
+        <textarea rows="1" placeholder=" " data-field=${f} .value=${this.draft[f]}
+          @input=${(e) => this.draftInput(f, e)} @keydown=${(e) => this.editorKey(e, f)}></textarea>
+        <label>${label(f)}</label>
       </div>`)}
+      ${this.pOpen ? this.renderPersonRow() : nothing}
     </div>`;
+  }
+
+  renderPersonRow() {
+    const handle = this.draft.person;
+    if (handle) {
+      const p = this.people[handle] || { handle, name: '' };
+      const url = this.info.gramps_url;
+      return html`<div class="tbl-chip">
+        ${this.avatar(p)}${this.personText(p)}
+        ${url && p.gramps_id ? html`<a class="button circle transparent small" href="${url}/person/${p.gramps_id}"
+          target="_blank" rel="noopener" title="Open in Gramps" aria-label="Open in Gramps">
+          <span class="app-icon" style="--icon:url('/static/vendor/icons/gramps-web.svg')"></span></a>` : nothing}
+        <button class="circle transparent small" title="Remove person" aria-label="Remove person"
+          @mousedown=${(e) => e.preventDefault()} @click=${() => this.unpickPerson()}><i>close</i></button>
+      </div>`;
+    }
+    const results = (this.pResults || []).slice(0, 5);
+    return html`<div class="field label prefix border small no-margin">
+        <i>person_add</i>
+        <input type="text" placeholder=" " autocomplete="off" data-field="person" .value=${this.pq}
+          @input=${(e) => this.personInput(e)} @keydown=${(e) => this.editorKey(e, 'person')}>
+        <label>Person</label>
+      </div>
+      ${this.pError ? html`<div class="small-text error-text">${this.pError}</div>` : nothing}
+      ${results.length ? html`<ul class="list tbl-people-found">
+        ${results.map((p, i) => html`<li class="${i === this.pHi ? 'active' : ''}"
+          @mousedown=${(e) => e.preventDefault()} @click=${() => this.pickPerson(p)}>
+          ${this.avatar(p)}
+          ${this.personText(p)}
+          <span class="small-text secondary-text">${p.gramps_id}</span>
+        </li>`)}
+      </ul>` : nothing}`;
   }
 
   renderRename() {
@@ -1453,8 +1815,9 @@ class TableViewer extends BifrostElement {
     const width = 280;
     const left = G.clamp(xs[i], GUTTER_W + 4, this.vp[0] - width - 8);
     const group = g.group_col === g.cols[i].id;
-    const input = (field, label) => html`<div class="field label border small no-margin">
-      <input type="text" placeholder=" " data-field=${field} .value=${this.renameDraft[field]}
+    const person = !!g.cols[i].person;
+    const input = (field, label, type = 'text') => html`<div class="field label border small no-margin">
+      <input type=${type} min="1" placeholder=" " data-field=${field} .value=${this.renameDraft[field]}
         @input=${(e) => { this.renameDraft[field] = e.target.value; }}
         @keydown=${(e) => this.renameKey(e, field)}>
       <label>${label}</label>
@@ -1462,12 +1825,18 @@ class TableViewer extends BifrostElement {
     return html`<div class="tbl-pop tbl-rename" style="left:${left}px;top:${HEAD_H + 6}px;width:${width}px"
       @pointerdown=${stop} @dblclick=${stop} @wheel=${stop} @focusout=${(e) => this.renameOut(e)}>
       <div class="tbl-rename-fields">
-        ${input('name', `Column ${i + 1}`)}
-        ${input('trans', 'Translation')}
+        ${input('name', `C${this.colNo(i)}`)}
+        ${this.info.translations ? input('trans', 'Translation') : nothing}
+        ${input('no', 'No.', 'number')}
       </div>
-      <button class="circle ${group ? 'fill' : 'transparent'}" aria-pressed=${group ? 'true' : 'false'}
-        title="Household" aria-label="Household" @mousedown=${(e) => e.preventDefault()}
-        @click=${() => this.toggleGroup(i)}><i>family_restroom</i></button>
+      <div class="tbl-toggles">
+        <button class="circle ${group ? 'fill' : 'transparent'}" aria-pressed=${group ? 'true' : 'false'}
+          title="Household" aria-label="Household" @mousedown=${(e) => e.preventDefault()}
+          @click=${() => this.toggleGroup(i)}><i>family_restroom</i></button>
+        <button class="circle ${person ? 'fill' : 'transparent'}" aria-pressed=${person ? 'true' : 'false'}
+          title="People" aria-label="People" @mousedown=${(e) => e.preventDefault()}
+          @click=${() => this.togglePersonCol(i)}><i>person</i></button>
+      </div>
     </div>`;
   }
 

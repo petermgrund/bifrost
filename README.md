@@ -22,6 +22,7 @@ Your family-tree data itself always lives in Gramps and the source systems. Bifr
 * Rebuild a Paperless PDF so every page shares the same width.
 * Give places boundaries on the minimap so you can see the extent of their jurisdiction.
 * Attach documents downloaded from Ancestry to the citations Ancestry created.
+* Index census pages and other tables in Paperless: lay a grid over the page once, then hover over any cell to see its column, line and value, like Ancestry's census viewer. Gemini can transcribe the cells.
 
 Developer's comment: I am developing Bifrost to assist me in my genealogical documentation workflow. Therefore, you may not be interested in using all of the features. Feel free to pick and choose which tools you'd like to use. At a minimum, you need to configure Gramps Web and Paperless-ngx.
 

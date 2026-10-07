@@ -95,6 +95,7 @@ from .routes.reprocess import router as reprocess_router  # noqa: E402
 from .routes.style import router as style_router  # noqa: E402
 from .routes.settings import router as settings_router  # noqa: E402
 from .routes.sync import router as sync_router  # noqa: E402
+from .routes.tables import router as tables_router  # noqa: E402
 from .routes.transcribe import router as transcribe_router  # noqa: E402
 
 app.include_router(ancestry_router)
@@ -107,6 +108,7 @@ app.include_router(reprocess_router)
 app.include_router(style_router)
 app.include_router(settings_router)
 app.include_router(sync_router)
+app.include_router(tables_router)
 app.include_router(transcribe_router)
 
 

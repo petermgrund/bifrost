@@ -8,6 +8,10 @@ import httpx
 class PaperlessError(Exception):
     """Wraps non-2xx response from Paperless"""
 
+    def __init__(self, message: str, status: int = 0) -> None:
+        super().__init__(message)
+        self.status = status
+
 
 class PaperlessClient:
     def __init__(self, base_url: str, api_token: str) -> None:
@@ -33,7 +37,8 @@ class PaperlessClient:
     async def _request(self, method: str, path: str, **kwargs) -> httpx.Response:
         resp = await self._client.request(method, f"{self._base}{path}", **kwargs)
         if resp.status_code >= 400:
-            raise PaperlessError(f"{method} {path} → {resp.status_code}: {resp.text[:500]}")
+            raise PaperlessError(f"{method} {path} → {resp.status_code}: {resp.text[:500]}",
+                                 resp.status_code)
         return resp
 
     # --- endpoints ---
@@ -53,7 +58,8 @@ class PaperlessClient:
         while url:
             resp = await self._client.get(url, params=params)
             if resp.status_code >= 400:
-                raise PaperlessError(f"GET {url} → {resp.status_code}: {resp.text[:500]}")
+                raise PaperlessError(f"GET {url} → {resp.status_code}: {resp.text[:500]}",
+                                     resp.status_code)
             data = resp.json()
             results.extend(data.get("results", []))
             url = data.get("next")
@@ -123,6 +129,25 @@ class PaperlessClient:
             "GET", f"/api/documents/{doc_id}/download/", params={"original": "true"})
         mime = resp.headers.get("content-type", "application/octet-stream").split(";")[0].strip()
         return resp.content, mime
+
+    async def download_archive(self, doc_id: int) -> tuple[bytes, str]:
+        """The archived PDF, or the original when Paperless kept no archive version"""
+        resp = await self._request("GET", f"/api/documents/{doc_id}/download/")
+        mime = resp.headers.get("content-type", "application/octet-stream").split(";")[0].strip()
+        return resp.content, mime
+
+    async def thumbnail(self, doc_id: int) -> tuple[bytes, str]:
+        resp = await self._request("GET", f"/api/documents/{doc_id}/thumb/")
+        return resp.content, resp.headers.get("content-type", "image/webp").split(";")[0].strip()
+
+    async def search_documents(self, query: str, limit: int = 10) -> list[dict]:
+        """Docs whose title contains the query, most recently changed first"""
+        params = {"page_size": limit, "ordering": "-modified",
+                  "fields": "id,title,created,mime_type,page_count"}
+        if query:
+            params["title__icontains"] = query
+        resp = await self._request("GET", "/api/documents/", params=params)
+        return resp.json().get("results", [])
 
     async def patch_content(self, doc_id: int, content: str) -> None:
         """Overwrite doc searchable text field in place"""

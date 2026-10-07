@@ -268,6 +268,33 @@ MIGRATIONS: list[str] = [
     """
     ALTER TABLE withdrawn_codes ADD COLUMN successor TEXT;
     """,
+    # 21 table grids over Paperless document pages
+    """
+    CREATE TABLE doc_tables (
+        paperless_id INTEGER NOT NULL,
+        page         INTEGER NOT NULL,
+        title        TEXT,
+        grid         TEXT NOT NULL,
+        rev          INTEGER NOT NULL,
+        updated_at   TEXT NOT NULL,
+        PRIMARY KEY (paperless_id, page)
+    );
+    """,
+    # 22 notes pinned to points on Paperless document pages
+    """
+    CREATE TABLE page_notes (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        paperless_id INTEGER NOT NULL,
+        page         INTEGER NOT NULL,
+        title        TEXT,
+        x            REAL NOT NULL,
+        y            REAL NOT NULL,
+        text         TEXT NOT NULL,
+        created_at   TEXT NOT NULL,
+        updated_at   TEXT NOT NULL
+    );
+    CREATE INDEX page_notes_page ON page_notes (paperless_id, page);
+    """,
 ]
 
 

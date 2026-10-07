@@ -2,6 +2,7 @@ import { BifrostElement, html, nothing } from './core.js';
 import './paperless-sync-page.js';
 import './immich-sync-page.js';
 import './transcribe-page.js';
+import './tables-page.js';
 import './reprocess-page.js';
 import './citations-page.js';
 import './faces-page.js';
@@ -24,6 +25,8 @@ const SECTIONS = [
     body: html`<a class="button" href="/photos"><span>Open Photos</span></a>` },
   { id: 'transcribe', title: 'Transcribe', desc: 'Manage OCR for Paperless docs',
     body: html`<transcribe-page></transcribe-page>` },
+  { id: 'tables', title: 'Tables', desc: 'Index census pages and other tables, and pin notes to Paperless docs',
+    body: html`<tables-page></tables-page>` },
   { id: 'reprocess', title: 'Reprocess', desc: 'Rebuild a Paperless doc so all pages are the same width',
     body: html`<reprocess-page></reprocess-page>` },
   { id: 'citations', title: 'Citations', desc: 'Generate Gramps citations from Paperless doc',

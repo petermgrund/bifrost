@@ -21,11 +21,11 @@ const SECTIONS = [
       <faces-backfill-page></faces-backfill-page>
       <div class="large-space"></div>
       <ancestry-links-page></ancestry-links-page>` },
-  { id: 'photos', title: 'Photos', desc: 'Curate Immich photos for Gramps: titles, dates, places, people and notes',
+  { id: 'photos', title: 'Photos', desc: 'Curate Immich photos for Gramps',
     body: html`<a class="button" href="/photos"><span>Open Photos</span></a>` },
   { id: 'transcribe', title: 'Transcribe', desc: 'Manage OCR for Paperless docs',
     body: html`<transcribe-page></transcribe-page>` },
-  { id: 'tables', title: 'Tables', desc: 'Index census pages and other tables, and pin notes to Paperless docs',
+  { id: 'tables', title: 'Tables', desc: 'Index census pages and other tables',
     body: html`<tables-page></tables-page>` },
   { id: 'reprocess', title: 'Reprocess', desc: 'Rebuild a Paperless doc so all pages are the same width',
     body: html`<reprocess-page></reprocess-page>` },

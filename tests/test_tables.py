@@ -23,6 +23,7 @@ def conn(tmp_path):
 def fresh_caches(monkeypatch):
     monkeypatch.setattr(tables, "SOURCES", tables._Lru(3))
     monkeypatch.setattr(tables, "IMAGES", tables._Lru(16))
+    monkeypatch.setattr(tables, "COUNTS", tables._Lru(512))
 
 
 def grid(ncols=3, nrows=4, **kw):
@@ -297,6 +298,29 @@ def test_sources_and_pages_are_cached():
         await tables.page_file(p, doc, 1)
     asyncio.run(go())
     assert p.downloads == 1
+
+
+def test_pages_come_from_the_latest_version(monkeypatch):
+    p = FakePaperless(pdf((300, 200)), "application/pdf")
+    root = {"id": 3, "checksum": "a", "is_root": True}
+    doc = {"id": 3, "mime_type": "application/pdf", "page_count": 2, "modified": "m",
+           "versions": [{"id": 9, "checksum": "b", "is_root": False}, root]}
+
+    async def go():
+        assert await tables.pages(p, {**doc, "versions": [root]}) == 2
+        assert p.downloads == 0
+        assert await tables.pages(p, doc) == 1
+        monkeypatch.setattr(tables, "SOURCES", tables._Lru(3))
+        assert await tables.pages(p, doc) == 1
+    asyncio.run(go())
+    assert p.downloads == 1
+
+
+def test_a_photo_replaced_by_a_pdf_counts_the_pdf():
+    p = FakePaperless(pdf((300, 200), (300, 200)), "application/pdf")
+    doc = {"id": 4, "mime_type": "image/jpeg", "page_count": None, "modified": "m",
+           "versions": [{"id": 9, "checksum": "b"}, {"id": 4, "checksum": "a"}]}
+    assert asyncio.run(tables.pages(p, doc)) == 2
 
 
 class TestTranscription:

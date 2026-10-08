@@ -189,7 +189,10 @@ class TableViewer extends BifrostElement {
       this.loadError = why(e);
       return;
     }
-    if (this.info.pages && this.page > this.info.pages) this.page = 1;
+    if (this.info.pages && this.page > this.info.pages) {
+      this.page = 1;
+      this.pageUrl(1);
+    }
     await this.loadPage();
   }
 
@@ -220,11 +223,15 @@ class TableViewer extends BifrostElement {
     this.commitEdit();
     await Promise.all([this.flush(), this.saveNote()]);
     this.page = n;
+    this.pageUrl(n);
+    await this.loadPage();
+  }
+
+  pageUrl(n) {
     const url = new URL(location.href);
     url.searchParams.set('page', n);
     url.hash = '';
     history.replaceState(null, '', url);
-    await this.loadPage();
   }
 
   imgLoaded(e) {

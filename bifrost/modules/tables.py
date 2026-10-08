@@ -506,6 +506,7 @@ class _Lru:
 
 SOURCES = _Lru(3)
 IMAGES = _Lru(16)
+COUNTS = _Lru(512)
 
 
 def source_kind(doc: dict) -> str | None:
@@ -619,17 +620,24 @@ async def source(paperless: PaperlessClient, doc: dict) -> tuple[bytes, str]:
 
 
 async def pages(paperless: PaperlessClient, doc: dict) -> int:
+    """Pages in the file Bifrost draws"""
     mime = doc.get("mime_type")
-    if source_kind(doc) == "original":
+    if source_kind(doc) == "original" and len(doc.get("versions") or []) < 2:
         if mime == "application/pdf" and doc.get("page_count"):
             return int(doc["page_count"])
         if mime in BROWSER_MIMES:
             return 1
+    key = (doc["id"], version_key(doc))
+    hit = COUNTS.get(key)
+    if hit is not None:
+        return hit
     data, mime = await source(paperless, doc)
     try:
-        return await asyncio.to_thread(page_count, data, mime)
+        n = await asyncio.to_thread(page_count, data, mime)
     except Exception as exc:  # noqa: BLE001
         raise PageError(f"unreadable file: {exc}") from exc
+    COUNTS.put(key, n)
+    return n
 
 
 async def page_file(paperless: PaperlessClient, doc: dict, page: int) -> tuple[bytes, str]:

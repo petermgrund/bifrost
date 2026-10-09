@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { loadState, saveState, STORE_KEY } from '../src/store.js';
+import { loadState, saveState, restoreDraft, STORE_KEY } from '../src/store.js';
 import { recordById } from '../src/records/index.js';
 import { newDraft, buildOutputs } from '../src/engine.js';
 
@@ -130,4 +130,18 @@ test('storage that throws is survivable', () => {
   assert.equal(loadState(broken, recordById), null);
   assert.equal(saveState(broken, { current: 'no-klokkerbok', drafts: {} }), false);
   assert.equal(loadState(null, recordById), null);
+});
+
+test('a kept draft comes back with its inputs, without output edits, and with renamed nouns mapped', () => {
+  const dop = recordById('se-dopbok');
+  const kept = { values: { parish: 'Vimmerby', vol: 'C:8', page: '45', gone: 'x' }, subject: { name: 'Anders Johan', noun: 'birth and baptism entry', which: 'b. 1868' },
+    confidence: 'Very High', variant: '', overrides: { page: 'edited' } };
+  const d = restoreDraft(dop, kept);
+  assert.equal(d.type, 'se-dopbok');
+  assert.deepEqual([d.values.parish, d.values.vol, d.values.page, d.subject.name, d.subject.which, d.confidence], ['Vimmerby', 'C:8', '45', 'Anders Johan', 'b. 1868', 'Very High']);
+  assert.equal('gone' in d.values, false);
+  assert.deepEqual(d.overrides, {});
+  assert.equal(buildOutputs(dop, d).page, 'p. 45, no. ⟦Entry no.⟧, Anders Johan (b. 1868) birth and baptism entry');
+  const vital = recordById('us-vital');
+  assert.equal(restoreDraft(vital, { subject: { noun: 'marriage' }, variant: 'license' }).subject.noun, 'marriage license');
 });

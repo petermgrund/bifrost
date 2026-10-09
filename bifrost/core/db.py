@@ -311,6 +311,15 @@ MIGRATIONS: list[str] = [
         used_at     TEXT NOT NULL
     );
     """,
+    # 25 the citations wizard's draft behind each citation it made
+    """
+    CREATE TABLE citation_drafts (
+        citation_handle TEXT PRIMARY KEY,
+        record_type     TEXT NOT NULL,
+        draft           TEXT NOT NULL,
+        created_at      TEXT NOT NULL
+    );
+    """,
 ]
 
 

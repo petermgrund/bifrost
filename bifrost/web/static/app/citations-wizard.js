@@ -2,8 +2,8 @@ import { BifrostElement, html, nothing, api, post, statusLine } from './core.js'
 import {
   RECORDS, recordById, newDraft, draftFromExample, buildOutputs, exampleLabel, setVariant, nextCitationDraft,
   runChecks, plain, hasGap, yearOf, loadState, saveState, recordGroups, sourceRows, referenceRows, citationRows,
-  noteRows, outputRows, exampleNote, copyAllText, repositoryName, paperlessMatch, REFERENCE_VALUES, CHAPTERS,
-  CHAPTER_CODE, GUIDE,
+  noteRows, outputRows, exampleNote, copyAllText, repositoryName, paperlessMatch, restoreDraft, REFERENCE_VALUES,
+  LEVELS, CHAPTERS, CHAPTER_CODE, GUIDE,
 } from '/static/citations/citations.js';
 
 const API = '/citations/api';
@@ -70,6 +70,7 @@ class CitationsWizard extends BifrostElement {
     this.scanPick = w.scanPick || {};
     this.fileScan = w.fileScan === true;
     this.result = w.result || null;
+    this.basis = w.basis || null;
     this.ctx = null;
     this.loadError = '';
     this.doc = null;
@@ -151,7 +152,7 @@ class CitationsWizard extends BifrostElement {
   save() {
     saveState(store, this.gen);
     writeWizard({ step: this.step, docId: this.doc?.id ?? this.docId, gsrc: this.gsrc, repo: this.repo,
-      scanPick: this.scanPick, fileScan: this.fileScan, result: this.result });
+      scanPick: this.scanPick, fileScan: this.fileScan, result: this.result, basis: this.basis });
   }
 
   changed() {
@@ -210,8 +211,33 @@ class CitationsWizard extends BifrostElement {
     this.scanPick = {};
     this.fileScan = false;
     this.result = null;
-    this.applyDoc();
-    this.changed();
+    this.basis = null;
+    if (this.doc.citations.length) this.startFrom(this.doc.citations[0]);
+    else {
+      this.applyDoc();
+      this.changed();
+    }
+  }
+
+  startFrom(c) {
+    this.basis = c.handle;
+    const kept = c.draft && recordById(c.draft.type);
+    const source = (this.ctx?.sources || []).find((s) => s.handle === c.source_handle);
+    if (kept) {
+      this.gen.current = kept.id;
+      this.gen.drafts[kept.id] = restoreDraft(kept, c.draft.draft);
+      if (source) this.gsrc = { mode: 'existing', handle: source.handle };
+    } else {
+      const known = recordById(source?.remembered?.type || '');
+      if (known) this.gen.current = known.id;
+      this.gen.drafts[this.gen.current] = newDraft(this.type);
+      this.applyDoc();
+      if (source) this.pickSource(source);
+      if (Number.isInteger(c.confidence) && LEVELS[4 - c.confidence]) this.draft.confidence = LEVELS[4 - c.confidence];
+    }
+    this.repo = { mode: 'auto' };
+    this.editing = '';
+    this.edited();
   }
 
   applyDoc() {
@@ -398,6 +424,7 @@ class CitationsWizard extends BifrostElement {
       citation: { page: plain(o.page), confidence: o.confidence, frn: plain(o.frn), srn: plain(o.srn) },
       scan: this.fileScan ? this.scanValues(o) : null,
       inputs: { type: type.id, values: Object.fromEntries(keys.map((key) => [key, String(draft.values[key] ?? '').trim()])) },
+      draft: { type: type.id, draft: { values: draft.values, subject: draft.subject, confidence: draft.confidence, variant: draft.variant } },
     };
     this.busy = true;
     this.say('busy', 'Creating');
@@ -432,8 +459,9 @@ class CitationsWizard extends BifrostElement {
   }
 
   againOnDocument() {
-    this.gen.drafts[this.gen.current] = nextCitationDraft(this.type, this.draft);
-    this.applyDoc();
+    this.draft.overrides = {};
+    this.draft.example = '';
+    this.basis = this.result?.citation?.handle || this.basis;
     this.result = null;
     this.fileScan = false;
     this.go(CITATION);
@@ -651,8 +679,11 @@ class CitationsWizard extends BifrostElement {
           ${gr && d.media ? html`<a class="link" href="${gr}/media/${d.media.gramps_id}" target="_blank" rel="noopener">Gramps</a>` : nothing}
         </div>
         ${d.media ? nothing : html`<p class="error-text">Gramps has no media ${d.pid}</p>`}
-        ${d.citations.length ? html`<table class="cw-cited">${d.citations.map((c) => html`<tr>
-          <td class="mono">${gr ? html`<a class="link" href="${gr}/citation/${c.gramps_id}" target="_blank" rel="noopener">${c.gramps_id}</a>` : c.gramps_id}</td>
+        ${d.citations.length ? html`<table class="cw-cited cw-bases">${d.citations.map((c) => html`<tr
+            class=${c.handle === this.basis ? 'active' : ''} tabindex="0" @click=${() => this.startFrom(c)}
+            @keydown=${(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.startFrom(c); } }}>
+          <td class="mono">${gr ? html`<a class="link" href="${gr}/citation/${c.gramps_id}" target="_blank" rel="noopener"
+            @click=${(e) => e.stopPropagation()}>${c.gramps_id}</a>` : c.gramps_id}</td>
           <td>${c.page}</td><td class="secondary-text">${c.source}</td></tr>`)}</table>` : nothing}
       </div>
     </article>`;

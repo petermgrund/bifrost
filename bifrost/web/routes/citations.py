@@ -56,7 +56,7 @@ async def thumb(request: Request, doc_id: int):
 async def get_document(request: Request, doc_id: int) -> dict:
     st = request.app.state
     try:
-        return await citations.document(st.gramps, st.paperless, st.cfg.sync_paperless, doc_id)
+        return await citations.document(st.gramps, st.paperless, st.cfg.sync_paperless, doc_id, st.conn)
     except (citations.CitationError, GrampsError, PaperlessError) as exc:
         raise _failed(exc) from exc
 
@@ -95,12 +95,18 @@ class InputsBody(BaseModel):
     values: dict[str, str] = {}
 
 
+class DraftBody(BaseModel):
+    type: str
+    draft: dict
+
+
 class CreateBody(BaseModel):
     doc_id: int
     source: SourceBody
     citation: CitationBody
     scan: ScanBody | None = None
     inputs: InputsBody | None = None
+    draft: DraftBody | None = None
 
 
 @router.post("/api/create")
@@ -114,4 +120,6 @@ async def create(request: Request, body: CreateBody) -> dict:
         raise _failed(exc) from exc
     if body.inputs:
         citations.remember(st.conn, result["source"]["handle"], body.inputs.type, body.inputs.values)
+    if body.draft:
+        citations.keep_draft(st.conn, result["citation"]["handle"], body.draft.type, body.draft.draft)
     return result

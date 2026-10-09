@@ -57,7 +57,6 @@ services:
       GRAMPS_PUBLIC_URL: http://localhost:${GRAMPS_PORT:-5555}
       PAPERLESS_PUBLIC_URL: http://localhost:${PAPERLESS_PORT:-8000}
       IMMICH_PUBLIC_URL: http://localhost:${IMMICH_PORT:-2283}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
     depends_on:
       grampsweb: {condition: service_healthy}

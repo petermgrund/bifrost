@@ -32,6 +32,16 @@ async def _doc(st, doc_id: int) -> dict:
         raise HTTPException(502, f"Paperless document #{doc_id} unavailable: {exc}") from exc
 
 
+def _pid(value) -> str:
+    return codes.normalize(str(value)) if value else ""
+
+
+def _code(st, doc: dict) -> str:
+    """The document's Gramps ID, set once it is synced to Gramps"""
+    field = st.cfg.sync_paperless.gramps_id_field_id
+    return _pid(st.paperless.custom_field_value(doc, field) if field else None)
+
+
 def _no_page(exc: Exception) -> HTTPException:
     if isinstance(exc, PaperlessError):
         return HTTPException(502, f"Paperless unavailable: {exc}")
@@ -45,22 +55,34 @@ async def tables_home(request: Request):
 
 @router.get("/api/list")
 async def list_tables(request: Request) -> dict:
-    return {"items": tables.list_tables(_state(request).conn)}
+    st = _state(request)
+    items = tables.list_tables(st.conn)
+    field = st.cfg.sync_paperless.gramps_id_field_id
+    values = {}
+    if items and field:
+        try:
+            values = await st.paperless.custom_field_values(field, ids={t["doc_id"] for t in items})
+        except PaperlessError:
+            values = {}
+    return {"items": [{**t, "pid": _pid(values.get(t["doc_id"]))} for t in items]}
 
 
 @router.get("/api/documents")
 async def search_documents(request: Request, q: str = "", limit: int = 10) -> list[dict]:
-    """Documents whose Gramps ID or title contains the query, Gramps ID matches first"""
+    """Documents synced to Gramps whose Gramps ID or title contains the query, Gramps ID matches first"""
     st = _state(request)
     q = q.strip()
     limit = max(1, min(limit, 30))
     field = st.cfg.sync_paperless.gramps_id_field_id
+    if not field:
+        return []
     try:
-        if q and field and q.isalnum():
+        if q and q.isalnum():
             by_pid, by_title = await asyncio.gather(
-                st.paperless.search_documents(q, limit, field), st.paperless.search_documents(q, limit))
+                st.paperless.search_documents(q, limit, field),
+                st.paperless.search_documents(q, limit, with_field=field))
         else:
-            by_pid, by_title = [], await st.paperless.search_documents(q, limit)
+            by_pid, by_title = [], await st.paperless.search_documents(q, limit, with_field=field)
     except PaperlessError as exc:
         raise HTTPException(502, f"Paperless unavailable: {exc}") from exc
     found, seen = [], set()
@@ -69,11 +91,7 @@ async def search_documents(request: Request, q: str = "", limit: int = 10) -> li
             seen.add(d["id"])
             found.append(d)
 
-    def pid(doc: dict) -> str:
-        value = st.paperless.custom_field_value(doc, field) if field else None
-        return codes.normalize(str(value)) if value else ""
-
-    return [{"id": d["id"], "title": d.get("title") or f"#{d['id']}", "pid": pid(d),
+    return [{"id": d["id"], "title": d.get("title") or f"#{d['id']}", "pid": _code(st, d),
              "created": d.get("created"), "mime": d.get("mime_type")} for d in found[:limit]]
 
 
@@ -140,11 +158,9 @@ async def doc_info(request: Request, doc_id: int) -> dict:
     except (tables.PageError, PaperlessError) as exc:
         pages, error = 0, str(exc)
     public = st.cfg.sync_paperless.public_url
-    field = st.cfg.sync_paperless.gramps_id_field_id
-    code = st.paperless.custom_field_value(doc, field) if field else None
     return {
         "id": doc_id, "title": title, "pages": pages, "error": error,
-        "code": codes.normalize(str(code)) if code else "",
+        "code": _code(st, doc),
         "version": tables.version_key(doc),
         "tables": tables.table_pages(st.conn, doc_id),
         "paperless_url": f"{public}/documents/{doc_id}/details" if public else "",
@@ -198,10 +214,10 @@ async def put_grid(request: Request, doc_id: int, page: int, body: GridBody) -> 
         grid = tables.normalize_grid(body.grid)
         title = None
         if body.rev == 0:
-            try:
-                title = (await st.paperless.get_document(doc_id)).get("title")
-            except PaperlessError:
-                pass
+            doc = await _doc(st, doc_id)
+            if not _code(st, doc):
+                raise HTTPException(403, f"Paperless document #{doc_id} isn't synced to Gramps")
+            title = doc.get("title")
         return tables.save_table(st.conn, doc_id, page, grid, body.rev, title)
     except tables.GridError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -210,10 +226,10 @@ async def put_grid(request: Request, doc_id: int, page: int, body: GridBody) -> 
 
 
 @router.delete("/api/doc/{doc_id}/page/{page}")
-async def delete_grid(request: Request, doc_id: int, page: int) -> dict:
-    """Delete the page's table; its notes stay"""
-    if not tables.delete_table(_state(request).conn, doc_id, page):
-        raise HTTPException(404, "this page has no table")
+async def delete_page(request: Request, doc_id: int, page: int) -> dict:
+    """Delete the page's table and notes"""
+    if not tables.delete_page(_state(request).conn, doc_id, page):
+        raise HTTPException(404, "nothing is saved on this page")
     return {"deleted": True}
 
 

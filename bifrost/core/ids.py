@@ -48,6 +48,13 @@ def generate_handle() -> str:
     return "".join(secrets.choice(CHARSET) for _ in range(16))
 
 
+def next_sequential_id(prefix: str, existing: set[str]) -> str:
+    pat = re.compile(rf"^{prefix}(\d+)$")
+    nums = [int(m.group(1)) for i in existing if (m := pat.match(i))]
+    n = (max(nums) + 1) if nums else 1
+    return f"{prefix}{n:04d}"
+
+
 def all_ids_ever_seen(
     conn: sqlite3.Connection,
     live: Iterable[str] = (),

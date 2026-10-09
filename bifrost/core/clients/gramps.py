@@ -285,9 +285,13 @@ class GrampsClient:
 
     async def create_object(self, obj: dict) -> dict:
         """Create any Gramps object"""
+        return await self.create_objects([obj])
+
+    async def create_objects(self, objs: list[dict]) -> dict:
+        """Create Gramps objects in one transaction"""
         resp = await self._request(
             "POST", "/objects",
-            json=[obj], headers={"Content-Type": "application/json"},
+            json=objs, headers={"Content-Type": "application/json"},
         )
         return resp.json()
 

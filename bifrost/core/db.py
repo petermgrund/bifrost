@@ -302,6 +302,15 @@ MIGRATIONS: list[str] = [
         options      TEXT NOT NULL
     );
     """,
+    # 24 the citations wizard's inputs behind each Gramps Source it cited
+    """
+    CREATE TABLE citation_sources (
+        handle      TEXT PRIMARY KEY,
+        record_type TEXT NOT NULL,
+        inputs      TEXT NOT NULL,
+        used_at     TEXT NOT NULL
+    );
+    """,
 ]
 
 

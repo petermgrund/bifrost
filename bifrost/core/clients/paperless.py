@@ -106,11 +106,12 @@ class PaperlessClient:
                 return val
         return None
 
-    async def custom_field_values(self, field_id: int) -> dict[int, object]:
-        """{doc id: value} of one custom field, for every document that carries it"""
-        docs = await self._paginated("/api/documents/", params={
-            "custom_fields__id__all": field_id, "fields": "id,custom_fields",
-            "page_size": 100})
+    async def custom_field_values(self, field_id: int, ids=None) -> dict[int, object]:
+        """{doc id: value} of one custom field, for every document (or those in `ids`) that carries it"""
+        params = {"custom_fields__id__all": field_id, "fields": "id,custom_fields", "page_size": 100}
+        if ids is not None:
+            params["id__in"] = ",".join(str(i) for i in sorted(ids))
+        docs = await self._paginated("/api/documents/", params=params)
         return {d["id"]: v for d in docs
                 if (v := self.custom_field_value(d, field_id)) is not None}
 
@@ -148,7 +149,8 @@ class PaperlessClient:
             "custom_field_query": json.dumps([field_id, "exact", value]), "fields": "id"})
         return [d["id"] for d in resp.json().get("results", [])]
 
-    async def search_documents(self, query: str, limit: int = 10, field_id: int = 0) -> list[dict]:
+    async def search_documents(self, query: str, limit: int = 10, field_id: int = 0,
+                               with_field: int = 0) -> list[dict]:
         """Docs whose title, or else a custom field, contains the query; most recently changed first"""
         params = {"page_size": limit, "ordering": "-modified",
                   "fields": "id,title,created,mime_type,page_count,custom_fields"}
@@ -156,8 +158,22 @@ class PaperlessClient:
             params["custom_field_query"] = json.dumps([field_id, "icontains", query])
         elif query:
             params["title__icontains"] = query
+        if with_field:
+            params["custom_fields__id__all"] = with_field
         resp = await self._request("GET", "/api/documents/", params=params)
         return resp.json().get("results", [])
+
+    async def document_types(self) -> list[dict]:
+        return await self._paginated("/api/document_types/", params={"page_size": 100})
+
+    async def correspondents(self) -> list[dict]:
+        return await self._paginated("/api/correspondents/", params={"page_size": 100})
+
+    async def custom_fields(self) -> list[dict]:
+        return await self._paginated("/api/custom_fields/", params={"page_size": 100})
+
+    async def patch_document(self, doc_id: int, fields: dict) -> None:
+        await self._request("PATCH", f"/api/documents/{doc_id}/", json=fields)
 
     async def patch_content(self, doc_id: int, content: str) -> None:
         """Overwrite doc searchable text field in place"""

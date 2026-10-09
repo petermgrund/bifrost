@@ -74,17 +74,6 @@ class PlacesConfig:
 
 
 @dataclass(frozen=True)
-class CitationsConfig:
-    house_style_path: Path | None = None
-
-
-@dataclass(frozen=True)
-class AnthropicConfig:
-    api_key: str = ""
-    model: str = "claude-opus-4-8"
-
-
-@dataclass(frozen=True)
 class GeminiConfig:
     api_key: str = ""
     model: str = "gemini-3-flash-preview"
@@ -100,10 +89,8 @@ class Config:
     immich: ImmichConfig = ImmichConfig()
     sync_immich: SyncImmichConfig = SyncImmichConfig()
     sync_paperless: SyncPaperlessConfig = SyncPaperlessConfig()
-    anthropic: AnthropicConfig = AnthropicConfig()
     gemini: GeminiConfig = GeminiConfig()
     places: PlacesConfig = PlacesConfig()
-    citations: CitationsConfig = CitationsConfig()
 
 
 DEFAULT_PATH = Path(__file__).resolve().parents[2] / "config.yaml"
@@ -227,10 +214,6 @@ def load_config(path: str | Path | None = None) -> Config:
         ),
         sync_immich=sync_immich,
         sync_paperless=sync_paperless,
-        anthropic=AnthropicConfig(
-            api_key=(raw.get("anthropic") or {}).get("api_key") or "",
-            model=(raw.get("anthropic") or {}).get("model") or "claude-opus-4-8",
-        ),
         gemini=GeminiConfig(
             api_key=gem_raw.get("api_key") or "",
             model=gem_raw.get("model") or "gemini-3-flash-preview",
@@ -238,8 +221,5 @@ def load_config(path: str | Path | None = None) -> Config:
         ),
         places=PlacesConfig(
             boundaries_dir=Path(b) if (b := (raw.get("places") or {}).get("boundaries_dir")) else None,
-        ),
-        citations=CitationsConfig(
-            house_style_path=Path(p) if (p := (raw.get("citations") or {}).get("house_style_path")) else None,
         ),
     )

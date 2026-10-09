@@ -17,6 +17,7 @@
       class="data-[state=checked]:bg-light data-[state=checked]:text-primary hover:text-dark focus-visible:ring-primary cursor-pointer rounded-md px-3 py-1 text-sm font-medium text-gray-600 transition-colors outline-none focus-visible:ring-2 data-[state=checked]:shadow-sm dark:text-gray-400 dark:data-[state=checked]:bg-gray-700"
     >
       {o.label}
+      {#if o.count !== undefined}<span class="ms-1 font-mono text-xs opacity-70">{o.count}</span>{/if}
     </RadioGroup.Item>
   {/each}
 </RadioGroup.Root>

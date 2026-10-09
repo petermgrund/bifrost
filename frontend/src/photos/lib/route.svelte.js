@@ -1,4 +1,4 @@
-const VIEWS = ['recent', 'tagged', 'synced', 'collections'];
+const VIEWS = ['recent', 'tagged', 'synced', 'collections', 'faces'];
 
 function parse() {
   const [name, id] = window.location.hash.replace(/^#\/?/, '').split('/');

@@ -212,7 +212,7 @@ class TableViewer extends BifrostElement {
       this.loadError = why(e);
       return;
     }
-    this.mode = this.grid || this.notes.length ? 'view' : 'layout';
+    this.mode = this.grid || this.notes.length || !this.info.code ? 'view' : 'layout';
     this.loadPeople();
     if (this.imgSize) this.fit();
     this.applyHash();
@@ -1500,10 +1500,12 @@ class TableViewer extends BifrostElement {
       </nav>` : nothing}
       ${this.saveError ? html`<span class="error-text small-text tbl-save-error"><i class="small">error</i>
         ${this.saveError}</span>` : nothing}
+      ${!g && !i.code ? html`<span class="error-text small-text tbl-save-error"><i class="small">error</i>
+        Not synced to Gramps</span>` : nothing}
       <nav class="group connected">
         <button class="${this.mode === 'view' ? 'active' : ''}" ?disabled=${!!this.busy}
           @click=${() => this.setMode('view')}><i>visibility</i><span>View</span></button>
-        <button class="${this.mode === 'layout' ? 'active' : ''}" ?disabled=${!!this.busy}
+        <button class="${this.mode === 'layout' ? 'active' : ''}" ?disabled=${!!this.busy || (!g && !i.code)}
           @click=${() => this.setMode('layout')}><i>grid_on</i><span>Layout</span></button>
       </nav>
       ${g ? html`<button class="circle ${this.info.translations ? 'fill' : 'transparent'}"

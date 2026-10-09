@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import yaml
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
@@ -120,18 +119,10 @@ async def apply(request: Request, body: ApplyBody = ApplyBody()):
 async def transcribe_config(request: Request):
     st = request.app.state
     cfg = st.cfg
-    # house_style_path isn't on the config dataclass
-    house_style = ""
-    try:
-        raw = yaml.safe_load(cfg.config_path.read_text()) or {}
-        house_style = ((raw.get("sync") or {}).get("paperless") or {}).get("house_style_path") or ""
-    except Exception:
-        pass
     return {
         "enabled": bool(cfg.sync_paperless.ocr_tag),
         "ocr_tag": cfg.sync_paperless.ocr_tag,
         "gemini": st.gemini.configured,
         "model": cfg.gemini.model,
-        "house_style_path": house_style,
         "gramps_public_url": cfg.sync_paperless.gramps_public_url,
     }

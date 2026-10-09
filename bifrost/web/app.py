@@ -14,10 +14,8 @@ from fastapi.templating import Jinja2Templates
 from .. import __version__
 from ..core import db
 from ..core.clients import GeminiClient, GrampsClient, ImmichClient, PaperlessClient
-from ..core.clients.anthropic import AnthropicClient
 from ..core.clients.immich import ImmichError
 from ..core.config import load_config
-from ..modules import citations as citations_mod
 from ..modules import faces as faces_mod
 
 WEB_DIR = Path(__file__).parent
@@ -30,13 +28,11 @@ async def lifespan(app: FastAPI):
     logging.getLogger("bifrost").setLevel(logging.INFO)
     cfg = load_config()
     app.state.cfg = cfg
-    citations_mod.configure_house_style(cfg.citations.house_style_path)
     app.state.conn = db.connect(cfg.db_path)
     app.state.conn.execute("PRAGMA busy_timeout=5000")
     faces_mod.import_person_map_yaml(app.state.conn, cfg.sync_immich.person_map_path)
     app.state.gramps = GrampsClient(cfg.gramps.base_url, cfg.gramps.username, cfg.gramps.password)
     app.state.paperless = PaperlessClient(cfg.paperless.base_url, cfg.paperless.api_token)
-    app.state.anthropic = AnthropicClient(cfg.anthropic.api_key, cfg.anthropic.model)
     app.state.gemini = GeminiClient(cfg.gemini.api_key, cfg.gemini.model)
     # Immich sync endpoints answer 503 with no accounts configured
     app.state.immich_accounts = []
@@ -49,7 +45,6 @@ async def lifespan(app: FastAPI):
     yield
     await app.state.gramps.close()
     await app.state.paperless.close()
-    await app.state.anthropic.close()
     await app.state.gemini.close()
     for client in app.state.immich_accounts:
         await client.close()
@@ -92,7 +87,6 @@ from .routes.faces import router as faces_router  # noqa: E402
 from .routes.photos import router as photos_router  # noqa: E402
 from .routes.places import router as places_router  # noqa: E402
 from .routes.reprocess import router as reprocess_router  # noqa: E402
-from .routes.style import router as style_router  # noqa: E402
 from .routes.settings import router as settings_router  # noqa: E402
 from .routes.sync import router as sync_router  # noqa: E402
 from .routes.tables import router as tables_router  # noqa: E402
@@ -105,7 +99,6 @@ app.include_router(faces_router)
 app.include_router(photos_router)
 app.include_router(places_router)
 app.include_router(reprocess_router)
-app.include_router(style_router)
 app.include_router(settings_router)
 app.include_router(sync_router)
 app.include_router(tables_router)

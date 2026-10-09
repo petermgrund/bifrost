@@ -4,8 +4,6 @@ import './immich-sync-page.js';
 import './transcribe-page.js';
 import './tables-page.js';
 import './reprocess-page.js';
-import './citations-page.js';
-import './faces-page.js';
 import './faces-backfill-page.js';
 import './places-page.js';
 import './ancestry-links-page.js';
@@ -29,10 +27,8 @@ const SECTIONS = [
     body: html`<tables-page></tables-page>` },
   { id: 'reprocess', title: 'Reprocess', desc: 'Rebuild a Paperless doc so all pages are the same width',
     body: html`<reprocess-page></reprocess-page>` },
-  { id: 'citations', title: 'Citations', desc: 'Generate Gramps citations from Paperless doc',
-    body: html`<citations-page></citations-page>` },
-  { id: 'faces', title: 'Faces', desc: 'Link Immich face recognition to Gramps people',
-    body: html`<faces-page></faces-page>` },
+  { id: 'citations', title: 'Citations', desc: 'Create Gramps sources and citations for Paperless docs',
+    body: html`<a class="button" href="/citations"><span>Open Citations</span></a>` },
   { id: 'places', title: 'Places', desc: 'Link Gramps places to OpenStreetMap and draw their boundaries on the map',
     body: html`<places-links-page></places-links-page>
       <div class="large-space"></div>

@@ -1,0 +1,8 @@
+# Credentials: never commit
+local.txt
+
+# Brainstorming companion screens
+.superpowers/
+
+.DS_Store
+node_modules/

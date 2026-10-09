@@ -4,14 +4,15 @@
     AppShell,
     AppShellHeader,
     AppShellSidebar,
+    Button,
     IconButton,
     Input,
     LoadingSpinner,
-    NavbarGroup,
     NavbarItem,
     TooltipProvider,
   } from '@immich/ui';
   import {
+    mdiArrowLeft,
     mdiBookmarkMultiple,
     mdiBookmarkMultipleOutline,
     mdiCheckCircle,
@@ -19,6 +20,8 @@
     mdiClockOutline,
     mdiClockTimeFour,
     mdiClose,
+    mdiFaceMan,
+    mdiFaceManOutline,
     mdiMagnify,
     mdiMenu,
     mdiTag,
@@ -29,6 +32,7 @@
   import BifrostMark from './components/BifrostMark.svelte';
   import CollectionView from './components/CollectionView.svelte';
   import CollectionsList from './components/CollectionsList.svelte';
+  import FacesView from './components/FacesView.svelte';
   import PhotoBrowser from './components/PhotoBrowser.svelte';
   import PhotoEditor from './components/PhotoEditor.svelte';
   import { activity } from './lib/api.svelte.js';
@@ -68,7 +72,7 @@
 
   function search() {
     q = qDraft.trim();
-    if (route.view === 'collections') window.location.hash = '#/recent';
+    if (!NAV.some((n) => n.id === route.view)) window.location.hash = '#/recent';
   }
 
   function clearSearch() {
@@ -127,6 +131,9 @@
             }}
           />
         </div>
+        <Button href="/#photos" size="small" shape="round" leadingIcon={mdiArrowLeft} class="hidden shrink-0 sm:inline-flex">
+          Back to Bifrost
+        </Button>
         <IconButton
           icon={dark ? mdiWeatherSunny : mdiWeatherNight}
           shape="round"
@@ -140,6 +147,13 @@
 
     <AppShellSidebar bind:open={sidebarOpen}>
       <nav class="flex flex-col pt-4 pe-4">
+        <NavbarItem
+          title="Faces"
+          href="#/faces"
+          icon={mdiFaceManOutline}
+          activeIcon={mdiFaceMan}
+          active={route.view === 'faces'}
+        />
         {#each NAV as item (item.id)}
           <NavbarItem
             title={item.title}
@@ -149,7 +163,6 @@
             active={route.view === item.id}
           />
         {/each}
-        <NavbarGroup title="Library" />
         <NavbarItem
           title="Collections"
           href="#/collections"
@@ -168,6 +181,8 @@
       <div class="p-6">
         <Alert color="warning" title={store.error || 'Immich is not configured (immich.base_url / accounts)'} />
       </div>
+    {:else if route.view === 'faces'}
+      <FacesView />
     {:else if route.view === 'collections'}
       {#if route.collection}
         <CollectionView id={route.collection} onOpenPhoto={(id) => (editorId = id)} />

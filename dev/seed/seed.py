@@ -47,6 +47,11 @@ IMMICH_TAGS = ["Sync/Gramps", "Sync/Date", "Sync/Location", "Sync/Description",
                "Date/Estimated", "Date/Calculated", "Date/Year", "Date/Month", "ID"]
 PAPERLESS_TAGS = ["doc", "img", "transcription", "Gemini OCR"]
 DATE_QUALIFIERS = ["Exact", "Circa", "Before", "After", "Year only", "Decade only"]
+DATE_MEANINGS = ["Event", "Creation", "Issuance", "Publication", "Scan"]
+DOCUMENT_TYPES = ["Vital record", "Enumeration", "Legal", "Immigration/naturalization", "Military", "Religious",
+                  "Correspondence", "Ephemera", "Publication", "Artifact", "Research"]
+CORRESPONDENTS = ["Ancestry.com", "FamilySearch", "Digitalarkivet", "Riksarkivet", "ArkivDigital", "Find A Grave",
+                  "Newspapers.com", "Nasjonalbiblioteket", "Lantmäteriet"]
 PHOTO_SUFFIXES = {".jpg", ".jpeg", ".png", ".heic", ".webp", ".tif", ".tiff"}
 
 NOW = int(time.time())
@@ -445,6 +450,14 @@ class Paperless:
         log(f"paperless: created custom field '{name}' ({data_type})")
         return r.json()
 
+    def get_or_create_named(self, path: str, name: str) -> int:
+        results = self._req("GET", path, params={"name__iexact": name}).json()["results"]
+        if results:
+            return results[0]["id"]
+        r = self._req("POST", path, json={"name": name, "matching_algorithm": 0})
+        log(f"paperless: created {path.strip('/').split('/')[-1][:-1].replace('_', ' ')} '{name}'")
+        return r.json()["id"]
+
     def find_document(self, title: str) -> int | None:
         results = self._req("GET", "/api/documents/",
                             params={"title__iexact": title, "fields": "id,title"}).json()["results"]
@@ -488,7 +501,12 @@ def seed_paperless(docs: list[dict]) -> dict:
         "Gramps URL": p.get_or_create_field("Gramps URL", "url"),
         "Date qualifier": p.get_or_create_field("Date qualifier", "select", DATE_QUALIFIERS),
         "Source URL": p.get_or_create_field("Source URL", "url"),
+        "Date meaning": p.get_or_create_field("Date meaning", "select", DATE_MEANINGS),
     }
+    for name in DOCUMENT_TYPES:
+        p.get_or_create_named("/api/document_types/", name)
+    for name in CORRESPONDENTS:
+        p.get_or_create_named("/api/correspondents/", name)
     qual_field = fields["Date qualifier"]
     qual_options = {o["label"]: o["id"] for o in qual_field.get("extra_data", {}).get("select_options", [])}
     missing = [q for q in DATE_QUALIFIERS if q not in qual_options]
@@ -806,9 +824,6 @@ def write_config(gramps: dict, paperless: dict | None, immich: dict | None) -> N
                 "ocr_tag": "Gemini OCR",
             },
         },
-        "citations": {},
-        "anthropic": {"api_key": os.environ.get("ANTHROPIC_API_KEY") or "REPLACE_ME",
-                      "model": os.environ.get("ANTHROPIC_MODEL") or "claude-opus-4-8"},
         "gemini": {"api_key": os.environ.get("GEMINI_API_KEY") or "REPLACE_ME",
                    "model": os.environ.get("GEMINI_MODEL") or "gemini-3-flash-preview"},
         "places": {"boundaries_dir": "/boundaries"},

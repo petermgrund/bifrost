@@ -27,7 +27,7 @@ def _accounts(request: Request) -> list:
 
 @router.get("")
 async def faces_page(request: Request):
-    return RedirectResponse(url="/#faces")
+    return RedirectResponse(url="/photos#/faces")
 
 
 @router.get("/api/gramps-people")

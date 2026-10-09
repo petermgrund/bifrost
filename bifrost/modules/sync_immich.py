@@ -15,7 +15,6 @@ from ..core.clients.immich import ImmichError
 from ..core.config import SyncImmichConfig
 from ..core.events import SyncEvent
 from . import codes
-from .citations import next_sequential_id
 from .sync_paperless import build_note_obj, format_gramps_date
 
 _MODIFIERS = {"regular": 0, "before": 1, "after": 2, "about": 3, "range": 4, "span": 5, "textonly": 6}
@@ -910,7 +909,7 @@ async def sync_note(
     else:
         handle = ids.generate_handle()
         items = await gramps._paged("/notes/", keys="gramps_id")
-        nid = next_sequential_id("N", {i["gramps_id"] for i in items if i.get("gramps_id")})
+        nid = ids.next_sequential_id("N", {i["gramps_id"] for i in items if i.get("gramps_id")})
         await gramps.create_note(build_note_obj(handle, nid, text, NOTE_TYPE))
         notes = media.setdefault("note_list", [])
         if handle not in notes:

@@ -37,13 +37,6 @@ sync:
     transcription_tag_id: null
     ocr_tag: "Gemini OCR"
 
-citations:
-  # house_style_path: "/path/to/house_style_master.md"
-
-anthropic:
-  api_key: "REPLACE_ME"
-  model: "claude-opus-4-8"
-
 gemini:
   api_key: "REPLACE_ME"
   model: "gemini-3-flash-preview"

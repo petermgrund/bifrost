@@ -10,8 +10,8 @@ from typing import AsyncIterator
 from ..core.clients import GrampsClient, PaperlessClient
 from ..core.config import SyncPaperlessConfig
 from ..core.events import SyncEvent
-from ..core.ids import IdReused, all_ids_ever_seen, generate_gramps_id, generate_handle, register_minted
-from .citations import next_sequential_id
+from ..core.ids import (IdReused, all_ids_ever_seen, generate_gramps_id, generate_handle,
+                        next_sequential_id, register_minted)
 
 log = logging.getLogger("bifrost.sync.paperless")
 

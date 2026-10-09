@@ -1,9 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Tables · Bifrost{% endblock %}
 {% block main_class %}max tbl-main{% endblock %}
-{% block nav_title %}Tables{% endblock %}
-{% block nav_actions %}
-<a class="button" href="/#tables"><i>arrow_back</i>Back to Bifrost</a>
+{% block header %}
+{% with bar_name="Tables", bar_back="/#tables" %}{% include "_bar.html" %}{% endwith %}
 {% endblock %}
 {% block content %}<table-viewer doc="{{ doc_id }}"></table-viewer>{% endblock %}
 {% block scripts %}<script type="module" src="/static/app/table-viewer.js"></script>{% endblock %}

@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}Citations · Bifrost{% endblock %}
+{% block main_class %}max cw-main{% endblock %}
+{% block header %}
+{% with bar_name="Citations", bar_back="/#citations" %}{% include "_bar.html" %}{% endwith %}
+{% endblock %}
+{% block content %}<citations-wizard></citations-wizard>{% endblock %}
+{% block scripts %}<script type="module" src="/static/app/citations-wizard.js"></script>{% endblock %}

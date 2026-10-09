@@ -481,7 +481,7 @@ class CodesPage extends BifrostElement {
         `Gramps could not be read. (${this.data.gramps_error || 'no answer'})`)}</p>` : nothing}
       <div class="space"></div>
       <div class="scroll">
-        <table class="border codes-table">
+        <table class="sync-table codes-table">
           <colgroup>
             <col class="col-code"><col class="col-status"><col>
             <col class="col-updated"><col class="col-actions">
@@ -491,7 +491,7 @@ class CodesPage extends BifrostElement {
             <th>Status</th>
             <th>Title or file name</th>
             <th>Last updated</th>
-            <th><span class="secondary-text">Actions</span></th>
+            <th>Actions</th>
           </tr></thead>
           <tbody>
             ${rows.length ? rows.slice(first, first + PAGE_SIZE).map((r) => this.row(r))
@@ -513,11 +513,11 @@ class CodesPage extends BifrostElement {
     return html`<tr>
       <td class="mono">${r.code}</td>
       <td>
-        <span class="chip ${cls}">${label}</span>
+        <span class="chip small ${cls}">${label}</span>
         ${r.attention ? html`<i class="error-text" title=${r.attention} aria-label=${r.attention}>error</i>`
           : nothing}
       </td>
-      <td>${this.whatItIs(r)}</td>
+      <td title=${r.title || r.note || nothing}>${this.whatItIs(r)}</td>
       <td class="small-text" title=${minute(r.updated) || nothing}>${day(r.updated)}</td>
       <td>${this.actions(r)}</td>
     </tr>`;

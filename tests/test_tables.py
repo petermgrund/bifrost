@@ -9,6 +9,7 @@ from PIL import Image
 
 from bifrost.core import db
 from bifrost.core.clients import GeminiError
+from bifrost.core.clients.paperless import PaperlessClient, PaperlessError
 from bifrost.modules import tables
 
 
@@ -144,12 +145,22 @@ class TestStorage:
         assert tables.get_table(conn, 8, 2) is None
         tables.save_table(conn, 8, 2, grid(), 0)
 
-    def test_delete_without_a_rev_keeps_the_notes(self, conn):
+    def test_deleting_a_table_keeps_its_notes(self, conn):
         tables.save_table(conn, 8, 1, grid(), 0)
         tables.add_note(conn, 8, 1, 0.5, 0.5, "stays")
-        assert tables.delete_table(conn, 8, 1) is True
-        assert tables.delete_table(conn, 8, 1) is False
+        assert tables.delete_table(conn, 8, 1, 1) is True
         assert [n["text"] for n in tables.list_notes(conn, 8, 1)] == ["stays"]
+
+    def test_deleting_a_page_removes_its_table_and_notes(self, conn):
+        tables.save_table(conn, 8, 1, grid(), 0)
+        tables.add_note(conn, 8, 1, 0.5, 0.5, "goes")
+        tables.add_note(conn, 8, 2, 0.5, 0.5, "only a note")
+        tables.add_note(conn, 9, 1, 0.5, 0.5, "other document")
+        assert tables.delete_page(conn, 8, 1) is True
+        assert tables.get_table(conn, 8, 1) is None and tables.list_notes(conn, 8, 1) == []
+        assert tables.delete_page(conn, 8, 2) is True
+        assert tables.delete_page(conn, 8, 2) is False
+        assert [(t["doc_id"], t["page"]) for t in tables.list_tables(conn)] == [(9, 1)]
 
     def test_list_counts_lines_columns_and_values(self, conn):
         tables.save_table(conn, 8, 1, grid(cells={"r0": {"c0": "a", "c1": "b"}, "r1": {"c0": "c"}}), 0, "T")
@@ -469,7 +480,6 @@ class TestPinpoints:
 
 def test_document_search_queries_the_gramps_id_field_or_the_title():
     import httpx
-    from bifrost.core.clients.paperless import PaperlessClient
     seen = []
 
     def serve(request):
@@ -479,9 +489,115 @@ def test_document_search_queries_the_gramps_id_field_or_the_title():
     client = PaperlessClient("http://paperless", "t")
     client._client = httpx.AsyncClient(transport=httpx.MockTransport(serve))
     asyncio.run(client.search_documents("9t5", 5, field_id=3))
-    asyncio.run(client.search_documents("census", 5))
+    asyncio.run(client.search_documents("census", 5, with_field=3))
     asyncio.run(client.search_documents("", 5))
     assert json.loads(seen[0]["custom_field_query"]) == [3, "icontains", "9t5"]
-    assert "title__icontains" not in seen[0]
+    assert "title__icontains" not in seen[0] and "custom_fields__id__all" not in seen[0]
     assert seen[1]["title__icontains"] == "census" and "custom_field_query" not in seen[1]
+    assert seen[1]["custom_fields__id__all"] == "3"
     assert "title__icontains" not in seen[2] and "custom_fields" in seen[2]["fields"]
+
+
+def test_listed_tables_ask_paperless_for_their_own_gramps_ids():
+    import httpx
+    seen = []
+
+    def serve(request):
+        seen.append(dict(request.url.params))
+        return httpx.Response(200, json={"results": [
+            {"id": 8, "custom_fields": [{"field": 3, "value": "69T5AU"}]}], "next": None})
+
+    client = PaperlessClient("http://paperless", "t")
+    client._client = httpx.AsyncClient(transport=httpx.MockTransport(serve))
+    assert asyncio.run(client.custom_field_values(3, ids={8, 2})) == {8: "69T5AU"}
+    asyncio.run(client.custom_field_values(3))
+    assert seen[0]["id__in"] == "2,8" and seen[0]["custom_fields__id__all"] == "3"
+    assert "id__in" not in seen[1]
+
+
+class TablesPaperless:
+    """Paperless documents as {id: (title, Gramps ID or None)}"""
+    custom_field_value = staticmethod(PaperlessClient.custom_field_value)
+
+    def __init__(self, docs):
+        self.docs = docs
+        self.searches = []
+
+    def _doc(self, i):
+        title, pid = self.docs[i]
+        return {"id": i, "title": title, "custom_fields": [{"field": 3, "value": pid}] if pid else []}
+
+    async def get_document(self, doc_id):
+        if doc_id not in self.docs:
+            raise PaperlessError("GET /api/documents/ → 404: not found", status=404)
+        return self._doc(doc_id)
+
+    async def custom_field_values(self, field_id, ids=None):
+        return {i: pid for i, (_, pid) in self.docs.items() if pid and (ids is None or i in ids)}
+
+    async def search_documents(self, query, limit=10, field_id=0, with_field=0):
+        self.searches.append((query, field_id, with_field))
+        if field_id:
+            hits = [i for i, (_, pid) in self.docs.items() if pid and query.lower() in pid.lower()]
+        else:
+            hits = [i for i, (title, pid) in self.docs.items()
+                    if query.lower() in title.lower() and (pid or not with_field)]
+        return [self._doc(i) for i in hits]
+
+
+def tables_app(conn, paperless):
+    from types import SimpleNamespace
+
+    from fastapi import FastAPI
+
+    from bifrost.core.config import SyncPaperlessConfig
+    from bifrost.web.routes import tables as routes
+    app = FastAPI()
+    app.include_router(routes.router)
+    app.state.conn = conn
+    app.state.paperless = paperless
+    app.state.cfg = SimpleNamespace(sync_paperless=SyncPaperlessConfig(gramps_id_field_id=3))
+    return app
+
+
+def call(app, method, url, **kw):
+    import httpx
+
+    async def go():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://bifrost") as client:
+            return await client.request(method, url, **kw)
+    return asyncio.run(go())
+
+
+DOCS = {8: ("1910 census, Center City", "69T5AU"), 11: ("Census photo", None)}
+
+
+def test_new_tables_only_on_documents_synced_to_gramps(conn):
+    app = tables_app(conn, TablesPaperless(DOCS))
+    r = call(app, "PUT", "/tables/api/doc/11/page/1", json={"grid": grid(), "rev": 0})
+    assert r.status_code == 403 and r.json()["detail"] == "Paperless document #11 isn't synced to Gramps"
+    assert tables.get_table(conn, 11, 1) is None
+    r = call(app, "PUT", "/tables/api/doc/8/page/1", json={"grid": grid(), "rev": 0})
+    assert r.status_code == 200 and r.json()["rev"] == 1
+    assert tables.list_tables(conn)[0]["title"] == "1910 census, Center City"
+
+
+def test_tables_made_before_the_rule_can_still_be_saved(conn):
+    tables.save_table(conn, 11, 1, tables.normalize_grid(grid()), 0, "Census photo")
+    r = call(tables_app(conn, TablesPaperless(DOCS)), "PUT", "/tables/api/doc/11/page/1",
+             json={"grid": grid(nrows=5), "rev": 1})
+    assert r.status_code == 200 and r.json()["rev"] == 2
+
+
+def test_list_and_search_carry_gramps_ids(conn):
+    paperless = TablesPaperless(DOCS)
+    app = tables_app(conn, paperless)
+    for doc_id in (8, 11):
+        tables.save_table(conn, doc_id, 1, tables.normalize_grid(grid()), 0, DOCS[doc_id][0])
+    items = call(app, "GET", "/tables/api/list").json()["items"]
+    assert sorted((t["doc_id"], t["pid"]) for t in items) == [(8, "69T5AU"), (11, "")]
+    found = call(app, "GET", "/tables/api/documents", params={"q": "census"}).json()
+    assert [(d["id"], d["pid"]) for d in found] == [(8, "69T5AU")]
+    assert paperless.searches == [("census", 3, 0), ("census", 0, 3)]
+    assert [d["id"] for d in call(app, "GET", "/tables/api/documents").json()] == [8]

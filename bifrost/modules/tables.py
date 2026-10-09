@@ -352,16 +352,24 @@ def save_table(conn: sqlite3.Connection, doc_id: int, page: int, grid: dict,
     return {"grid": grid, "rev": current + 1, "updated_at": now}
 
 
-def delete_table(conn: sqlite3.Connection, doc_id: int, page: int, base_rev: int | None = None) -> bool:
-    """Remove the page's table, if it is still at base_rev when one is given; its notes stay"""
+def delete_table(conn: sqlite3.Connection, doc_id: int, page: int, base_rev: int) -> bool:
+    """Remove the page's table if it is still at base_rev; its notes stay"""
     with conn:
         row = conn.execute(
             "SELECT rev FROM doc_tables WHERE paperless_id=? AND page=?", (doc_id, page)).fetchone()
         current = row["rev"] if row else 0
-        if base_rev is not None and current != base_rev:
+        if current != base_rev:
             raise Conflict(current)
         return conn.execute("DELETE FROM doc_tables WHERE paperless_id=? AND page=?",
                             (doc_id, page)).rowcount > 0
+
+
+def delete_page(conn: sqlite3.Connection, doc_id: int, page: int) -> bool:
+    """Remove the page's table and notes"""
+    with conn:
+        n = conn.execute("DELETE FROM doc_tables WHERE paperless_id=? AND page=?", (doc_id, page)).rowcount
+        n += conn.execute("DELETE FROM page_notes WHERE paperless_id=? AND page=?", (doc_id, page)).rowcount
+    return n > 0
 
 
 def doc_options(conn: sqlite3.Connection, doc_id: int) -> dict:

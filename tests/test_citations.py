@@ -29,7 +29,11 @@ class FakeGramps:
             "sources": {"src1": {"handle": "src1", "gramps_id": "S0007", "title": "Old source", "reporef_list": [
                 {"ref": "rep1", "call_number": "C/7"}]}},
             "repositories": {"rep1": {"handle": "rep1", "gramps_id": "R0002", "name": "Värmlandsarkiv", "type": "Archive"}},
-            "citations": {"cit1": {"handle": "cit1", "gramps_id": "C0041", "page": "p. 9", "source_handle": "src1"}},
+            "citations": {
+                "cit1": {"handle": "cit1", "gramps_id": "C0041", "page": "p. 9", "source_handle": "src1",
+                         "confidence": 3, "change": 100},
+                "cit2": {"handle": "cit2", "gramps_id": "C0043", "page": "p. 9, Anna", "source_handle": "src1",
+                         "confidence": 2, "change": 200}},
             "notes": {"n1": {"handle": "n1", "gramps_id": "N0099"}},
             "media": {"med1": {"handle": "med1", "gramps_id": "NC3MPQ"}},
         }
@@ -114,14 +118,14 @@ def test_new_source_note_and_citation_go_to_gramps_in_one_batch():
     assert [(r["ref"], r["call_number"]) for r in source["reporef_list"]] == [("rep1", "SE/VALA/23453/C/8")]
     assert (note["_class"], note["gramps_id"], note["type"]) == ("Note", "N0100", "Citation")
     assert note["text"]["string"] == citations.note_text(CITATION["frn"], CITATION["srn"])
-    assert cit["_class"] == "Citation" and cit["gramps_id"] == "C0042"
+    assert cit["_class"] == "Citation" and cit["gramps_id"] == "C0044"
     assert (cit["source_handle"], cit["page"], cit["confidence"]) == (source["handle"], CITATION["page"], 4)
     assert cit["note_list"] == [note["handle"]]
     assert [m["ref"] for m in cit["media_list"]] == ["med1"]
     assert "date" not in cit
     assert [(c["kind"], c["gramps_id"]) for c in result["created"]] == [
-        ("source", "S0008"), ("citation", "C0042"), ("note", "N0100")]
-    assert result["source"]["gramps_id"] == "S0008" and result["citation"]["gramps_id"] == "C0042"
+        ("source", "S0008"), ("citation", "C0044"), ("note", "N0100")]
+    assert result["source"]["gramps_id"] == "S0008" and result["citation"]["gramps_id"] == "C0044"
     assert result["media"] == "NC3MPQ" and result["scan"] == 7 and result["scan_error"] is None
 
 
@@ -197,15 +201,30 @@ def test_a_paperless_failure_after_gramps_is_reported_not_raised():
     assert result["scan"] is None and result["scan_error"] == "PATCH → 500: down"
 
 
-def test_document_lists_its_media_citations_and_scan_values():
-    doc = asyncio.run(citations.document(FakeGramps(), FakePaperless(), CFG, 7))
+def test_document_lists_its_media_citations_newest_first_with_their_drafts(conn):
+    citations.keep_draft(conn, "cit1", "se-dopbok", {"values": {"parish": "Vimmerby"}, "confidence": "High"})
+    doc = asyncio.run(citations.document(FakeGramps(), FakePaperless(), CFG, 7, conn))
     assert (doc["pid"], doc["created"], doc["source_url"]) == ("NC3MPQ", "1868-03-14", "https://old.example/7")
     assert (doc["document_type"], doc["correspondent"], doc["date_meaning"]) == (None, 3, None)
     assert doc["media"] == {"handle": "med1", "gramps_id": "NC3MPQ"}
-    assert doc["citations"] == [{"gramps_id": "C0041", "page": "p. 9", "source": "Old source"}]
+    assert doc["citations"] == [
+        {"handle": "cit2", "gramps_id": "C0043", "page": "p. 9, Anna", "confidence": 2, "change": 200,
+         "source_handle": "src1", "source": "Old source", "draft": None},
+        {"handle": "cit1", "gramps_id": "C0041", "page": "p. 9", "confidence": 3, "change": 100,
+         "source_handle": "src1", "source": "Old source",
+         "draft": {"type": "se-dopbok", "draft": {"values": {"parish": "Vimmerby"}, "confidence": "High"}}}]
     with pytest.raises(CitationError) as err:
-        asyncio.run(citations.document(FakeGramps(), FakePaperless(), CFG, 8))
+        asyncio.run(citations.document(FakeGramps(), FakePaperless(), CFG, 8, conn))
     assert err.value.status == 403
+
+
+def test_kept_drafts_answer_only_for_the_citations_asked_about(conn):
+    citations.keep_draft(conn, "cit1", "se-dopbok", {"values": {"parish": "Vimmerby"}})
+    citations.keep_draft(conn, "cit1", "se-husforhor", {"values": {"parish": "Norra Ny"}})
+    citations.keep_draft(conn, "cit9", "us-federal-census", {"values": {"year": "1920"}})
+    assert citations.kept_drafts(conn, ["cit1", "cit2"]) == {
+        "cit1": {"type": "se-husforhor", "draft": {"values": {"parish": "Norra Ny"}}}}
+    assert citations.kept_drafts(conn, []) == {}
 
 
 def test_context_names_each_source_s_repositories_and_finds_the_date_meaning_field(conn):
@@ -257,10 +276,13 @@ def call(app, method, url, **kw):
 def test_create_route_answers_with_what_was_made_or_why_not(conn):
     app = citations_app(FakeGramps(), FakePaperless(), conn)
     inputs = {"type": "se-dopbok", "values": {"parish": "Vimmerby", "vol": "C:8"}}
-    body = {"doc_id": 7, "source": SOURCE, "citation": CITATION, "scan": SCAN, "inputs": inputs}
+    draft = {"type": "se-dopbok", "draft": {"values": {"parish": "Vimmerby", "page": "45"}, "subject": {"name": "Anders Johan"},
+                                            "confidence": "Very High", "variant": ""}}
+    body = {"doc_id": 7, "source": SOURCE, "citation": CITATION, "scan": SCAN, "inputs": inputs, "draft": draft}
     r = call(app, "POST", "/citations/api/create", json=body)
-    assert r.status_code == 200 and r.json()["citation"]["gramps_id"] == "C0042"
+    assert r.status_code == 200 and r.json()["citation"]["gramps_id"] == "C0044"
     assert citations.remembered(conn)[r.json()["source"]["handle"]]["inputs"] == inputs["values"]
+    assert citations.kept_drafts(conn, [r.json()["citation"]["handle"]]) == {r.json()["citation"]["handle"]: draft}
     r = call(app, "POST", "/citations/api/create", json={**body, "doc_id": 8})
     assert r.status_code == 403 and r.json()["detail"] == "Paperless document #8 isn't synced to Gramps"
     r = call(app, "POST", "/citations/api/create",

@@ -57,6 +57,26 @@ def remembered(conn: sqlite3.Connection) -> dict[str, dict]:
             for r in conn.execute("SELECT handle, record_type, inputs, used_at FROM citation_sources")}
 
 
+def keep_draft(conn: sqlite3.Connection, citation_handle: str, record_type: str, draft: dict) -> None:
+    """Keep the wizard draft a citation was made from, to start the next citation on its media from it"""
+    with conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO citation_drafts (citation_handle, record_type, draft, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            (citation_handle, record_type, json.dumps(draft, ensure_ascii=False),
+             datetime.now(timezone.utc).isoformat(timespec="seconds")))
+
+
+def kept_drafts(conn: sqlite3.Connection, handles) -> dict[str, dict]:
+    """{citation handle: {"type", "draft"}} for the given citations the wizard made"""
+    handles = list(handles)
+    if not handles:
+        return {}
+    rows = conn.execute("SELECT citation_handle, record_type, draft FROM citation_drafts "
+                        f"WHERE citation_handle IN ({', '.join('?' * len(handles))})", handles)
+    return {r["citation_handle"]: {"type": r["record_type"], "draft": json.loads(r["draft"])} for r in rows}
+
+
 async def context(gramps: GrampsClient, paperless: PaperlessClient, conn: sqlite3.Connection) -> dict:
     """The Sources and Repositories in Gramps, and the Paperless names a scan is filed under"""
     sources, repos, doctypes, people, fields = await asyncio.gather(
@@ -86,8 +106,8 @@ async def context(gramps: GrampsClient, paperless: PaperlessClient, conn: sqlite
 
 
 async def document(gramps: GrampsClient, paperless: PaperlessClient, cfg: SyncPaperlessConfig,
-                   doc_id: int) -> dict:
-    """The Paperless document, its Gramps media, and the citations already on that media"""
+                   doc_id: int, conn: sqlite3.Connection) -> dict:
+    """The Paperless document, its Gramps media, and the citations already on that media, newest first"""
     doc, fields = await asyncio.gather(paperless.get_document(doc_id), paperless.custom_fields())
     pid = gramps_id_of(cfg, doc)
     if not pid:
@@ -100,9 +120,13 @@ async def document(gramps: GrampsClient, paperless: PaperlessClient, cfg: SyncPa
                                       for h in links.get("citation") or []))
         handles = sorted({c.get("source_handle") for c in cits if c.get("source_handle")})
         srcs = dict(zip(handles, await asyncio.gather(*(gramps.get_object("sources", h) for h in handles))))
-        cited = sorted(({"gramps_id": c.get("gramps_id") or "", "page": c.get("page") or "",
-                         "source": (srcs.get(c.get("source_handle")) or {}).get("title") or ""}
-                        for c in cits), key=lambda c: c["gramps_id"])
+        kept = kept_drafts(conn, (c["handle"] for c in cits))
+        cited = sorted(({"handle": c["handle"], "gramps_id": c.get("gramps_id") or "", "page": c.get("page") or "",
+                         "confidence": c.get("confidence"), "change": c.get("change") or 0,
+                         "source_handle": c.get("source_handle") or "",
+                         "source": (srcs.get(c.get("source_handle")) or {}).get("title") or "",
+                         "draft": kept.get(c["handle"])}
+                        for c in cits), key=lambda c: (-c["change"], c["gramps_id"]))
     meaning = date_meaning_field(fields)
     url = cfg.source_url_field_id
     return {

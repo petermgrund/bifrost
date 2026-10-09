@@ -40,6 +40,11 @@ export function loadState(storage, recordById) {
   return { current: saved.current, drafts, filter: typeof saved.filter === 'string' ? saved.filter : '' };
 }
 
+/** A draft kept elsewhere (a citation made earlier), brought up to date like a saved one, without its edits to the outputs. */
+export function restoreDraft(type, saved) {
+  return mergeDraft(type, newDraft(type), { ...saved, overrides: {} });
+}
+
 export function saveState(storage, state) {
   try {
     storage?.setItem(STORE_KEY, JSON.stringify(state));

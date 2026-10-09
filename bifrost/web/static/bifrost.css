@@ -500,6 +500,11 @@ citations-wizard { display: block; max-inline-size: 84rem; margin-inline: auto; 
 .cw-meta { display: flex; flex-wrap: wrap; gap: 0.25rem 0.875rem; color: var(--on-surface-variant); }
 .cw-cited { margin: 0.75rem 0 0; border-collapse: collapse; }
 .cw-cited td { padding: 0.25rem 0.875rem 0.25rem 0; vertical-align: top; block-size: auto; }
+.cw-bases > tbody > tr, .cw-bases > tr { cursor: pointer; }
+.cw-bases tr:hover > td { background: var(--surface-container); }
+.cw-bases tr.active > td { background: var(--secondary-container); color: var(--on-secondary-container); }
+.cw-bases td:first-child { padding-inline-start: 0.375rem; border-start-start-radius: 0.25rem; border-end-start-radius: 0.25rem; }
+.cw-bases td:last-child { border-start-end-radius: 0.25rem; border-end-end-radius: 0.25rem; }
 .cw-chapter { margin: 1.25rem 0 0.5rem; font-size: 0.75rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--on-surface-variant); }
 .cw-chapter:first-of-type { margin-block-start: 0.25rem; }
 .cw-types { display: flex; flex-wrap: wrap; gap: 0.5rem; }

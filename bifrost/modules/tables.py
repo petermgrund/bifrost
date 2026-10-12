@@ -220,6 +220,18 @@ def person_summary(person: dict) -> dict:
     }
 
 
+async def person_summaries(gramps, handles: list[str]) -> list[dict]:
+    """The linked people's summaries; a person deleted from Gramps comes back as missing"""
+    gate = asyncio.Semaphore(8)
+
+    async def one(handle: str) -> dict:
+        async with gate:
+            person = await gramps.person_profile(handle)
+        return person_summary(person) if person else {"handle": handle, "missing": True}
+
+    return list(await asyncio.gather(*(one(h) for h in handles)))
+
+
 def to_csv(grid: dict) -> str:
     """One column per table column, each followed by its translation when the table has any"""
     cols = grid["cols"]

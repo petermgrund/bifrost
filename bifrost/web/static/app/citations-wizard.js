@@ -2,8 +2,8 @@ import { BifrostElement, html, nothing, api, post, statusLine } from './core.js'
 import {
   RECORDS, recordById, newDraft, draftFromExample, buildOutputs, exampleLabel, setVariant, nextCitationDraft,
   runChecks, plain, hasGap, yearOf, loadState, saveState, recordGroups, sourceRows, referenceRows, citationRows,
-  noteRows, outputRows, exampleNote, copyAllText, repositoryName, paperlessMatch, restoreDraft, REFERENCE_VALUES,
-  LEVELS, CHAPTERS, CHAPTER_CODE, GUIDE,
+  noteRows, outputRows, exampleNote, copyAllText, repositoryName, paperlessMatch, restoreDraft, readCitation, readByFrn, readLoosely,
+  REFERENCE_VALUES, LEVELS, CHAPTERS, CHAPTER_CODE, GUIDE,
 } from '/static/citations/citations.js';
 
 const API = '/citations/api';
@@ -223,18 +223,33 @@ class CitationsWizard extends BifrostElement {
     this.basis = c.handle;
     const kept = c.draft && recordById(c.draft.type);
     const source = (this.ctx?.sources || []).find((s) => s.handle === c.source_handle);
+    const call = (source?.repositories || []).map((r) => r.call_number).find(Boolean) || '';
+    const cited = { page: c.page, frn: c.frn, srn: c.srn, title: source?.title, author: source?.author, abbrev: source?.abbrev,
+      pubinfo: source?.pubinfo, call };
+    const prefer = source?.remembered?.type || this.gen.current;
+    const read = kept ? null : readCitation(cited, prefer) || readByFrn(cited, prefer);
     if (kept) {
       this.gen.current = kept.id;
       this.gen.drafts[kept.id] = restoreDraft(kept, c.draft.draft);
-      if (source) this.gsrc = { mode: 'existing', handle: source.handle };
+    } else if (read) {
+      const type = recordById(read.type);
+      this.gen.current = type.id;
+      this.gen.drafts[type.id] = restoreDraft(type, read.draft);
     } else {
       const known = recordById(source?.remembered?.type || '');
       if (known) this.gen.current = known.id;
       this.gen.drafts[this.gen.current] = newDraft(this.type);
-      this.applyDoc();
       if (source) this.pickSource(source);
-      if (Number.isInteger(c.confidence) && LEVELS[4 - c.confidence]) this.draft.confidence = LEVELS[4 - c.confidence];
     }
+    if (!kept) {
+      const v = this.draft.values, loose = readLoosely(c);
+      for (const key of ['page', 'image', 'accessed', 'url']) if (loose[key] && !v[key]) v[key] = loose[key];
+      if (loose.name && !this.draft.subject.name) this.draft.subject.name = loose.name;
+      if (!v.url) v.url = this.doc?.source_url || '';
+      if (!v.eventYear) v.eventYear = yearOf(this.doc?.created) || '';
+    }
+    if (!kept && Number.isInteger(c.confidence) && LEVELS[4 - c.confidence]) this.draft.confidence = LEVELS[4 - c.confidence];
+    if (source) this.gsrc = { mode: 'existing', handle: source.handle };
     this.repo = { mode: 'auto' };
     this.editing = '';
     this.edited();

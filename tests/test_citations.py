@@ -31,10 +31,12 @@ class FakeGramps:
             "repositories": {"rep1": {"handle": "rep1", "gramps_id": "R0002", "name": "Värmlandsarkiv", "type": "Archive"}},
             "citations": {
                 "cit1": {"handle": "cit1", "gramps_id": "C0041", "page": "p. 9", "source_handle": "src1",
-                         "confidence": 3, "change": 100},
+                         "confidence": 3, "change": 100, "note_list": ["n0", "n1"]},
                 "cit2": {"handle": "cit2", "gramps_id": "C0043", "page": "p. 9, Anna", "source_handle": "src1",
                          "confidence": 2, "change": 200}},
-            "notes": {"n1": {"handle": "n1", "gramps_id": "N0099"}},
+            "notes": {"n0": {"handle": "n0", "gramps_id": "N0098", "text": {"string": "Transcription: …"}},
+                      "n1": {"handle": "n1", "gramps_id": "N0099",
+                             "text": {"string": "FIRST REFERENCE NOTE:\nOld FRN.\n\nSHORT REFERENCE NOTE:\nOld SRN.\n"}}},
             "media": {"med1": {"handle": "med1", "gramps_id": "NC3MPQ"}},
         }
         self.created = []
@@ -105,6 +107,8 @@ def create(gramps, paperless, source=SOURCE, citation=CITATION, scan=SCAN, doc_i
 
 def test_note_holds_both_reference_notes_under_their_headings():
     assert citations.note_text(" FRN. ", "SRN.\n") == "FIRST REFERENCE NOTE:\nFRN.\n\nSHORT REFERENCE NOTE:\nSRN."
+    assert citations.reference_notes(citations.note_text("A, b.\nMore.", "C.")) == ("A, b.\nMore.", "C.")
+    assert citations.reference_notes("Transcription: …") == ("", "")
 
 
 def test_new_source_note_and_citation_go_to_gramps_in_one_batch():
@@ -209,9 +213,9 @@ def test_document_lists_its_media_citations_newest_first_with_their_drafts(conn)
     assert doc["media"] == {"handle": "med1", "gramps_id": "NC3MPQ"}
     assert doc["citations"] == [
         {"handle": "cit2", "gramps_id": "C0043", "page": "p. 9, Anna", "confidence": 2, "change": 200,
-         "source_handle": "src1", "source": "Old source", "draft": None},
+         "source_handle": "src1", "source": "Old source", "frn": "", "srn": "", "draft": None},
         {"handle": "cit1", "gramps_id": "C0041", "page": "p. 9", "confidence": 3, "change": 100,
-         "source_handle": "src1", "source": "Old source",
+         "source_handle": "src1", "source": "Old source", "frn": "Old FRN.", "srn": "Old SRN.",
          "draft": {"type": "se-dopbok", "draft": {"values": {"parish": "Vimmerby"}, "confidence": "High"}}}]
     with pytest.raises(CitationError) as err:
         asyncio.run(citations.document(FakeGramps(), FakePaperless(), CFG, 8, conn))

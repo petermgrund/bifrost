@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import sqlite3
 from datetime import datetime, timezone
 
@@ -15,6 +16,7 @@ from .codes import normalize
 
 CONFIDENCE = ("Very Low", "Low", "Normal", "High", "Very High")
 DATE_MEANING = "date meaning"
+REFERENCE_NOTES = re.compile(r"FIRST REFERENCE NOTE:\s*(?P<frn>.*?)\s*SHORT REFERENCE NOTE:\s*(?P<srn>.*?)\s*$", re.S)
 
 
 class CitationError(Exception):
@@ -27,6 +29,12 @@ class CitationError(Exception):
 
 def note_text(frn: str, srn: str) -> str:
     return f"FIRST REFERENCE NOTE:\n{frn.strip()}\n\nSHORT REFERENCE NOTE:\n{srn.strip()}"
+
+
+def reference_notes(text: str) -> tuple[str, str]:
+    """The FRN and SRN of a citation note laid out as note_text lays them out, or blanks"""
+    m = REFERENCE_NOTES.search(text or "")
+    return (m["frn"], m["srn"]) if m else ("", "")
 
 
 def gramps_id_of(cfg: SyncPaperlessConfig, doc: dict) -> str:
@@ -121,12 +129,24 @@ async def document(gramps: GrampsClient, paperless: PaperlessClient, cfg: SyncPa
         handles = sorted({c.get("source_handle") for c in cits if c.get("source_handle")})
         srcs = dict(zip(handles, await asyncio.gather(*(gramps.get_object("sources", h) for h in handles))))
         kept = kept_drafts(conn, (c["handle"] for c in cits))
-        cited = sorted(({"handle": c["handle"], "gramps_id": c.get("gramps_id") or "", "page": c.get("page") or "",
-                         "confidence": c.get("confidence"), "change": c.get("change") or 0,
-                         "source_handle": c.get("source_handle") or "",
-                         "source": (srcs.get(c.get("source_handle")) or {}).get("title") or "",
-                         "draft": kept.get(c["handle"])}
-                        for c in cits), key=lambda c: (-c["change"], c["gramps_id"]))
+        note_handles = sorted({h for c in cits for h in c.get("note_list") or []})
+        notes = dict(zip(note_handles, await asyncio.gather(*(gramps.get_object("notes", h) for h in note_handles))))
+
+        def notes_of(c: dict) -> tuple[str, str]:
+            for h in c.get("note_list") or []:
+                frn, srn = reference_notes(((notes.get(h) or {}).get("text") or {}).get("string") or "")
+                if frn or srn:
+                    return frn, srn
+            return "", ""
+
+        for c in cits:
+            frn, srn = notes_of(c)
+            cited.append({"handle": c["handle"], "gramps_id": c.get("gramps_id") or "", "page": c.get("page") or "",
+                          "confidence": c.get("confidence"), "change": c.get("change") or 0,
+                          "source_handle": c.get("source_handle") or "",
+                          "source": (srcs.get(c.get("source_handle")) or {}).get("title") or "",
+                          "frn": frn, "srn": srn, "draft": kept.get(c["handle"])})
+        cited.sort(key=lambda c: (-c["change"], c["gramps_id"]))
     meaning = date_meaning_field(fields)
     url = cfg.source_url_field_id
     return {

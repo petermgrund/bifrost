@@ -1,7 +1,7 @@
 // Lookup tables shared by every record type. PLATFORMS and STATE_ABBREV are pinned to the
 // guide's own tables (A10, B.3 §10) by test/tables.test.js.
 
-export const CHAPTERS = { no: 'Norwegian', se: 'Swedish', us: 'US', pp: 'Published & personal' };
+export const CHAPTERS = { no: 'Norwegian', se: 'Swedish', us: 'US', pp: 'Published & personal', ge: 'General' };
 export const CHAPTER_CODE = { no: 'B.1', se: 'B.2', us: 'B.3', pp: 'B.4' };
 
 export const LEVELS = ['Very High', 'High', 'Normal', 'Low', 'Very Low'];
@@ -36,6 +36,7 @@ export const ARCHIVES = {
   se: ['Värmlandsarkiv', 'Riksarkivet'],
   us: ['National Archives', 'Minnesota Historical Society', 'Swenson Swedish Immigration Research Center', 'Family History Library'],
   pp: ['Minnesota Historical Society', 'Library of Virginia'],
+  ge: [],
 };
 
 // A7 parenthetical suggestions per chapter (§9): 1 which entry, 2 source says, 3 evidence.
@@ -52,6 +53,37 @@ export const SUGGESTIONS = {
   pp: { which: ['b. ', 'd. ', 'at ', 'senior', 'junior'],
     says: ['written contemporaneously', 'compiled later', 'damaged page', 'in unrelated handwriting'],
     evidence: ['reported by ', 'handwritten by ', 'uncited claim in published work', 'second-hand'] },
+  ge: { which: ['b. ', 'd. ', 'at ', 'senior', 'junior'],
+    says: ['grantor', 'grantee', 'witness', 'widow'],
+    evidence: ['named at ', 'stated age ', 'second-hand'] },
+};
+
+// A7 · Usual cited for: the fact a record noun (or a record type without one) is usually cited for. Pinned to the
+// guide's table by test/tables.test.js.
+export const USUAL_CITED_FOR = {
+  'birth and baptism entry': 'birth and baptism',
+  'birth entry': 'birth', 'birth certificate': 'birth',
+  'baptism entry': 'baptism',
+  'death entry': 'death', 'death certificate': 'death', 'obituary': 'death',
+  'burial entry': 'burial', 'headstone application': 'burial',
+  'death and burial entry': 'death and burial',
+  'marriage entry': 'marriage', 'marriage license': 'marriage', 'marriage announcement': 'marriage',
+  'confirmation entry': 'confirmation',
+  'communion entry': 'communion',
+  'membership entry': 'membership',
+  'household': 'residence', 'household examination entry': 'residence', 'census entry': 'residence', 'directory entry': 'residence',
+  'estate entry': 'estate', 'estate inventory': 'estate',
+  'matrikkel entry': 'land holding',
+  'land allotment entry': 'land allotment',
+  'signatory entry': 'signature',
+  'croft transfer entry': 'croft transfer',
+  'naturalization petition': 'naturalization',
+  'declaration of intention': 'declaration of intention',
+  'WWII draft card': 'draft registration',
+  'pension file': 'military service', 'compiled service record': 'military service',
+  'funeral notice': 'funeral',
+  'Find a Grave memorial': 'burial',
+  'Passenger manifest': 'arrival',
 };
 
 // C2 document types and their default C4 date meaning.

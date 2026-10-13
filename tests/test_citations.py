@@ -301,3 +301,94 @@ def test_the_page_is_served(conn):
     r = call(citations_app(FakeGramps(), FakePaperless(), conn), "GET", "/citations")
     assert r.status_code == 200
     assert "<citations-wizard>" in r.text and "/static/app/citations-wizard.js" in r.text
+
+
+class TaggingGramps(FakeGramps):
+    def __init__(self, tags=None):
+        super().__init__()
+        self.objects["tags"] = dict(tags or {})
+
+    async def get_tag_handle(self, name):
+        return next((h for h, t in self.objects["tags"].items() if t["name"] == name), None)
+
+    async def update_object(self, api_path, handle, obj):
+        self.objects[api_path][handle] = copy.deepcopy(obj)
+        return obj
+
+    async def create_objects(self, objs):
+        for o in objs:
+            if o["_class"] == "Tag":
+                self.objects["tags"][o["handle"]] = {"handle": o["handle"], "name": o["name"]}
+        return await super().create_objects(objs)
+
+
+def test_a_new_citation_carries_its_attributes_and_the_general_form_tag():
+    gramps = TaggingGramps()
+    pairs = [["Subject", "Anders Johan"], ["Record", "birth and baptism entry"], ["Bogus", "x"], ["Evidence", " "],
+             ["Guide", "2026-10-13"]]
+    create(gramps, FakePaperless(), citation={**CITATION, "attributes": pairs, "tag": "General form"})
+    objs = gramps.created[0]
+    tag = next(o for o in objs if o["_class"] == "Tag")
+    cit = next(o for o in objs if o["_class"] == "Citation")
+    assert tag["name"] == "General form" and cit["tag_list"] == [tag["handle"]]
+    assert [(a["_class"], a["type"], a["value"]) for a in cit["attribute_list"]] == [
+        ("SrcAttribute", "Subject", "Anders Johan"), ("SrcAttribute", "Record", "birth and baptism entry"),
+        ("SrcAttribute", "Guide", "2026-10-13")]
+
+
+def test_an_existing_tag_is_reused_and_no_tag_means_none():
+    gramps = TaggingGramps(tags={"tg1": {"handle": "tg1", "name": "General form"}})
+    create(gramps, FakePaperless(), citation={**CITATION, "tag": "General form"})
+    objs = gramps.created[0]
+    assert not [o for o in objs if o["_class"] == "Tag"]
+    assert next(o for o in objs if o["_class"] == "Citation")["tag_list"] == ["tg1"]
+    plain = TaggingGramps()
+    create(plain, FakePaperless())
+    assert next(o for o in plain.created[0] if o["_class"] == "Citation")["tag_list"] == []
+
+
+def test_wizard_citations_lists_kept_drafts_as_gramps_holds_them(conn):
+    citations.keep_draft(conn, "cit1", "se-dopbok", {"values": {"page": "9"}})
+    citations.keep_draft(conn, "gone", "se-dopbok", {"values": {}})
+    gramps = TaggingGramps(tags={"tg1": {"handle": "tg1", "name": "General form"}})
+    gramps.objects["citations"]["cit1"]["tag_list"] = ["tg1"]
+    gramps.objects["citations"]["cit1"]["attribute_list"] = [{"type": "_APID", "value": "1,2::3"}]
+    [row] = asyncio.run(citations.wizard_citations(gramps, conn))
+    assert (row["handle"], row["gramps_id"], row["page"]) == ("cit1", "C0041", "p. 9")
+    assert (row["frn"], row["srn"], row["note"]) == ("Old FRN.", "Old SRN.", "n1")
+    assert row["attributes"] == [["_APID", "1,2::3"]] and row["tags"] == ["General form"]
+    assert row["source"]["title"] == "Old source" and row["draft"] == {"type": "se-dopbok", "draft": {"values": {"page": "9"}}}
+
+
+def test_rebuild_rewrites_page_attributes_tag_and_notes_and_keeps_other_attributes(conn):
+    gramps = TaggingGramps()
+    gramps.objects["citations"]["cit1"]["attribute_list"] = [
+        {"_class": "SrcAttribute", "type": "_APID", "value": "1,2::3", "private": False}, {"type": "Subject", "value": "old"}]
+    items = [{"handle": "cit1", "page": "p. 9 (birth and baptism)", "attributes": [["Subject", "Anders Johan"], ["Guide", "2026-10-13"]],
+              "tagged": True, "note": "n1", "frn": "New FRN.", "srn": "New SRN.",
+              "draft": {"type": "se-dopbok", "draft": {"guide": "2026-10-13"}}}]
+    assert asyncio.run(citations.rebuild(gramps, conn, items, "General form")) == {"rebuilt": ["C0041"], "failed": []}
+    cit = gramps.objects["citations"]["cit1"]
+    assert cit["page"] == "p. 9 (birth and baptism)"
+    assert [(a["type"], a["value"]) for a in cit["attribute_list"]] == [("_APID", "1,2::3"), ("Subject", "Anders Johan"),
+                                                                       ("Guide", "2026-10-13")]
+    assert cit["tag_list"] == list(gramps.objects["tags"])
+    assert gramps.objects["notes"]["n1"]["text"]["string"] == citations.note_text("New FRN.", "New SRN.")
+    assert citations.kept_drafts(conn, ["cit1"])["cit1"]["draft"] == {"guide": "2026-10-13"}
+    untag = [{"handle": "cit1", "tagged": False}]
+    asyncio.run(citations.rebuild(gramps, conn, untag, "General form"))
+    assert gramps.objects["citations"]["cit1"]["tag_list"] == []
+
+
+def test_rebuild_reports_a_citation_it_could_not_write(conn):
+    got = asyncio.run(citations.rebuild(TaggingGramps(), conn, [{"handle": "nope", "page": "x"}], "General form"))
+    assert got["rebuilt"] == [] and got["failed"][0]["handle"] == "nope"
+
+
+def test_the_rebuild_page_and_list_are_served(conn):
+    citations.keep_draft(conn, "cit1", "se-dopbok", {"values": {}})
+    app = citations_app(TaggingGramps(), FakePaperless(), conn)
+    r = call(app, "GET", "/citations/rebuild")
+    assert r.status_code == 200 and "<citations-rebuild>" in r.text and "/static/app/citations-rebuild.js" in r.text
+    r = call(app, "GET", "/citations/api/rebuild")
+    assert r.status_code == 200 and [i["gramps_id"] for i in r.json()["items"]] == ["C0041"]

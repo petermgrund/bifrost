@@ -38,7 +38,6 @@ test('C1 uses the page string\'s record noun, in its copy form', () => {
 
 test('C1 variants: record types with titles of their own', () => {
   assert.equal(outputsOf('us-find-a-grave').plTitle, 'Per Larsson Grund Find a Grave memorial 1929');
-  assert.equal(outputsOf('pp-funeral-program').plTitle, 'Thomas Emil Siggerud funeral program 1953');
   assert.equal(outputsOf('pp-video').plTitle, 'Norra Ny walking tour video clip 2025');
 });
 

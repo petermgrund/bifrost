@@ -201,7 +201,7 @@ function readerFor(type, variant, cited) {
   // What the FRN says the citation documents ends the page string too, so that reading goes first.
   const documented = /\(documenting ([^()]+)\)/.exec(cited.frn)?.[1];
   const pageTexts = citedOff(cited.page).sort((a, b) => (b[1] === documented) - (a[1] === documented));
-  const page = c => pageTexts.flatMap(([text, citedFor]) => readings(t.page, {}, text).flatMap((got) => {
+  const page = c => pageTexts.flatMap(([text, citedFor]) => readings(t.legacyPage ?? t.page, {}, text).flatMap((got) => {
     const loc = got.pageLoc === undefined ? {} : locatorsOf(got.pageLoc);
     if (!loc) return [];
     const people = got.subject !== undefined ? subjects(t, got.subject)
@@ -315,7 +315,7 @@ function readAs(type, variant, cited) {
   let tried = 0, close = null;
   for (const c of search(start, [page, source, frnOrNot, srn, source])) {
     const d = settle(c);
-    const o = buildOutputs(type, d);
+    const o = buildOutputs(type, d, { legacy: true });
     if (o.page === cited.page) {
       if (o.frn === cited.frn && o.srn === cited.srn) return { draft: d, exact: true };
       if (!close && o.frn === cited.frn) close = { draft: d, exact: false };
@@ -332,7 +332,7 @@ function readAs(type, variant, cited) {
  */
 export function readCitation(cited, preferred = '') {
   if (!cited?.page || !cited.frn || !cited.srn) return null;
-  const order = [recordById(preferred), ...RECORDS.filter(r => r.id !== preferred)].filter(Boolean);
+  const order = [recordById(preferred), ...RECORDS.filter(r => r.id !== preferred)].filter(r => r && r.chapter !== 'ge');
   let close = null;
   for (const type of order) {
     for (const variant of type.pageVariants ? type.pageVariants.map(v => v.key) : ['']) {
@@ -355,7 +355,7 @@ const fixedText = template => String(template ?? '').replace(/\{\w+\}|«|»/g, '
  */
 export function readByFrn(cited, preferred = '') {
   if (!cited?.frn) return null;
-  const order = [recordById(preferred), ...RECORDS.filter(r => r.id !== preferred)].filter(Boolean);
+  const order = [recordById(preferred), ...RECORDS.filter(r => r.id !== preferred)].filter(r => r && r.chapter !== 'ge');
   let best = null;
   for (const type of order) {
     for (const variant of type.pageVariants ? type.pageVariants.map(v => v.key) : ['']) {

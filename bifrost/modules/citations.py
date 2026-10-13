@@ -15,6 +15,8 @@ from .ancestry_links import media_ref
 from .codes import normalize
 
 CONFIDENCE = ("Very Low", "Low", "Normal", "High", "Very High")
+WIZARD_ATTRIBUTES = ("Subject", "Record", "Household", "Which entry", "Source says", "Evidence", "Record type", "Guide")
+TAG_COLOR = "#7b5ea7"
 DATE_MEANING = "date meaning"
 REFERENCE_NOTES = re.compile(r"FIRST REFERENCE NOTE:\s*(?P<frn>.*?)\s*SHORT REFERENCE NOTE:\s*(?P<srn>.*?)\s*$", re.S)
 
@@ -35,6 +37,24 @@ def reference_notes(text: str) -> tuple[str, str]:
     """The FRN and SRN of a citation note laid out as note_text lays them out, or blanks"""
     m = REFERENCE_NOTES.search(text or "")
     return (m["frn"], m["srn"]) if m else ("", "")
+
+
+def citation_attributes(existing: list[dict] | None, pairs) -> list[dict]:
+    """The citation's own attributes kept, the wizard's (A7) replaced by the given pairs"""
+    kept = [a for a in existing or [] if (a.get("type") or "") not in WIZARD_ATTRIBUTES]
+    made = [{"_class": "SrcAttribute", "type": str(t), "value": _text(v), "private": False}
+            for t, v in pairs or [] if str(t) in WIZARD_ATTRIBUTES and _text(v)]
+    return kept + made
+
+
+async def tag_for(gramps: GrampsClient, name: str, objs: list[dict], now: int) -> str:
+    """The handle of the Gramps tag with this name; a new tag joins the objects about to be created"""
+    handle = await gramps.get_tag_handle(name)
+    if handle:
+        return handle
+    handle = generate_handle()
+    objs.append({"_class": "Tag", "handle": handle, "name": name, "color": TAG_COLOR, "priority": 0, "change": now})
+    return handle
 
 
 def gramps_id_of(cfg: SyncPaperlessConfig, doc: dict) -> str:
@@ -217,13 +237,14 @@ async def create(gramps: GrampsClient, paperless: PaperlessClient, cfg: SyncPape
         made.append({"kind": "source", "gramps_id": src_id, "title": src_title})
 
     note_handle, cit_handle = generate_handle(), generate_handle()
+    tags = [await tag_for(gramps, _text(citation["tag"]), objs, now)] if _text(citation.get("tag")) else []
     objs.append({"_class": "Note", "handle": note_handle, "gramps_id": minted["N"],
                  "text": {"_class": "StyledText", "string": note_text(frn, srn), "tags": []},
                  "type": "Citation", "format": 0, "change": now, "tag_list": [], "private": False})
     objs.append({"_class": "Citation", "handle": cit_handle, "gramps_id": minted["C"],
                  "source_handle": src_handle, "page": page, "confidence": CONFIDENCE.index(confidence),
                  "change": now, "note_list": [note_handle], "media_list": [media_ref(media["handle"])],
-                 "attribute_list": [], "tag_list": [], "private": False})
+                 "attribute_list": citation_attributes([], citation.get("attributes")), "tag_list": tags, "private": False})
     made += [{"kind": "citation", "gramps_id": minted["C"], "title": page},
              {"kind": "note", "gramps_id": minted["N"], "title": "Reference notes"}]
     await gramps.create_objects(objs)
@@ -252,3 +273,74 @@ async def file_scan(paperless: PaperlessClient, cfg: SyncPaperlessConfig, doc: d
         values[meaning["id"]] = scan["date_meaning"]
     patch["custom_fields"] = [{"field": f, "value": v} for f, v in values.items()]
     await paperless.patch_document(doc["id"], patch)
+
+
+def _rebuild_row(c: dict, kept: dict, notes: dict, sources: dict, tags: dict) -> dict:
+    frn, srn, note = "", "", ""
+    for h in c.get("note_list") or []:
+        got = reference_notes(((notes.get(h) or {}).get("text") or {}).get("string") or "")
+        if any(got):
+            (frn, srn), note = got, h
+            break
+    src = sources.get(c.get("source_handle")) or {}
+    return {"handle": c["handle"], "gramps_id": c.get("gramps_id") or "", "page": c.get("page") or "", "frn": frn, "srn": srn,
+            "note": note, "attributes": [[a.get("type") or "", a.get("value") or ""] for a in c.get("attribute_list") or []],
+            "tags": [tags.get(t, "") for t in c.get("tag_list") or []],
+            "source": {"handle": src.get("handle") or "", "gramps_id": src.get("gramps_id") or "", "title": src.get("title") or ""},
+            "draft": kept}
+
+
+async def wizard_citations(gramps: GrampsClient, conn: sqlite3.Connection) -> list[dict]:
+    """Every citation the wizard kept a draft for, as Gramps holds it now, newest first; deleted ones left out"""
+    rows = conn.execute("SELECT citation_handle, record_type, draft FROM citation_drafts ORDER BY created_at DESC").fetchall()
+    gate = asyncio.Semaphore(8)
+
+    async def one(path: str, handle: str) -> dict | None:
+        async with gate:
+            try:
+                return await gramps.get_object(path, handle)
+            except Exception:  # noqa BLE001
+                return None
+
+    cits = await asyncio.gather(*(one("citations", r["citation_handle"]) for r in rows))
+    found = [(c, {"type": r["record_type"], "draft": json.loads(r["draft"])}) for c, r in zip(cits, rows) if c]
+    note_handles = sorted({h for c, _ in found for h in c.get("note_list") or []})
+    src_handles = sorted({c.get("source_handle") for c, _ in found if c.get("source_handle")})
+    notes = dict(zip(note_handles, await asyncio.gather(*(one("notes", h) for h in note_handles))))
+    sources = dict(zip(src_handles, await asyncio.gather(*(one("sources", h) for h in src_handles))))
+    tags = {t["handle"]: t.get("name") or "" for t in await gramps._paged("/tags/", keys="handle,name")}
+    return [_rebuild_row(c, kept, notes, sources, tags) for c, kept in found]
+
+
+async def rebuild(gramps: GrampsClient, conn: sqlite3.Connection, items: list[dict], tag: str) -> dict:
+    """Write each rebuilt citation: page string, attributes and General form tag, then its reference notes"""
+    now = int(datetime.now(timezone.utc).timestamp())
+    done, failed = [], []
+    for item in items:
+        handle = item["handle"]
+        try:
+            cit = await gramps.get_object("citations", handle)
+            if item.get("page") is not None:
+                cit["page"] = item["page"].strip()
+            if item.get("attributes") is not None:
+                cit["attribute_list"] = citation_attributes(cit.get("attribute_list"), item["attributes"])
+            if item.get("tagged") is not None:
+                objs: list[dict] = []
+                tag_handle = await tag_for(gramps, tag, objs, now)
+                if objs:
+                    await gramps.create_objects(objs)
+                rest = [t for t in cit.get("tag_list") or [] if t != tag_handle]
+                cit["tag_list"] = rest + ([tag_handle] if item["tagged"] else [])
+            cit["change"] = now
+            await gramps.update_object("citations", handle, cit)
+            if item.get("frn") is not None and item.get("srn") is not None and item.get("note"):
+                note = await gramps.get_object("notes", item["note"])
+                note["text"] = {"_class": "StyledText", "string": note_text(item["frn"], item["srn"]), "tags": []}
+                note["change"] = now
+                await gramps.update_object("notes", item["note"], note)
+            if item.get("draft"):
+                keep_draft(conn, handle, item["draft"]["type"], item["draft"]["draft"])
+            done.append(cit.get("gramps_id") or handle)
+        except Exception as exc:  # noqa BLE001
+            failed.append({"handle": handle, "error": str(exc)[:300]})
+    return {"rebuilt": done, "failed": failed}

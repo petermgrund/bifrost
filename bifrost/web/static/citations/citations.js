@@ -14,21 +14,22 @@ const PAGE = ['page', 'Page', 'blank if unnumbered'];
 const IMAGE = ['image', 'Image', 'if not the page, or if unnumbered'];
 const PARISH_LOCATORS = [PAGE, IMAGE, ['entry', 'Entry no.']];
 const PARISH_NOUNS = ['birth and baptism entry', 'baptism entry', 'death entry', 'burial entry', 'marriage entry'];
-const PARISH_PAGE_PIN = ['B.1 §7', 'Parish | p. [P] (image [I]), [entry], [subject]'];
-const UNPAGINATED_PIN = ['B.1 §7', 'Unpaginated fallback: when the page has no number, lead with the image number: image [I], [entry], [subject]'];
+const PARISH_PAGE_PIN = ['B.1 §7', 'Parish | p. [P] (image [I]), [entry]'];
+const UNPAGINATED_PIN = ['B.1 §7', 'Unpaginated fallback: when the page has no number, lead with the image number: image [I], [entry]'];
 /** Eidsvoll sorenskriveri → Eidsvoll, for the court's gloss. */
 const courtPlace = court => String(court || '').replace(/\s+sorenskriveri$/i, '').trim();
 
 const NORWEGIAN = [
   {
-    id: 'no-ministerialbok', chapter: 'no', group: 'Parish registers (kirkebøker)', name: 'Ministerialbok',
+    id: 'no-ministerialbok', chapter: 'no', group: 'Parish registers (kirkebøker)', name: 'Parish register',
     hint: "The minister's original register",
     source: PARISH_SOURCE, citation: PARISH_LOCATORS, nouns: PARISH_NOUNS,
     defaults: OSLO, confidence: 'Very High', doctype: 'vital record',
     title: 'Norway, {fylke}, {parish}, Ministerialbok [parish register] {vol}, {years}',
     abbrev: '{parish} kirkebok {vol} ({years})',
     author: '{parish} prestekontor',
-    page: '{pageLoc}, no. {entry}, {subject}',
+    page: '{pageLoc}, no. {entry}',
+    legacyPage: '{pageLoc}, no. {entry}, {subject}',
     frn: `{parish} prestekontor, Ministerialbok [parish register] no. {vol}, {years}, {pageRef}, no. {entry}, {name}« {details}»« (documenting {citedFor})»; ${DIGITAL_IMAGE}; citing {archive}, {call}.`,
     srn: '{parish} kirkebok {vol} ({years}), {pageRef}, no. {entry}, {srnSubject}.',
     detailsLabel: 'Entry details (dates, parents, church)',
@@ -42,14 +43,15 @@ const NORWEGIAN = [
     examples: [],
   },
   {
-    id: 'no-klokkerbok', chapter: 'no', group: 'Parish registers (kirkebøker)', name: 'Klokkerbok',
+    id: 'no-klokkerbok', chapter: 'no', group: 'Parish registers (kirkebøker)', name: 'Parish register (copy)',
     hint: "The sacristan's duplicate (parish register copy). Prefer the ministerialbok when you can reach it.",
     source: PARISH_SOURCE, citation: PARISH_LOCATORS, nouns: PARISH_NOUNS,
     defaults: OSLO, confidence: 'High', doctype: 'vital record',
     title: 'Norway, {fylke}, {parish}, Klokkerbok [parish register (copy)] {vol}, {years}',
     abbrev: '{parish} klokkerbok {vol} ({years})',
     author: '{parish} prestekontor',
-    page: '{pageLoc}, no. {entry}, {subject}',
+    page: '{pageLoc}, no. {entry}',
+    legacyPage: '{pageLoc}, no. {entry}, {subject}',
     frn: `{parish} prestekontor, Klokkerbok [parish register (copy)] no. {vol}, {years}, {pageRef}, no. {entry}, {name}« {details}»« (documenting {citedFor})»; ${DIGITAL_IMAGE}; citing {archive}, {call}.`,
     srn: '{parish} klokkerbok {vol} ({years}), {pageRef}, no. {entry}, {srnSubject}.',
     detailsLabel: 'Entry details (dates, parents, church)',
@@ -92,15 +94,16 @@ const NORWEGIAN = [
     title: 'Norway, {fylke}, {parish}, {bookName} [{bookGloss}] {vol}, {years}',
     abbrev: '{parish} {kb} {vol} ({years})',
     author: '{parish} prestekontor',
-    page: '{section}, {pageLoc}«, no. {entry}», {subject}',
+    page: '{section}, {pageLoc}«, no. {entry}»',
+    legacyPage: '{section}, {pageLoc}«, no. {entry}», {subject}',
     frn: `{parish} prestekontor, {bookName} [{bookGloss}] no. {vol}, {years}, {section} section, {pageRef}«, no. {entry}», {name}« {details}»« (documenting {citedFor})»; ${DIGITAL_IMAGE}; citing {archive}, {call}.`,
     srn: '{parish} {kb} {vol} ({years}), {section}, {pageRef}«, no. {entry}», {srnSubject}.',
     detailsLabel: 'Entry details (parents, church, year)',
     pins: {
       title: [['B.1 §4', "Confirmation and communion have no Title of their own; they use the kirkebok's Title."]],
       page: [
-        ['B.1 §7', 'Confirmation Pending review | confirmations, p. [P] (image [I]), no. [N], [Subject] confirmation entry'],
-        ['B.1 §7', 'Communion Pending review | communicants, p. [P] (image [I]), [Subject] communion entry'],
+        ['B.1 §7', 'Confirmation Pending review | confirmations, p. [P] (image [I]), no. [N]'],
+        ['B.1 §7', 'Communion Pending review | communicants, p. [P] (image [I])'],
         UNPAGINATED_PIN,
       ],
       author: [['B.1 §2', 'Confirmation, communion | [Parish] prestekontor']],
@@ -130,20 +133,21 @@ const NORWEGIAN = [
     title: 'Norway, {fylke}, {parish}, Menighetsmøteprotokoll [parish meeting minutes] {vol}, {years}',
     abbrev: '{parish} menighetsmøteprotokoll {vol} ({years})',
     author: '{parish} prestekontor',
-    page: '{pageLoc}, {date}, {subject}',
+    page: '{pageLoc}, {date}',
+    legacyPage: '{pageLoc}, {date}, {subject}',
     frn: `{parish} prestekontor, Menighetsmøteprotokoll [parish meeting minutes] no. {vol}, {years}, {pageRef}, {date}, {subject}«, {details}»« (documenting {citedFor})»; ${DIGITAL_IMAGE}; citing {archive}«, {call}».`,
     srn: '{parish} menighetsmøteprotokoll {vol} ({years}), {pageRef}, {srnSubject}.',
     subjectLabel: 'Meeting subject',
     pins: {
       title: [['B.1 §4', 'Meeting minutes | Norway, [Fylke/Amt], [Parish], Menighetsmøteprotokoll [parish meeting minutes] [vol], [years]']],
-      page: [['B.1 §7', 'Meeting minutes Pending review | p. [P] (image [I]), [date], [subject] minute entry'], UNPAGINATED_PIN],
+      page: [['B.1 §7', 'Meeting minutes Pending review | p. [P] (image [I]), [date]'], UNPAGINATED_PIN],
       abbrev: [['B.1 §10', 'Menighetsmøteprotokoll 1 Pending review | menighetsmøteprotokoll 1 | Eidsvoll menighetsmøteprotokoll 1 (1870–1895)']],
       confidence: [['B.1 §8', 'Meeting minutes Pending review | High for the recorded act or attendance']],
     },
     examples: [],
   },
   {
-    id: 'no-folketelling-1801', chapter: 'no', group: 'Census (folketelling)', name: 'Folketelling 1801',
+    id: 'no-folketelling-1801', chapter: 'no', group: 'Census (folketelling)', name: 'Census 1801',
     hint: 'Nominal census, organized by gård',
     source: [['amt', 'Amt', 'Akershus'], ['prestegjeld', 'Prestegjeld', 'Eidsvoll'], ['ref', 'Reference (if needed)', 'L0009'], ['call', 'Call number']],
     citation: [['gard', 'Gård no.'], ['gardname', 'Gård name'], ['hh', 'Household'], ['person', 'Person']],
@@ -152,12 +156,13 @@ const NORWEGIAN = [
     title: 'Norway, {amt}, {prestegjeld}, Folketelling [census] 1801«, {ref}»',
     abbrev: '{prestegjeld} folketelling 1801',
     author: 'Riksarkivet',
-    page: 'gård {gard} ({gardname}), household {hh}, person {person}, {subject}',
+    page: 'gård {gard} ({gardname}), household {hh}, person {person}',
+    legacyPage: 'gård {gard} ({gardname}), household {hh}, person {person}, {subject}',
     frn: `Folketelling [census] 1801, {amt}, {prestegjeld} prestegjeld, gård {gard} ({gardname}), household no. {hh}, person no. {person}, {name}«, {details}»« (documenting {citedFor})»; ${DIGITAL_IMAGE}; citing {archive}«, {call}».`,
     srn: '{prestegjeld} folketelling 1801, gård {gard}, household {hh}, {srnSubject}.',
     pins: {
       title: [['B.1 §4', 'Folketelling 1801 | Norway, [Amt], [Prestegjeld], Folketelling [census] 1801, [reference if needed]']],
-      page: [['B.1 §7', 'Folketelling 1801 | gård [N] ([name]), household [N], person [N], [Head] household']],
+      page: [['B.1 §7', 'Folketelling 1801 | gård [N] ([name]), household [N], person [N]']],
       author: [['B.1 §2', 'Folketelling | Riksarkivet (preferred)']],
       abbrev: [['B.1 §10', 'Folketelling YYYY | folketelling YYYY']],
       confidence: [['B.1 §8', 'Folketelling 1801 | Very High for residence (enumerator visited each gård); Normal for ages']],
@@ -165,7 +170,7 @@ const NORWEGIAN = [
     examples: [],
   },
   {
-    id: 'no-folketelling', chapter: 'no', group: 'Census (folketelling)', name: 'Folketelling 1865 and later',
+    id: 'no-folketelling', chapter: 'no', group: 'Census (folketelling)', name: 'Census 1865 and later',
     hint: 'Decennial census, by sokn and district. Use the jurisdiction names the census itself uses.',
     source: [['amt', 'Amt or fylke', 'Akershus'], ['prestegjeld', 'Prestegjeld or herred', 'Eidsvoll'], ['year', 'Census year', '1875'], ['call', 'Call number', 'AV/RA-S-2231/E']],
     citation: [['district', 'District (tellekrets)', '009 Blegstad'], ['page', 'Page'], ['hh', 'Household'], ['person', 'Person']],
@@ -175,13 +180,14 @@ const NORWEGIAN = [
     title: 'Norway, {amt}, {prestegjeld}, Folketelling [census] {year}',
     abbrev: '{prestegjeld} folketelling {year}',
     author: 'Riksarkivet',
-    page: 'district {district}, p. {page}, household {hh}, person {person}, {subject}',
+    page: 'district {district}, p. {page}, household {hh}, person {person}',
+    legacyPage: 'district {district}, p. {page}, household {hh}, person {person}, {subject}',
     frn: `Folketelling [census] {year}, {amt} fylke, {prestegjeld} prestegjeld«, {sokn} sokn», district {district}, p. {page}, household no. {hh}, person no. {person}, {name}« ({details})»« (documenting {citedFor})»; ${DIGITAL_IMAGE}«; transcribed entry at {turl}»; citing {archive}«, {citing}»; archive reference {call}.`,
     srn: '{prestegjeld} folketelling {year}, p. {page}, household {hh}, {srnSubject}.',
     detailsLabel: 'Entry details (role, age, household)',
     pins: {
       title: [['B.1 §4', 'Folketelling 1865+ | Norway, [Amt or fylke], [Prestegjeld or herred], Folketelling [census] [year]']],
-      page: [['B.1 §7', 'Folketelling 1865+ | district [N] [name], p. [N], household [N], person [N], [Head] household']],
+      page: [['B.1 §7', 'Folketelling 1865+ | district [N] [name], p. [N], household [N], person [N]']],
       author: [['B.1 §2', 'Folketelling | Riksarkivet (preferred)']],
       abbrev: [['B.1 §10', 'Folketelling YYYY | folketelling YYYY']],
       confidence: [['B.1 §8', 'Folketelling 1865+ | High for residence and household; Normal for ages and birthplaces']],
@@ -200,7 +206,7 @@ const NORWEGIAN = [
     }],
   },
   {
-    id: 'no-tingbok', chapter: 'no', group: 'Court and land', name: 'Tingbok',
+    id: 'no-tingbok', chapter: 'no', group: 'Court and land', name: 'Court journal',
     hint: 'District court journal (sorenskriverarkiv)',
     source: [['fylke', 'Fylke / amt', 'Akershus'], ['court', 'Sorenskriveri', 'Eidsvoll sorenskriveri'], ['series', 'Series', 'A I 5'], ['years', 'Years', '1820–1830'], ['call', 'Call number']],
     citation: [['folio', 'Folio'], ['session', 'Date or session']],
@@ -210,20 +216,21 @@ const NORWEGIAN = [
     title: 'Norway, {fylke}, {court}, Tingbok [court journal] {series}, {years}',
     abbrev: '{court} tingbok {series} ({years})',
     author: '{court}',
-    page: 'folio {folio}, {session}, {subject}',
+    page: 'folio {folio}, {session}',
+    legacyPage: 'folio {folio}, {session}, {subject}',
     frn: `{court} [{cs} district court], Tingbok [court journal] {series}, {years}, fol. {folio}, {session}, {subject}«, {details}»« (documenting {citedFor})»; ${DIGITAL_IMAGE}; citing {archive}«, {call}».`,
     srn: '{court} tingbok {series} ({years}), fol. {folio}, {srnSubject}.',
     subjectLabel: 'Parties or subject',
     pins: {
       title: [['B.1 §4', 'Court (tingbok) | Norway, [Fylke/Amt], [Sorenskriveri], Tingbok [court journal] [series], [years]']],
-      page: [['B.1 §7', 'Tingbok | folio [F], [date or session], [parties or subject]']],
+      page: [['B.1 §7', 'Tingbok | folio [F], [date or session]']],
       author: [['B.1 §2', 'Court records | The creating body, e.g. Eidsvoll sorenskriveri']],
       abbrev: [['B.1 §10', 'Tingbok A I 5 | tingbok A I 5 | Eidsvoll sorenskriveri tingbok A I 5 (1820–1830)']],
     },
     examples: [],
   },
   {
-    id: 'no-skifteprotokoll', chapter: 'no', group: 'Court and land', name: 'Skifteprotokoll',
+    id: 'no-skifteprotokoll', chapter: 'no', group: 'Court and land', name: 'Probate register',
     hint: 'Probate register; folios for the whole skifte go in the page string',
     source: [['fylke', 'Fylke / amt', 'Akershus'], ['court', 'Sorenskriveri', 'Eidsvoll sorenskriveri'], ['series', 'Series', 'II 3'], ['years', 'Years', '1815–1825'], ['call', 'Call number', 'AV/SAO-A-10063/H/Hb/L0003']],
     citation: [['folio', 'Folio range', '145–148']],
@@ -233,14 +240,15 @@ const NORWEGIAN = [
     title: 'Norway, {fylke}, {court}, Skifteprotokoll [probate register] {series}, {years}',
     abbrev: '{court} skifteprotokoll {series} ({years})',
     author: '{court}',
-    page: 'folio {folio}, {subject}',
+    page: 'folio {folio}',
+    legacyPage: 'folio {folio}, {subject}',
     frn: `{court} [{cs} district court], Skifteprotokoll [probate register] {series}, {years}, fol. {folio}, estate inventory of {name}«, {details}»« (documenting {citedFor})»; ${DIGITAL_IMAGE}; citing {archive}, {call}.`,
     srn: '{court} skifteprotokoll {series} ({years}), fol. {folio}, {srnSubject}.',
     subjectLabel: 'Deceased',
     detailsLabel: 'Entry details (farm, death)',
     pins: {
       title: [['B.1 §4', 'Probate | Norway, [Fylke/Amt], [Sorenskriveri], Skifteprotokoll [probate register] [series], [years]']],
-      page: [['B.1 §7', 'Skifteprotokoll | folio [F]–[F], [Deceased] estate entry']],
+      page: [['B.1 §7', 'Skifteprotokoll | folio [F]–[F]']],
       author: [['B.1 §2', 'Probate | The court that conducted it, usually [District] sorenskriveri']],
       abbrev: [['B.1 §10', 'Skifteprotokoll II 3 | skifteprotokoll II 3 | Eidsvoll sorenskriveri skifteprotokoll II 3 (1815–1825)']],
       confidence: [['B.1 §8', 'Skifteprotokoller | High for the death and primary heirs']],
@@ -256,7 +264,7 @@ const NORWEGIAN = [
     }],
   },
   {
-    id: 'no-matrikkel', chapter: 'no', group: 'Court and land', name: 'Matrikkel',
+    id: 'no-matrikkel', chapter: 'no', group: 'Court and land', name: 'Land register',
     hint: 'Cadastral register; one Source per revision (1665, 1723, 1838, 1886/1904…)',
     source: [
       ['amt', 'Amt or fylke (as written)', 'Akershus amt'], ['prestegjeld', 'Prestegjeld or herred (as written)', 'Eidsvoll prestegjeld'],
@@ -272,13 +280,14 @@ const NORWEGIAN = [
     title: 'Norway, {amt}, {prestegjeld}, Matrikkel [land register] {year}«, {protocol}»',
     abbrev: '{short} matrikkel {year}',
     author: 'Riksarkivet',
-    page: 'gård no. {gard}, {gardname}«, løpenummer {lnr}», {subject}',
+    page: 'gård no. {gard}, {gardname}«, løpenummer {lnr}»',
+    legacyPage: 'gård no. {gard}, {gardname}«, løpenummer {lnr}», {subject}',
     frn: `Matrikkel [land register] {year}, {amt}, {prestegjeld}, gård no. {gard}, {gardname}«, løpenummer {lnr}», listed owner {name}«, {details}»« (documenting {citedFor})»; ${DIGITAL_IMAGE}; citing {archive}«, {call}».`,
     srn: '{short} matrikkel {year}, gård {gard} {gardshort}«, løpenr. {lnr}», {srnSubject}.',
     subjectLabel: 'Owner or topic',
     pins: {
       title: [['B.1 §4', 'Matrikkel | Norway, [Fylke or amt], [Prestegjeld or herred], Matrikkel [land register] [year], [protocol if needed]']],
-      page: [['B.1 §7', 'Matrikkel | gård no. [matrikkelnr.], [gård name], [løpenummer if specific], [owner or topic]']],
+      page: [['B.1 §7', 'Matrikkel | gård no. [matrikkelnr.], [gård name], [løpenummer if specific]']],
       author: [['B.1 §2', 'Matrikkel | Riksarkivet for centrally held volumes']],
       abbrev: [['B.1 §10', 'Matrikkel 1838 | matrikkel 1838']],
       confidence: [['B.1 §8', 'Matrikkel | High for the cadastral fact; Low for any genealogical inference']],
@@ -350,7 +359,7 @@ const PARISH_SOURCE = [
 const PAGE_IMAGE = [['page', 'Page', 'blank if unnumbered'], ['image', 'Image', 'if not the page, or if unnumbered']];
 const PAGE_IMAGE_ENTRY = [...PAGE_IMAGE, ['entry', 'Entry no.']];
 const PARISH_AUTHOR_PIN = ['B.2 §2', 'Parish records, incl. confirmation, communion, minutes | [Parish] församling'];
-const UNPAGINATED_PIN = ['B.2 §7', 'Unpaginated fallback is image [I], [entry], [subject]'];
+const UNPAGINATED_PIN = ['B.2 §7', 'Unpaginated fallback is image [I], [entry]'];
 
 /** Värmland → Värmlands län (Swedish genitive). */
 const lanFull = lan => {
@@ -360,19 +369,20 @@ const lanFull = lan => {
 
 const SWEDISH = [
   {
-    id: 'se-husforhor', chapter: 'se', group: 'Parish records (kyrkoarkiv)', name: 'Husförhörslängd',
+    id: 'se-husforhor', chapter: 'se', group: 'Parish records (kyrkoarkiv)', name: 'Household examination',
     hint: 'Clerical survey (household examination); one Source per volume',
     source: PARISH_SOURCE, citation: PAGE_IMAGE, nouns: ['household', 'household examination entry'],
     defaults: VARMLAND_RA, confidence: 'High', doctype: 'enumeration',
     title: 'Sweden, {lan}, {parish}, Husförhörslängder [household examinations] {vol}, {years}',
     abbrev: '{parish} husförhörslängd {vol} ({years})',
     author: '{parish} församling',
-    page: '{pageLoc}, {subject}',
+    page: '{pageLoc}',
+    legacyPage: '{pageLoc}, {subject}',
     frn: `{parish} församling, Husförhörslängder [household examinations], vol. {vol} ({years}), {pageRef}, {entryof}«, {details}»« (documenting {citedFor})»; ${DIGITAL_IMAGE}; citing {archive}, {call}.`,
     srn: '{parish} husförhörslängd {vol} ({years}), {pageRef}, {srnSubject}.',
     pins: {
       title: [['B.2 §4', 'Clerical survey | Sweden, [län], [parish], Husförhörslängder [household examinations] [vol], [years]']],
-      page: [['B.2 §7', 'Husförhörslängd household | p. [P] (image [I]), [Head] household'], UNPAGINATED_PIN],
+      page: [['B.2 §7', 'Husförhörslängd household | p. [P] (image [I])'], UNPAGINATED_PIN],
       author: [PARISH_AUTHOR_PIN],
       abbrev: [['B.2 §10', 'Husförhörslängder | husförhörslängd']],
       confidence: [['B.2 §8', 'Husförhörslängd household | High residence; Normal stated age']],
@@ -388,19 +398,20 @@ const SWEDISH = [
     }],
   },
   {
-    id: 'se-dopbok', chapter: 'se', group: 'Parish records (kyrkoarkiv)', name: 'Födelse- och dopbok',
+    id: 'se-dopbok', chapter: 'se', group: 'Parish records (kyrkoarkiv)', name: 'Birth and baptism book',
     hint: 'Birth and baptism book',
     source: PARISH_SOURCE, citation: PAGE_IMAGE_ENTRY, nouns: ['birth and baptism entry', 'birth entry', 'baptism entry'],
     defaults: VARMLAND_AD, confidence: 'Very High', doctype: 'vital record',
     title: 'Sweden, {lan}, {parish}, Födelse- och dopböcker [birth and baptism books] {vol}, {years}',
     abbrev: '{parish} dopbok {vol} ({years})',
     author: '{parish} församling',
-    page: '{pageLoc}, no. {entry}, {subject}',
+    page: '{pageLoc}, no. {entry}',
+    legacyPage: '{pageLoc}, no. {entry}, {subject}',
     frn: `{parish} församling, Födelse- och dopböcker [birth and baptism books], vol. {vol} ({years}), {pageRef}, no. {entry}, {entryof}«, {details}»« (documenting {citedFor})»; ${DIGITAL_IMAGE}; citing {archive}, {call}.`,
     srn: '{parish} dopbok {vol} ({years}), {pageRef}, no. {entry}, {srnSubject}.',
     pins: {
       title: [['B.2 §4', 'Birth and baptism | …, Födelse- och dopböcker [birth and baptism books] [vol], [years]']],
-      page: [['B.2 §7', 'Birth and baptism | p. [P] (image [I]), no. [N], [Name] birth and baptism entry'], UNPAGINATED_PIN],
+      page: [['B.2 §7', 'Birth and baptism | p. [P] (image [I]), no. [N]'], UNPAGINATED_PIN],
       author: [PARISH_AUTHOR_PIN],
       abbrev: [['B.2 §10', 'Födelse- och dopböcker | dopbok']],
       confidence: [['B.2 §8', "Birth and baptism | Very High (child's birth/baptism)"]],
@@ -408,20 +419,21 @@ const SWEDISH = [
     examples: [],
   },
   {
-    id: 'se-vigselbok', chapter: 'se', group: 'Parish records (kyrkoarkiv)', name: 'Lysnings- och vigselbok',
+    id: 'se-vigselbok', chapter: 'se', group: 'Parish records (kyrkoarkiv)', name: 'Banns and marriage book',
     hint: 'Banns and marriage book',
     source: PARISH_SOURCE, citation: PAGE_IMAGE_ENTRY, nouns: ['marriage entry'],
     defaults: VARMLAND_AD, confidence: 'High', doctype: 'vital record',
     title: 'Sweden, {lan}, {parish}, Lysnings- och Vigselbok [banns and marriage book] {vol}, {years}',
     abbrev: '{parish} vigselbok {vol} ({years})',
     author: '{parish} församling',
-    page: '{pageLoc}, no. {entry}, {subject}',
+    page: '{pageLoc}, no. {entry}',
+    legacyPage: '{pageLoc}, no. {entry}, {subject}',
     frn: `{parish} församling, Lysnings- och Vigselbok [banns and marriage book], vol. {vol} ({years}), {pageRef}, no. {entry}, {entryof}«, {details}»« (documenting {citedFor})»; ${DIGITAL_IMAGE}; citing {archive}«, {call}».`,
     srn: '{parish} vigselbok {vol} ({years}), {pageRef}, no. {entry}, {srnSubject}.',
     subjectLabel: 'Couple (Surname-Surname)',
     pins: {
       title: [['B.2 §4', 'Banns and marriage | …, Lysnings- och Vigselbok [banns and marriage book] [vol], [years]']],
-      page: [['B.2 §7', 'Banns and marriage | p. [P] (image [I]), no. [N], [Surname]-[Surname] marriage entry'], UNPAGINATED_PIN],
+      page: [['B.2 §7', 'Banns and marriage | p. [P] (image [I]), no. [N]'], UNPAGINATED_PIN],
       author: [PARISH_AUTHOR_PIN],
       abbrev: [['B.2 §10', 'Lysnings- och Vigselbok | vigselbok']],
       confidence: [['B.2 §8', 'Banns and marriage | High to Very High']],
@@ -429,19 +441,20 @@ const SWEDISH = [
     examples: [],
   },
   {
-    id: 'se-dodbok', chapter: 'se', group: 'Parish records (kyrkoarkiv)', name: 'Dödbok',
+    id: 'se-dodbok', chapter: 'se', group: 'Parish records (kyrkoarkiv)', name: 'Death book',
     hint: 'Death and burial book',
     source: PARISH_SOURCE, citation: PAGE_IMAGE_ENTRY, nouns: ['death entry', 'burial entry'],
     defaults: VARMLAND_AD, confidence: 'Very High', doctype: 'vital record',
     title: 'Sweden, {lan}, {parish}, Dödbok [death book] {vol}, {years}',
     abbrev: '{parish} dödbok {vol} ({years})',
     author: '{parish} församling',
-    page: '{pageLoc}, no. {entry}, {subject}',
+    page: '{pageLoc}, no. {entry}',
+    legacyPage: '{pageLoc}, no. {entry}, {subject}',
     frn: `{parish} församling, Dödbok [death book], vol. {vol} ({years}), {pageRef}, no. {entry}, {entryof}«, {details}»« (documenting {citedFor})»; ${DIGITAL_IMAGE}; citing {archive}«, {call}».`,
     srn: '{parish} dödbok {vol} ({years}), {pageRef}, no. {entry}, {srnSubject}.',
     pins: {
       title: [['B.2 §4', 'Death / burial | …, Dödbok [death book] [vol], [years]']],
-      page: [['B.2 §7', 'Death / burial | p. [P] (image [I]), no. [N], [Name] death entry'], UNPAGINATED_PIN],
+      page: [['B.2 §7', 'Death / burial | p. [P] (image [I]), no. [N]'], UNPAGINATED_PIN],
       author: [PARISH_AUTHOR_PIN],
       abbrev: [['B.2 §10', 'Dödbok | dödbok']],
       confidence: [['B.2 §8', 'Death/burial entry near the event | Very High']],
@@ -456,12 +469,13 @@ const SWEDISH = [
     title: 'Sweden, {lan}, {parish}, Husförhörslängder [household examinations] {vol}, {years}',
     abbrev: '{parish} husförhörslängd {vol} ({years})',
     author: '{parish} församling',
-    page: '{pageLoc}, {subject}',
+    page: '{pageLoc}',
+    legacyPage: '{pageLoc}, {subject}',
     frn: `{parish} församling, Husförhörslängder [household examinations], vol. {vol} ({years}), {pageRef}, {entryof}«, {details}»« (documenting {citedFor})»; ${DIGITAL_IMAGE}; citing {archive}, {call}.`,
     srn: '{parish} husförhörslängd {vol} ({years}), {pageRef}, {srnSubject}.',
     pins: {
       title: [['B.2 §4', "Confirmation and communion use the husförhörslängd's Title."]],
-      page: [['B.2 §7', 'Confirmation / communion Pending review | p. [P] (image [I]), [Name] confirmation entry / communion entry'], UNPAGINATED_PIN],
+      page: [['B.2 §7', 'Confirmation / communion Pending review | p. [P] (image [I])'], UNPAGINATED_PIN],
       author: [PARISH_AUTHOR_PIN],
       confidence: [['B.2 §8', 'Confirmation Pending review | High']],
     },
@@ -475,7 +489,7 @@ const SWEDISH = [
     }],
   },
   {
-    id: 'se-sockenstamma', chapter: 'se', group: 'Parish records (kyrkoarkiv)', name: 'Sockenstämmoprotokoll',
+    id: 'se-sockenstamma', chapter: 'se', group: 'Parish records (kyrkoarkiv)', name: 'Parish meeting minutes',
     hint: 'Parish meeting minutes, a series of its own',
     source: PARISH_SOURCE,
     citation: [...PAGE_IMAGE, ['date', 'Meeting date or item no.', 'meeting of 3 May 1850']],
@@ -484,12 +498,13 @@ const SWEDISH = [
     title: 'Sweden, {lan}, {parish}, Sockenstämmoprotokoll [parish meeting minutes] {vol}, {years}',
     abbrev: '{parish} sockenstämmoprotokoll {vol} ({years})',
     author: '{parish} församling',
-    page: '{pageLoc}, {date}, {subject}',
+    page: '{pageLoc}, {date}',
+    legacyPage: '{pageLoc}, {date}, {subject}',
     frn: `{parish} församling, Sockenstämmoprotokoll [parish meeting minutes], vol. {vol} ({years}), {pageRef}, {date}, {entryof}«, {details}»« (documenting {citedFor})»; ${DIGITAL_IMAGE}; citing {archive}«, {call}».`,
     srn: '{parish} sockenstämmoprotokoll {vol} ({years}), {pageRef}, {srnSubject}.',
     pins: {
       title: [['B.2 §4', 'Meeting minutes Pending review | …, Sockenstämmoprotokoll [parish meeting minutes] [vol], [years]']],
-      page: [['B.2 §7', 'Meeting minutes Pending review | p. [P] (image [I]), [date or item no.], [Name] parish meeting entry'], UNPAGINATED_PIN],
+      page: [['B.2 §7', 'Meeting minutes Pending review | p. [P] (image [I]), [date or item no.]'], UNPAGINATED_PIN],
       author: [PARISH_AUTHOR_PIN],
       abbrev: [['B.2 §10', 'Sockenstämmoprotokoll Pending review | sockenstämmoprotokoll']],
       confidence: [['B.2 §8', "Meeting minutes Pending review | High for the meeting's business"]],
@@ -497,7 +512,7 @@ const SWEDISH = [
     examples: [],
   },
   {
-    id: 'se-bouppteckning', chapter: 'se', group: 'Court, census and land', name: 'Bouppteckning',
+    id: 'se-bouppteckning', chapter: 'se', group: 'Court, census and land', name: 'Estate inventory',
     hint: 'Estate inventory (häradsrätt); the locality is the härad, not the parish',
     source: [
       ['lan', 'Län', 'Värmland'], ['harad', 'Härad', 'Älvdals härad'], ['court', 'Court (creating body)', 'Älvdals häradsrätt'],
@@ -510,14 +525,15 @@ const SWEDISH = [
     title: 'Sweden, {lan}, {harad}, Bouppteckningar [estate inventories] {vol}, {years}',
     abbrev: '{court} bouppteckning {vol} ({years})',
     author: '{court}',
-    page: 'pp. {pages}, {subject}',
+    page: 'pp. {pages}',
+    legacyPage: 'pp. {pages}, {subject}',
     frn: `{court} [{cgloss}], Bouppteckningar [estate inventories], vol. {vol} ({years}), pp. {pages}, {entryof}«, {details}»« (documenting {citedFor})»; ${DIGITAL_IMAGE}; citing {archive}, {call}.`,
     srn: '{court} bouppteckning {vol} ({years}), pp. {pages}, {srnSubject}.',
     subjectLabel: 'Deceased',
     detailsLabel: 'Entry details (farm, parish, death)',
     pins: {
       title: [['B.2 §4', 'Estate inventory | Sweden, [län], [härad], Bouppteckningar [estate inventories] [vol], [years]']],
-      page: [['B.2 §7', 'Estate inventory | pp. [P]–[P], [Deceased] estate inventory']],
+      page: [['B.2 §7', 'Estate inventory | pp. [P]–[P]']],
       author: [['B.2 §2', 'Court and other state bodies | The creating body, e.g. Älvdals häradsrätt']],
       abbrev: [['B.2 §10', 'Bouppteckningar | bouppteckning | Älvdals häradsrätt bouppteckning FII:26 (1832–1833)']],
       confidence: [['B.2 §8', 'Bouppteckning | High']],
@@ -534,7 +550,7 @@ const SWEDISH = [
     }],
   },
   {
-    id: 'se-folkrakning', chapter: 'se', group: 'Court, census and land', name: 'Folkräkning (SVAR)',
+    id: 'se-folkrakning', chapter: 'se', group: 'Court, census and land', name: 'Census (SVAR)',
     hint: 'Census database; one Source per parish per count year',
     source: [['lan', 'Län', 'Värmland'], ['parish', 'Parish', 'Norra Ny'], ['year', 'Count year', '1880'], ['call', 'Call number', 'Folk_817085']],
     citation: [...PAGE_IMAGE, ['row', 'Row'], ['fam', 'Family no.']],
@@ -545,12 +561,13 @@ const SWEDISH = [
     title: 'Sweden, {lan}, {parish}, Folkräkning [census] {year}',
     abbrev: '{parish} folkräkning {year}',
     author: 'Riksarkivet',
-    page: '{pageLoc}, row {row}, family no. {fam}, {subject}',
+    page: '{pageLoc}, row {row}, family no. {fam}',
+    legacyPage: '{pageLoc}, row {row}, family no. {fam}, {subject}',
     frn: `Sveriges folkräkning {year} [Swedish census {year}], {parish} församling, {lanfull}, {pageRef}, row {row}, family no. {fam}, {entryof}«, {details}»« (documenting {citedFor})»; ${DIGITAL_IMAGE}.`,
     srn: '{parish} folkräkning {year}, {pageRef}, row {row}, {srnSubject}.',
     pins: {
       title: [['B.2 §4', 'SVAR census | Sweden, [län], [parish], Folkräkning [census] [year]']],
-      page: [['B.2 §7', 'SVAR census | p. [P] (image [I]), row [R], family no. [F], [Head] household'], UNPAGINATED_PIN],
+      page: [['B.2 §7', 'SVAR census | p. [P] (image [I]), row [R], family no. [F]'], UNPAGINATED_PIN],
       author: [['B.2 §2', 'SVAR databases and other central records | Riksarkivet (covers SVAR)']],
       abbrev: [['B.2 §10', 'Folkräkning | folkräkning']],
       confidence: [['B.2 §8', 'SVAR with images | High residence; Normal ages']],
@@ -566,7 +583,7 @@ const SWEDISH = [
     }],
   },
   {
-    id: 'se-lantmateriet', chapter: 'se', group: 'Court, census and land', name: 'Lantmäteriet survey act',
+    id: 'se-lantmateriet', chapter: 'se', group: 'Court, census and land', name: 'Land survey act',
     hint: 'Laga skifte, storskifte, ägodelning…; one numbered act = one Source',
     source: [
       ['lan', 'Län', 'Värmland'], ['parish', 'Parish', 'Norra Ny'], ['farm', 'Farm', 'Ambjörby'],
@@ -584,14 +601,15 @@ const SWEDISH = [
     title: 'Sweden, {lan}, {parish}, {stype} [{stgloss}], act {act}, {years}',
     abbrev: '{parish} {stype} {act} ({years})',
     author: '{surveyAuthor}',
-    page: '{protocol}, {subject}',
+    page: '{protocol}',
+    legacyPage: '{protocol}, {subject}',
     frn: `{author}, {stype} [{stgloss}], {farm}, {parish} socken, act {act}«, {survey}»; {protocol}, {details}« (documenting {citedFor})»; ${DIGITAL_IMAGE}.`,
     srn: '{parish} {stype} {act} ({years}), {protocol}, {srnSubject}.',
     detailsLabel: 'Entry description (FRN)',
     paperlessTitle: '{farm} {stype} {eventYear}',
     pins: {
       title: [['B.2 §4', 'Land survey Pending review | Sweden, [län], [parish], [survey type] [English gloss], act [act-no], [years]']],
-      page: [['B.2 §7', 'Land survey Pending review | [protocol locator], [name] [record-noun]']],
+      page: [['B.2 §7', 'Land survey Pending review | [protocol locator]']],
       author: [['B.2 §2', 'Land survey, NN-XXX-NNN county series (e.g. 17-NON-148) Pending review | Lantmäterimyndigheten i Värmlands län']],
       abbrev: [['B.2 §10', 'Land survey Pending review | ägodelning / storskifte / laga skifte / enskifte / gränsbestämning / avvittring']],
       confidence: [['B.2 §8', 'Land survey Pending review | High for what the surveyor recorded']],
@@ -617,7 +635,7 @@ __modules["tables.js"] = (() => {
 // Lookup tables shared by every record type. PLATFORMS and STATE_ABBREV are pinned to the
 // guide's own tables (A10, B.3 §10) by test/tables.test.js.
 
-const CHAPTERS = { no: 'Norwegian', se: 'Swedish', us: 'US', pp: 'Published & personal' };
+const CHAPTERS = { no: 'Norwegian', se: 'Swedish', us: 'US', pp: 'Published & personal', ge: 'General' };
 const CHAPTER_CODE = { no: 'B.1', se: 'B.2', us: 'B.3', pp: 'B.4' };
 
 const LEVELS = ['Very High', 'High', 'Normal', 'Low', 'Very Low'];
@@ -652,6 +670,7 @@ const ARCHIVES = {
   se: ['Värmlandsarkiv', 'Riksarkivet'],
   us: ['National Archives', 'Minnesota Historical Society', 'Swenson Swedish Immigration Research Center', 'Family History Library'],
   pp: ['Minnesota Historical Society', 'Library of Virginia'],
+  ge: [],
 };
 
 // A7 parenthetical suggestions per chapter (§9): 1 which entry, 2 source says, 3 evidence.
@@ -668,6 +687,37 @@ const SUGGESTIONS = {
   pp: { which: ['b. ', 'd. ', 'at ', 'senior', 'junior'],
     says: ['written contemporaneously', 'compiled later', 'damaged page', 'in unrelated handwriting'],
     evidence: ['reported by ', 'handwritten by ', 'uncited claim in published work', 'second-hand'] },
+  ge: { which: ['b. ', 'd. ', 'at ', 'senior', 'junior'],
+    says: ['grantor', 'grantee', 'witness', 'widow'],
+    evidence: ['named at ', 'stated age ', 'second-hand'] },
+};
+
+// A7 · Usual cited for: the fact a record noun (or a record type without one) is usually cited for. Pinned to the
+// guide's table by test/tables.test.js.
+const USUAL_CITED_FOR = {
+  'birth and baptism entry': 'birth and baptism',
+  'birth entry': 'birth', 'birth certificate': 'birth',
+  'baptism entry': 'baptism',
+  'death entry': 'death', 'death certificate': 'death', 'obituary': 'death',
+  'burial entry': 'burial', 'headstone application': 'burial',
+  'death and burial entry': 'death and burial',
+  'marriage entry': 'marriage', 'marriage license': 'marriage', 'marriage announcement': 'marriage',
+  'confirmation entry': 'confirmation',
+  'communion entry': 'communion',
+  'membership entry': 'membership',
+  'household': 'residence', 'household examination entry': 'residence', 'census entry': 'residence', 'directory entry': 'residence',
+  'estate entry': 'estate', 'estate inventory': 'estate',
+  'matrikkel entry': 'land holding',
+  'land allotment entry': 'land allotment',
+  'signatory entry': 'signature',
+  'croft transfer entry': 'croft transfer',
+  'naturalization petition': 'naturalization',
+  'declaration of intention': 'declaration of intention',
+  'WWII draft card': 'draft registration',
+  'pension file': 'military service', 'compiled service record': 'military service',
+  'funeral notice': 'funeral',
+  'Find a Grave memorial': 'burial',
+  'Passenger manifest': 'arrival',
 };
 
 // C2 document types and their default C4 date meaning.
@@ -711,7 +761,7 @@ function stateAbbrev(state) {
   return STATE_ABBREV[String(state ?? '').trim()] || String(state ?? '').trim();
 }
 
-return { CHAPTERS, CHAPTER_CODE, LEVELS, PLATFORMS, STATE_ABBREV, ARCHIVES, SUGGESTIONS, DATE_MEANING, MEDIA, COPY_FORMS, isoDate, yearOf, lastWord, allButLastWord, stateAbbrev };
+return { CHAPTERS, CHAPTER_CODE, LEVELS, PLATFORMS, STATE_ABBREV, ARCHIVES, SUGGESTIONS, USUAL_CITED_FOR, DATE_MEANING, MEDIA, COPY_FORMS, isoDate, yearOf, lastWord, allButLastWord, stateAbbrev };
 })();
 __modules["records/us.js"] = (() => {
 // B.3 · US sources.
@@ -737,14 +787,15 @@ const US = [
     title: '{year} U.S. Federal Census, {county} County, {state}',
     abbrev: '{county} Co., {stab}, {year} census',
     author: 'Bureau of the Census',
-    page: 'roll {roll}, ED {ed}, sheet {sheet}, dwelling {dwelling}, family {family}, {subject}',
+    page: 'roll {roll}, ED {ed}, sheet {sheet}, dwelling {dwelling}, family {family}',
+    legacyPage: 'roll {roll}, ED {ed}, sheet {sheet}, dwelling {dwelling}, family {family}, {subject}',
     frn: `{year} U.S. census, {county} County, {state}, population schedule, {locality}, enumeration district {ed}, sheet {sheet}, dwelling {dwelling}, family {family}, {subject}« (documenting {citedFor})»; ${DIGITAL_IMAGE}; citing {archive} microfilm publication {call}, roll {roll}.`,
     frnMicrofilm: '{year} U.S. census, {county} County, {state}, population schedule, {locality}, enumeration district {ed}, sheet {sheet}, dwelling {dwelling}, family {family}, {subject}« (documenting {citedFor})»; {archive} microfilm publication {call}, roll {roll}.',
     srn: '{year} U.S. census, {county} Co., {stab}, pop. sched., {locality}, ED {ed}, sheet {sheet}, {subject}.',
     subjectLabel: 'Head (or person)',
     pins: {
       title: [['B.3 §4', 'Federal census | [year] U.S. Federal Census, [county] County, [state]']],
-      page: [['B.3 §7', 'Federal census | roll [N], ED [N], sheet [N]A/B, dwelling [N], family [N], [Head] household']],
+      page: [['B.3 §7', 'Federal census | roll [N], ED [N], sheet [N]A/B, dwelling [N], family [N]']],
       author: [['B.3 §2', 'Federal census | Bureau of the Census']],
       confidence: [['B.3 §8', 'Federal census | High for residence and household; Normal for ages, birthplaces']],
     },
@@ -768,13 +819,14 @@ const US = [
     title: '{year} {state} State Census, {county} County',
     abbrev: '{county} Co., {stab}, {year} state census',
     author: '{state} Population Census Office',
-    page: '{ward}, p. {page}, line {line}, {subject}',
+    page: '{ward}, p. {page}, line {line}',
+    legacyPage: '{ward}, p. {page}, line {line}, {subject}',
     frn: `{year} {state} state census, {county} County, {ward}, p. {page}, line {line}, {subject}« (documenting {citedFor})»; ${DIGITAL_IMAGE}; citing {archive}.`,
     srn: '{year} {stab} state census, {county} Co., {ward}, p. {page}, {subject}.',
     subjectLabel: 'Head (or person)',
     pins: {
       title: [['B.3 §4', 'State census | [year] [state] State Census, [county] County']],
-      page: [['B.3 §7', 'State census | [ward or township], p. [N], line [N], [Head] household']],
+      page: [['B.3 §7', 'State census | [ward or township], p. [N], line [N]']],
       author: [['B.3 §2', 'State census | [State] Population Census Office']],
     },
     examples: [],
@@ -789,7 +841,8 @@ const US = [
         key: 'certificate', label: 'Certificate',
         citation: [['cert', 'Certificate no.']],
         nouns: ['death certificate', 'birth certificate'],
-        page: 'certificate no. {cert}, {subject}',
+        page: 'certificate no. {cert}',
+        legacyPage: 'certificate no. {cert}, {subject}',
         frn: `{state}, {kind} no. {cert} ({eventYear}), {name}« (documenting {citedFor})»; {author}; ${DIGITAL_IMAGE}; citing {archive}.`,
         srn: '{stab} {kindShort} {cert} ({eventYear}), {name}.',
       },
@@ -797,7 +850,8 @@ const US = [
         key: 'license', label: 'Marriage license',
         citation: [['license', 'License no.']],
         nouns: ['marriage license'],
-        page: 'license no. {license}, {subject}',
+        page: 'license no. {license}',
+        legacyPage: 'license no. {license}, {subject}',
         frn: `{state}, marriage license no. {license} ({eventYear}), {name}« (documenting {citedFor})»; {author}; ${DIGITAL_IMAGE}; citing {archive}.`,
         srn: '{stab} marriage license {license} ({eventYear}), {name}.',
       },
@@ -820,8 +874,8 @@ const US = [
     pins: {
       title: [['B.3 §4', 'State vital records | [State], [record series], [years]']],
       page: [
-        ['B.3 §7', 'Death / birth certificate | certificate no. [N], [Name] death certificate / birth certificate'],
-        ['B.3 §7', 'Marriage license | license no. [N], [Surname]-[Surname] marriage license'],
+        ['B.3 §7', 'Death / birth certificate | certificate no. [N]'],
+        ['B.3 §7', 'Marriage license | license no. [N]'],
       ],
       author: [['B.3 §2', 'State vital records | [State] Department of Health, Vital Records']],
       confidence: [['B.3 §8', 'State death certificate (post-1900) | Very High for the death']],
@@ -851,13 +905,14 @@ const US = [
     title: '{state}, {county} County, {town}, {church} records',
     abbrev: '{church}, {town}, {stab}, records«, {years}»',
     author: '{church}, {town}',
-    page: '{register}, p. {page}« (image {image})», {subject}',
+    page: '{register}, p. {page}« (image {image})»',
+    legacyPage: '{register}, p. {page}« (image {image})», {subject}',
     frn: `{church} ({town}, {county} County, {state}), {register}, p. {page}« (image {image})», {details}« (documenting {citedFor})»; ${DIGITAL_IMAGE}«, "{collection}"»; citing {archive}«, {citing}».`,
     srn: '{church} ({town}, {stab}), {entryof}, p. {page}.',
     detailsLabel: 'Entry description (FRN)',
     pins: {
       title: [['B.3 §4', 'Church records Pending review | [State], [county], [town], [Church name] records']],
-      page: [['B.3 §7', 'Church record Pending review | [register], p. [P] (image [I]), [Name] [record-noun]']],
+      page: [['B.3 §7', 'Church record Pending review | [register], p. [P] (image [I])']],
       author: [['B.3 §2', 'Church records Pending review | [Church name], [town]']],
       confidence: [['B.3 §8', 'Church register Pending review | Very High for the recorded event']],
     },
@@ -888,7 +943,8 @@ const US = [
         key: 'petition', label: 'Petition',
         citation: [['pet', 'Petition no.']],
         nouns: ['naturalization petition'],
-        page: 'petition no. {pet}, {subject}',
+        page: 'petition no. {pet}',
+        legacyPage: 'petition no. {pet}, {subject}',
         frn: `{court} ({courtplace}), Naturalization Records, petition no. {pet} ({eventYear}), {name}« (documenting {citedFor})»; ${DIGITAL_IMAGE}«, {platformRef}»; citing {archive}« microfilm {call}».`,
         frnMicrofilm: '{court} ({courtplace}), Naturalization Records, petition no. {pet} ({eventYear}), {name}« (documenting {citedFor})»; {archive} microfilm {call}.',
         srn: '{county} Co. natz., pet. no. {pet} ({eventYear}), {name}.',
@@ -897,7 +953,8 @@ const US = [
         key: 'declaration', label: 'Declaration of intention',
         citation: [['decl', 'Declaration no.']],
         nouns: ['declaration of intention'],
-        page: 'declaration no. {decl}, {subject}',
+        page: 'declaration no. {decl}',
+        legacyPage: 'declaration no. {decl}, {subject}',
         frn: `{court} ({courtplace}), Naturalization Records, declaration of intention no. {decl} ({eventYear}), {name}« (documenting {citedFor})»; ${DIGITAL_IMAGE}«, {platformRef}»; citing {archive}« microfilm {call}».`,
         frnMicrofilm: '{court} ({courtplace}), Naturalization Records, declaration of intention no. {decl} ({eventYear}), {name}« (documenting {citedFor})»; {archive} microfilm {call}.',
         srn: '{county} Co. natz., decl. no. {decl} ({eventYear}), {name}.',
@@ -910,7 +967,8 @@ const US = [
           ['image', 'Image', 'if not the page, or if unnumbered'], ['signed', 'Date signed', '12 March 1897'],
         ],
         nouns: ['naturalization petition'],
-        page: '«reel {reel}, »final papers vol. {vol}, {pageLoc}, {subject}',
+        page: '«reel {reel}, »final papers vol. {vol}, {pageLoc}',
+        legacyPage: '«reel {reel}, »final papers vol. {vol}, {pageLoc}, {subject}',
         frn: `{court} ({courtplace}), Naturalization Records, final papers vol. {vol}, {pageRef} ({signed}), {name}« (documenting {citedFor})»; ${DIGITAL_IMAGE}«, {platformRef}»; citing {archive}« microfilm {call}»«, reel {reel}».`,
         frnMicrofilm: '{court} ({courtplace}), Naturalization Records, final papers vol. {vol}, {pageRef} ({signed}), {name}« (documenting {citedFor})»; {archive} microfilm {call}«, reel {reel}».',
         srn: '{county} Co. natz., final papers vol. {vol}, {pageRef} ({eventYear}), {name}.',
@@ -929,10 +987,10 @@ const US = [
     pins: {
       title: [['B.3 §4', 'Naturalization | [State], [county] County, [court], Naturalization Records, [years]']],
       page: [
-        ['B.3 §7', 'Naturalization petition | petition no. [N], [Name] naturalization petition'],
-        ['B.3 §7', 'Declaration of intention | declaration no. [N], [Name] declaration of intention'],
-        ['B.3 §7', 'Final papers volume (before 1906) | reel [N], final papers vol. [V], p. [P] (image [I]), [Name] naturalization petition'],
-        ['B.3 §7', 'With no page number, the image number takes the page\'s place: final papers vol. [V], image [I], [Name] naturalization petition'],
+        ['B.3 §7', 'Naturalization petition | petition no. [N]'],
+        ['B.3 §7', 'Declaration of intention | declaration no. [N]'],
+        ['B.3 §7', 'Final papers volume (before 1906) | reel [N], final papers vol. [V], p. [P] (image [I])'],
+        ['B.3 §7', 'With no page number, the image number takes the page\'s place: final papers vol. [V], image [I]'],
       ],
       author: [['B.3 §2', 'State/county court naturalization | [Court name]']],
       callNumber: [['B.3 §5', 'State archives microfilm (Minnesota Historical Society SAM 227) | Call number']],
@@ -967,12 +1025,13 @@ const US = [
     title: 'World War II Draft Registration Cards, {state}',
     abbrev: 'WWII draft cards, {stab}',
     author: 'Selective Service System',
-    page: 'serial no. {serial}, {subject}',
+    page: 'serial no. {serial}',
+    legacyPage: 'serial no. {serial}, {subject}',
     frn: `{author}, World War II Draft Registration Cards, {state}, serial no. {serial}, {name} ({eventYear})« (documenting {citedFor})»; ${DIGITAL_IMAGE}; citing {recordGroup}, {archive}.`,
     srn: 'WWII draft card, {stab}, {name}.',
     pins: {
       title: [['B.3 §4', 'WWII draft cards | World War II Draft Registration Cards, [state]']],
-      page: [['B.3 §7', 'WWII draft card | serial no. [N], [Name] WWII draft card']],
+      page: [['B.3 §7', 'WWII draft card | serial no. [N]']],
       author: [['B.3 §2', 'WWII draft cards | Selective Service System']],
     },
     examples: [{
@@ -994,13 +1053,14 @@ const US = [
     title: 'Applications for Headstones for U.S. Military Veterans, {years}',
     abbrev: 'Headstone applications, {years}',
     author: 'Office of the Quartermaster General',
-    page: '{name} (d. {dyear}) {noun}',
+    page: '',
+    legacyPage: '{name} (d. {dyear}) {noun}',
     frn: `{author}, "Applications for Headstones for U.S. Military Veterans, {years}," application for {name}«, {details}»« (documenting {citedFor})»; ${DIGITAL_IMAGE}; citing {citing}.`,
     srn: 'Headstone app., {name} (d. {dyear}).',
     detailsLabel: 'Application details (death date)',
     pins: {
       title: [['B.3 §4', 'Headstone applications | Applications for Headstones for U.S. Military Veterans, [years]']],
-      page: [['B.3 §7', 'Headstone application | [Name] (d. [year]) headstone application']],
+      page: [['B.3 §7', 'Headstone application | none: only what it is cited for (A7)']],
       author: [['B.3 §2', 'Headstone applications | Office of the Quartermaster General']],
       confidence: [['B.3 §8', 'Headstone application | Normal for death date; High for military service']],
     },
@@ -1023,12 +1083,13 @@ const US = [
     title: 'Civil War Pension Application Files',
     abbrev: 'Civil War pension files',
     author: 'Bureau of Pensions',
-    page: 'application no. {app}, certificate no. {cert}, {subject}',
+    page: 'application no. {app}, certificate no. {cert}',
+    legacyPage: 'application no. {app}, certificate no. {cert}, {subject}',
     frn: `{author}, Civil War Pension Application Files, application no. {app}, certificate no. {cert}, {name}«, {details}»« (documenting {citedFor})»; ${DIGITAL_IMAGE}; citing {archive}«, {call}».`,
     srn: 'Civil War pension, app. {app}, {name}.',
     pins: {
       title: [['B.3 §4', 'Civil War pensions | Civil War Pension Application Files']],
-      page: [['B.3 §7', 'Civil War pension | application no. [N], certificate no. [N], [Name] pension file']],
+      page: [['B.3 §7', 'Civil War pension | application no. [N], certificate no. [N]']],
       author: [['B.3 §2', 'Civil War pensions | Bureau of Pensions']],
     },
     examples: [],
@@ -1043,11 +1104,12 @@ const US = [
     title: '{series}',
     abbrev: '{short}',
     author: "War Department, Adjutant General's Office",
-    page: '{unit}, {subject}',
+    page: '',
+    legacyPage: '{unit}, {subject}',
     frn: `{author}, {series}, {unit}, {name}«, {details}»« (documenting {citedFor})»; ${DIGITAL_IMAGE}; citing {archive}«, {call}».`,
     srn: '{short}, {unit}, {name}.',
     pins: {
-      page: [['B.3 §7', 'Compiled service record | [Unit], [Name] compiled service record']],
+      page: [['B.3 §7', 'Compiled service record | none: only what it is cited for (A7)']],
       author: [['B.3 §2', "Compiled service records | War Department, Adjutant General's Office"]],
     },
     examples: [],
@@ -1062,13 +1124,14 @@ const US = [
     title: 'Passenger Lists of Vessels Arriving at {port}, {years}',
     abbrev: 'Passenger lists, {port}, {years}',
     author: '«{agency}»',
-    page: 'list {list}, line {line}, {subject}',
+    page: 'list {list}, line {line}',
+    legacyPage: 'list {list}, line {line}, {subject}',
     frn: `«{agency}, »"Passenger Lists of Vessels Arriving at {port}, {years}," list {list}, line {line}, {name}«, {details}»« (documenting {citedFor})»; ${DIGITAL_IMAGE}; citing {archive}«, microfilm publication {call}».`,
     srn: 'Passenger lists, {port}, list {list}, line {line}, {name}.',
     paperlessTitle: '{name} passenger manifest entry« {eventYear}»',
     pins: {
       title: [['B.3 §4', 'Passenger manifests | Passenger Lists of Vessels Arriving at [port], [years]']],
-      page: [['B.3 §7', 'Passenger manifest | list [N], line [N], [Name]']],
+      page: [['B.3 §7', 'Passenger manifest | list [N], line [N]']],
       plTitle: [['C1', 'Passenger manifest | [Name] passenger manifest entry [year]']],
     },
     examples: [],
@@ -1086,13 +1149,14 @@ const US = [
     title: '{state}, {county} County, {cemetery}, Find a Grave Memorials',
     abbrev: '{cemeteryShort}, {city}, FAG',
     author: '',
-    page: 'memorial no. {memorial}, {subject}',
+    page: 'memorial no. {memorial}',
+    legacyPage: 'memorial no. {memorial}, {subject}',
     frn: 'Find a Grave, memorial no. {memorial}, {name}« ({life})», {cemetery}, {city}, {county} County, {state}« (documenting {citedFor})»; database with images, {platform} ({url} : accessed {accessed})«; marker photograph by {photographer}».',
     srn: 'FAG memorial {memorial}, {name}, {cemetery}.',
     paperlessTitle: '{name} Find a Grave memorial« {eventYear}»',
     pins: {
       title: [['B.3 §4', 'Find a Grave | [State], [county], [cemetery], Find a Grave Memorials']],
-      page: [['B.3 §7', 'Find a Grave | memorial no. [N], [Name]']],
+      page: [['B.3 §7', 'Find a Grave | memorial no. [N]']],
       author: [['B.3 §2', 'Newspapers, Find a Grave | Blank']],
       confidence: [['B.3 §8', 'Find a Grave with marker photo | High for burial and inscribed dates']],
       plTitle: [['C1', 'Find a Grave | [Name] Find a Grave memorial [year]']],
@@ -1118,7 +1182,8 @@ const US = [
     title: '{paper}, {city}, {state}',
     abbrev: '{paper}',
     author: '',
-    page: '{date}, p. {page}«, col. {col}»«, {column} column», {subject}',
+    page: '{date}, p. {page}«, col. {col}»«, {column} column»',
+    legacyPage: '{date}, p. {page}«, col. {col}»«, {column} column», {subject}',
     // An item can report many things, so the FRN names it by the page string's subject and says what it is
     // cited for, as the page string does (B.3 §7). The SRN is the paper and the page string.
     frn: `«"{headline}," »«"{column}" [column], »{paper} ({city}, {state}), {date}, p. {page}«, col. {col}», {subject}« (documenting {citedFor})»; ${DIGITAL_IMAGE}.`,
@@ -1128,13 +1193,13 @@ const US = [
     pins: {
       title: [['B.3 §4', 'Newspaper | [Title], [city, state]']],
       page: [
-        ['B.3 §7', 'Newspaper wedding / funeral / obituary | [date], p. [N], col. [N], [Name] obituary (or marriage announcement, funeral notice)'],
-        ['B.3 §7', 'Newspaper personals | [date], p. [N], col. [N], [Name] news mention'],
-        ['B.3 §7', 'Mixed-subject column | [date], p. [N], col. [N], [Column name], [Name] news mention'],
+        ['B.3 §7', 'Newspaper wedding / funeral / obituary | [date], p. [N], col. [N]'],
+        ['B.3 §7', 'Newspaper personals | [date], p. [N], col. [N]'],
+        ['B.3 §7', 'Mixed-subject column | [date], p. [N], col. [N], [Column name]'],
       ],
       author: [['B.3 §2', 'Newspapers, Find a Grave | Blank']],
       pubinfo: [['B.3 §6', 'Newspapers read on a library\'s film use Microfilm, Minnesota Historical Society.']],
-      citedFor: [['A7', 'A page string may end with what the citation is cited for, in parentheses after everything else'], ['A7', 'the FRN gives it as (documenting …) at the end of the item it describes, before the image, film, or holding clause'], ['A5', 'Citing in an FRN introduces only the source behind an image or film']],
+      citedFor: [['A7', 'What it is cited for is always given, lower case except for names'], ['A7', 'the FRN also gives it as (documenting …) at the end of the item it describes, before the image, film, or holding clause'], ['A5', 'Citing in an FRN introduces only the source behind an image or film']],
       confidence: [['B.3 §8', 'Obituary | Normal at best']],
     },
     examples: [
@@ -1167,7 +1232,7 @@ const US = [
         guide: 'B.3 Example 10', citation: 1,
         inputs: {
           paper: 'Warren Sheaf', city: 'Warren', state: 'Minnesota', date: '17 May 1916', page: '7', column: 'Alma',
-          name: 'Peter Grund', noun: 'news mention',
+          name: 'Peter Grund', noun: 'news mention', citedFor: 'lost horse',
           url: 'https://www.newspapers.com/image/64259642', accessed: '6 May 2026', eventYear: '1916',
         },
       },
@@ -1175,7 +1240,7 @@ const US = [
         guide: 'B.3 Example 10', citation: 2,
         inputs: {
           paper: 'Warren Sheaf', city: 'Warren', state: 'Minnesota', date: '17 May 1916', page: '7', column: 'Alma',
-          name: 'John Olson', noun: 'news mention',
+          name: 'John Olson', noun: 'news mention', citedFor: 'visit to John Nilson',
           url: 'https://www.newspapers.com/image/64259642', accessed: '6 May 2026', eventYear: '1916',
         },
       },
@@ -1212,12 +1277,13 @@ const US = [
     abbrev: '{dabbr}, {year}',
     author: '{publisher}',
     pubinfo: '{city}: {publisher}, {year}.« {pubmedium}, {platform} ({home}).»',
-    page: 'p. {page}, {subject}',
+    page: 'p. {page}',
+    legacyPage: 'p. {page}, {subject}',
     frn: '{publisher}, {dtitle}, {year} ({city}: {publisher}, {year}), p. {page}, {name}« (documenting {citedFor})»«; {medium}, {platform} ({url} : accessed {accessed})».',
     srn: '{dshort}, {year}, p. {page}, {name}.',
     pins: {
       title: [['B.3 §4', 'City directory | [Publisher] [city] City Directory, [year]']],
-      page: [['B.3 §7', 'City directory | p. [N], [Name] directory entry']],
+      page: [['B.3 §7', 'City directory | p. [N]']],
       author: [['B.3 §2', 'City directories | [Publisher]']],
       pubinfo: [['B.3 §6', 'Published directories use the imprint variant (Example 7).']],
       confidence: [['B.3 §8', 'City directory | Normal for residence']],
@@ -1246,7 +1312,7 @@ const pagesLabel = pages => (/[–\-,]/.test(String(pages || '')) ? 'pp.' : 'p.'
 
 const PUBLISHED = [
   {
-    id: 'pp-book', chapter: 'pp', group: 'Published works', name: 'Book or bygdebok',
+    id: 'pp-book', chapter: 'pp', group: 'Published works', name: 'Book',
     hint: 'One Source per book (or multi-volume set cited as a unit)',
     source: [
       ['bookAuthor', 'Author', 'Birger Kirkeby'], ['btitle', 'Title'], ['gloss', 'English gloss (foreign titles)'],
@@ -1258,7 +1324,8 @@ const PUBLISHED = [
       {
         key: 'pages', label: 'Pages',
         citation: [['pages', 'Pages', '432–440']],
-        page: '{pl} {pages}«, {subject}»',
+        page: '{pl} {pages}',
+        legacyPage: '{pl} {pages}«, {subject}»',
         frn: '{author}, {btitle}« [{gloss}]»«, {vol}» ({city}: {publisher}, {year}«. {format}»), {pl} {pages}{frnEnd}',
         srn: '{surname}, {abbr}, {pl} {pages}.',
       },
@@ -1272,7 +1339,8 @@ const PUBLISHED = [
       {
         key: 'volume', label: 'Multi-volume work',
         citation: [['volume', 'Volume'], ['pages', 'Pages']],
-        page: 'vol. {volume}, {pl} {pages}«, {subject}»',
+        page: 'vol. {volume}, {pl} {pages}',
+        legacyPage: 'vol. {volume}, {pl} {pages}«, {subject}»',
         frn: '{author}, {btitle}« [{gloss}]», vol. {volume} ({city}: {publisher}, {year}«. {format}»), {pl} {pages}{frnEnd}',
         srn: '{surname}, {abbr}, vol. {volume}, {pl} {pages}.',
       },
@@ -1304,7 +1372,7 @@ const PUBLISHED = [
     pins: {
       title: [['B.4 §4', 'Book | [Title]']],
       page: [
-        ['B.4 §7', 'Book | p. [N] or pp. [N]–[N], plus subject if relevant'],
+        ['B.4 §7', 'Book | p. [N] or pp. [N]–[N]'],
         ['B.4 §7', 'Book chapter | [Chapter title], pp. [N]–[N]'],
         ['B.4 §7', 'Multi-volume work | vol. [N], pp. [N]–[N]'],
         ['B.4 §7', 'Encyclopedia | [entry headword]'],
@@ -1330,60 +1398,6 @@ const PUBLISHED = [
     }],
   },
   {
-    id: 'pp-edited-collection', chapter: 'pp', group: 'Published works', name: 'Edited collection',
-    hint: 'A book with chapters by different authors (EE 13.65)',
-    source: [
-      ['editor', 'Editor(s)', 'Sarah L. Wilkerson Freeman and Beverly Greene Bond'], ['btitle', 'Title', 'Tennessee Women: Their Lives and Times'],
-      ['city', 'City', 'Athens'], ['publisher', 'Publisher', 'University of Georgia Press'], ['year', 'Year', '2009'], ['abbr', 'Abbrev', 'Tennessee Women 2009'],
-    ],
-    citation: [['chapterAuthor', 'Chapter author'], ['chapter', 'Chapter title'], ['pages', 'Pages']],
-    nouns: [''],
-    optionalSubject: true,
-    defaults: {}, confidence: 'Normal', doctype: 'publication',
-    derive: v => ({ pl: pagesLabel(v.pages), chapterSurname: lastWord(v.chapterAuthor) }),
-    title: '{btitle}',
-    abbrev: '{abbr}',
-    author: '{editor}, editor',
-    pubinfo: '{city}: {publisher}, {year}.« {pubmedium}, {platform} ({home}).»',
-    page: '{chapter}, {pl} {pages}«, {subject}»',
-    frn: '{chapterAuthor}, "{chapter}," in {btitle}, ed. {editor} ({city}: {publisher}, {year}), {pl} {pages}« (documenting {citedFor})».',
-    srn: '{chapterSurname}, "{chapter}," {pl} {pages}.',
-    subjectLabel: 'Topic (optional)',
-    pins: {
-      title: [['B.4 §4', 'Edited collection | [Title]']],
-      page: [['B.4 §7', 'Book chapter | [Chapter title], pp. [N]–[N]']],
-      author: [['B.4 §2', 'Edited collection | [Name], editor (EE 13.65)']],
-      abbrev: [['B.4 §10', 'Book | Eidsvoll bygdebok 2:2 · Tennessee Women 2009']],
-    },
-    examples: [],
-  },
-  {
-    id: 'pp-periodical', chapter: 'pp', group: 'Published works', name: 'Periodical article',
-    hint: 'One Source per periodical title; the issue goes in the page string',
-    source: [['periodical', 'Periodical', 'American Genealogist'], ['pcity', 'City, state', 'New Haven, Connecticut']],
-    citation: [['aauthor', 'Article author'], ['atitle', 'Article title'], ['volume', 'Volume'], ['issue', 'Issue no.'], ['ayear', 'Year'], ['pages', 'Pages']],
-    nouns: [''],
-    optionalSubject: true,
-    defaults: {}, confidence: 'Normal', doctype: 'publication',
-    derive: v => ({ pl: pagesLabel(v.pages), articleSurname: lastWord(v.aauthor) }),
-    title: '{periodical}, {pcity}',
-    abbrev: '{periodical}',
-    author: '',
-    pubinfo: '{pcity}.',
-    page: 'vol. {volume}, no. {issue} ({ayear}), {pl} {pages}«, {subject}»',
-    frn: '{aauthor}, "{atitle}," {periodical} {volume} ({ayear}): {pages}« (documenting {citedFor})».',
-    srn: '{articleSurname}, "{atitle}," {pages}.',
-    subjectLabel: 'Topic (optional)',
-    pins: {
-      title: [['B.4 §4', 'Periodical | [Title], [city, state]']],
-      page: [['B.4 §7', 'Periodical article | vol. [N], no. [N] ([year]), pp. [N]–[N]']],
-      author: [['B.4 §2', 'Periodical | Blank']],
-      pubinfo: [['B.4 §6', 'Periodical | [City], [State if needed], [Publisher].']],
-      abbrev: [['B.4 §10', 'Periodical | American Genealogist']],
-    },
-    examples: [],
-  },
-  {
     id: 'pp-register', chapter: 'pp', group: 'Published works', name: 'Directory or register',
     hint: 'Membership roster or school register; one Source per annual issue or volume',
     source: [
@@ -1399,12 +1413,13 @@ const PUBLISHED = [
     abbrev: '{abbr}',
     author: '{issuer}',
     pubinfo: '{city}: {publisher}, {year}.« {pubmedium}, {platform} ({home}).»',
-    page: 'p. {page}« (image {image})»«, entry no. {entry}», {subject}',
+    page: 'p. {page}« (image {image})»«, entry no. {entry}»',
+    legacyPage: 'p. {page}« (image {image})»«, entry no. {entry}», {subject}',
     frn: '{author}, {rtitle}« [{gloss}]» ({city}: {publisher}, {year}), p. {page}, {entryLead}{name}« (documenting {citedFor})»«; {medium}, {platform} ({url} : accessed {accessed})».',
     srn: '«{srnAuthor}, »{abbr}, p. {page}«, no. {entry}», {name}.',
     pins: {
       title: [['B.4 §4', 'Membership directory | [Title with year]'], ['B.4 §4', 'School roster | [Title with years]']],
-      page: [['B.4 §7', 'Directory or register | p. [P] (image [I]), entry no. [N], [Name] directory entry (or register entry)']],
+      page: [['B.4 §7', 'Directory or register | p. [P] (image [I]), entry no. [N]']],
       author: [['B.4 §2', 'Membership directory / organizational publication | Issuing body (Den norske sakførerforening)']],
       pubinfo: [['B.4 §6', 'Membership directory | [City]: [Issuing organization], year.']],
       abbrev: [['B.4 §10', 'Register | Sakførerforening medlemmer 1950 · Kristiania katedralskole 1891–1901']],
@@ -1447,7 +1462,8 @@ const PUBLISHED = [
     abbrev: '{vshort}',
     author: '{channel}',
     pubinfo: 'Online video, {platform} ({home}), {year}.',
-    page: 'minute {range}, {subject}',
+    page: 'minute {range}',
+    legacyPage: 'minute {range}, {subject}',
     frn: '{channel}, "{vtitle}," {platform} video ({url} : accessed {accessed}), minute {range}, on {topic}« (documenting {citedFor})».',
     srn: '{srnChannel}, "{vshort}," minute {range}.',
     subjectLabel: 'Topic',
@@ -1455,7 +1471,7 @@ const PUBLISHED = [
     paperlessTitle: '{vshort} video clip {year}',
     pins: {
       title: [['B.4 §4', 'Online video | [Title]']],
-      page: [['B.4 §7', 'Audio interview / video | minute [N]:[NN], [topic] (or transcript p. [N], [topic])']],
+      page: [['B.4 §7', 'Audio interview / video | minute [N]:[NN] (or transcript p. [N]); the topic is the Subject (A7)']],
       author: [['B.4 §2', 'Online video | Channel or production company']],
       pubinfo: [['B.4 §6', 'Online video | Online video, [Platform] (homepage URL), year.'], ['A10', 'Online video | Online video, [Platform] (URL), year.']],
       abbrev: [['B.4 §10', 'Online video | Norra Ny walking tour (the SRN may lead with the channel)']],
@@ -1471,42 +1487,6 @@ const PUBLISHED = [
     }],
   },
   {
-    id: 'pp-bible', chapter: 'pp', group: 'Family artifacts', name: 'Family Bible',
-    hint: 'Photograph the cover, title page, and all family pages before judging confidence',
-    source: [
-      ['surname', 'Family surname', 'Grund'], ['years', 'Years of entries', '1848–1932'], ['compiler', 'Inferred compiler', 'Per Larsson Grund'],
-      ['btitle', 'Bible title', 'The Holy Bible Containing the Old and New Testaments'], ['city', 'Place of publication'],
-      ['publisher', 'Bible publisher'], ['year', 'Bible year'],
-    ],
-    citation: [['pagelabel', 'Page', 'family page 2']],
-    nouns: ['birth entry', 'marriage entry', 'death entry'],
-    defaults: PRIVATE, confidence: 'High', doctype: 'artifact',
-    title: '{surname} Family Bible Records, {years}',
-    abbrev: '{surname} Family Bible',
-    author: '[{compiler}]',
-    pubinfo: '',
-    page: '{pagelabel}, {subject}',
-    frn: `[{compiler}], compiler, {surname} Family Bible Records, {years}, in {btitle} ({city}: {publisher}, {year}), {pagelabel}, entry for {name}« {details}»« (documenting {citedFor})»; ${HELD_BY}.`,
-    srn: '{surname} Family Bible, {pagelabel}, {subject}.',
-    detailsLabel: 'Entry details (dates, places)',
-    pins: {
-      title: [['B.4 §4', 'Family Bible | [Surname] Family Bible Records, [years]']],
-      page: [['B.4 §7', 'Family Bible | [record-type] page, [event] (family page, Per Larsson Grund birth entry)']],
-      author: [['B.4 §2', 'Family Bible | Inferred compiler in brackets ([Per Larsson Grund]), or blank.']],
-      pubinfo: [['B.4 §6', 'Family Bible | Blank']],
-      abbrev: [['B.4 §10', 'Family Bible | Grund Family Bible']],
-    },
-    examples: [{
-      guide: 'B.4 Family Bible',
-      inputs: {
-        surname: 'Grund', years: '1848–1932', compiler: 'Per Larsson Grund', btitle: 'The Holy Bible Containing the Old and New Testaments',
-        city: 'Stockholm', publisher: '[Bible publisher]', year: '[year]', pagelabel: 'family page 2',
-        name: 'Per Larsson Grund', noun: 'birth entry', details: 'born 14 January 1848 at Ambjörby, Norra Ny parish',
-        comment: "Entries appear in two distinct hands: an early hand for events 1848–1880, a later hand for events 1881–1932. The earliest entries appear to have been copied into this Bible from an earlier family record after the Bible's purchase.",
-      },
-    }],
-  },
-  {
     id: 'pp-family-record', chapter: 'pp', group: 'Family artifacts', name: 'Family record',
     hint: 'A family record other than a Bible (notes, registers, histories)',
     source: [['family', 'Family or compiler', 'Grund'], ['rtype', 'Record type', 'Family Record'], ['compiler', 'Compiler (if known)']],
@@ -1516,7 +1496,8 @@ const PUBLISHED = [
     title: '{family} {rtype}',
     abbrev: '{family} {rtype}',
     author: '«[{compiler}]»',
-    page: '{pagelabel}, {subject}',
+    page: '{pagelabel}',
+    legacyPage: '{pagelabel}, {subject}',
     frn: `«[{compiler}], compiler, »{family} {rtype}, {pagelabel}, entry for {name}« {details}»« (documenting {citedFor})»; ${HELD_BY}.`,
     srn: '{family} {rtype}, {pagelabel}, {subject}.',
     pins: {
@@ -1524,43 +1505,6 @@ const PUBLISHED = [
       author: [['B.4 §2', 'Family record (non-Bible) | Blank, or compiler in brackets']],
     },
     examples: [],
-  },
-  {
-    id: 'pp-funeral-program', chapter: 'pp', group: 'Family artifacts', name: 'Funeral program',
-    hint: 'One Source per program unless several artifacts share one provenance (A1)',
-    source: [
-      ['dname', 'Deceased', 'Thomas Emil Siggerud'], ['funeralHome', 'Funeral home', 'Helgeson Funeral Home'], ['fcity', 'Funeral home city', 'Williams, Minnesota'],
-      ['date', 'Service date', '16 February 1953'], ['ptitle', 'Printed title', 'In Memory of Thomas Emil Siggerud'],
-    ],
-    citation: [],
-    nouns: ['funeral program', 'obituary'],
-    defaults: PRIVATE, confidence: 'High', doctype: 'ephemera',
-    derive: v => ({ surname: lastWord(v.dname), year: yearOf(v.date) }),
-    title: 'Funeral program, {dname}',
-    abbrev: '{surname} funeral program {year}',
-    author: '{funeralHome}',
-    pubinfo: '{fcity}: {funeralHome}, {date}.',
-    page: '{subject}',
-    frn: `{funeralHome}, "{ptitle}," funeral program for services held {date}« {details}»« (documenting {citedFor})»; ${HELD_BY}.`,
-    srn: '{surname} funeral program {year}.',
-    detailsLabel: 'Service details (church, officiant, burial)',
-    paperlessTitle: '{dname} funeral program {year}',
-    pins: {
-      title: [['B.4 §4', 'Funeral program | Funeral program, [Subject]']],
-      page: [['B.4 §7', 'Funeral program | [subject] (short enough to need no page)']],
-      author: [['B.4 §2', 'Funeral program | Funeral home (Helgeson Funeral Home)']],
-      pubinfo: [['B.4 §6', 'Funeral program | [City]: [Funeral home], date.'], ['A10', 'Funeral program | [City]: [Funeral home], date.']],
-      abbrev: [['B.4 §10', 'Artifact | Siggerud funeral program 1953']],
-      plTitle: [['C1', 'Funeral program | [Deceased] funeral program [year]']],
-    },
-    examples: [{
-      guide: 'B.4 Funeral program',
-      inputs: {
-        dname: 'Thomas Emil Siggerud', funeralHome: 'Helgeson Funeral Home', fcity: 'Williams, Minnesota', date: '16 February 1953',
-        ptitle: 'In Memory of Thomas Emil Siggerud', name: 'Thomas Emil Siggerud', noun: 'funeral program',
-        details: 'at Lutheran Church, Williams, Minnesota; Rev. Edstrom officiating; burial at Pine Hill Cemetery, Williams, Minnesota',
-      },
-    }],
   },
   {
     id: 'pp-photograph', chapter: 'pp', group: 'Family artifacts', name: 'Photograph',
@@ -1577,17 +1521,18 @@ const PUBLISHED = [
     abbrev: '{surname} {ptype} {decade}',
     author: '«{photographer}»',
     pubinfo: '«{studio}, {scity}, {pdate}.»« {pubmedium}, {platform} ({home}).»',
-    page: '{element}, {subject}«; {element2}»',
+    page: '{element}«; {element2}»',
+    legacyPage: '{element}, {subject}«; {element2}»',
     frn: `{pname} {ptype} portrait, {pdate}«, taken at {studio}, {scity}»«; {details}»« (documenting {citedFor})»; ${HELD_BY}.`,
     srn: '{pname} {ptype}, {pdate}.',
     detailsLabel: 'Inscriptions and marks (FRN)',
     paperlessTitle: '{pname} photograph {decade}',
     pins: {
       title: [['B.4 §4', 'Photograph | [Subject] [photo type], [year or range]']],
-      page: [['B.4 §7', 'Photograph | [image element], [subject], then ; [second element] if needed (cabinet card front, Per Larsson Grund portrait; inscription on mount, "Grandma\'s Grandpa")']],
+      page: [['B.4 §7', 'Photograph | [image element], then ; [second element] if needed (cabinet card front; inscription on mount, "Grandma\'s Grandpa" ([cited for]))']],
       author: [['B.4 §2', 'Photograph | Photographer or studio if known']],
       pubinfo: [['B.4 §6', 'Photograph from a studio | [Studio], [city], [year or circa]. if known']],
-      abbrev: [['B.4 §10', 'Artifact | Siggerud funeral program 1953 · Grund cabinet card 1890s']],
+      abbrev: [['B.4 §10', 'Artifact | Grund cabinet card 1890s']],
       plTitle: [['C1', 'Photograph | [Subject] photograph [decade or year]']],
     },
     examples: [{
@@ -1612,13 +1557,15 @@ const PUBLISHED = [
     abbrev: '{senderSurname} to {recipientSurname} letter {iso}',
     author: '{sender}',
     pubinfo: '',
-    page: '{subject}',
+    page: '',
+    legacyPage: '{subject}',
     frn: `{sender} to {recipient}, letter, {date}«, {details}»« (documenting {citedFor})»; ${HELD_BY}.`,
     srn: '{sender} to {recipient}, {date}.',
     subjectLabel: 'Topic, subject (e.g. report of a death, Name)',
     detailsLabel: 'Content for the FRN',
     paperlessTitle: '{sender} to {recipient} letter {iso}',
     pins: {
+      page: [['B.4 §7', 'Letter | none: only what it is cited for (A7)']],
       title: [['B.4 §4', 'Letter | [Sender] to [Recipient], [date], letter']],
       author: [['B.4 §2', 'Letter | Writer']],
       pubinfo: [['B.4 §6', 'Letter | Blank']],
@@ -1638,7 +1585,8 @@ const PUBLISHED = [
     abbrev: '{interviewee} interview {iso}',
     author: '{interviewee}',
     pubinfo: 'Recorded interview, {city}, {date}.',
-    page: 'minute {minute}, {subject}',
+    page: 'minute {minute}',
+    legacyPage: 'minute {minute}, {subject}',
     frn: '{interviewee} ({city}), recorded interview by {interviewer}, {date}; audio recording and transcript privately held by {custodian}, [ADDRESS FOR PRIVATE USE,] {custplace}; minute {minute}, on {topic}« (documenting {citedFor})».',
     srn: '{interviewee} interview, {date}, minute {minute}.',
     subjectLabel: 'Topic',
@@ -1646,7 +1594,7 @@ const PUBLISHED = [
     paperlessTitle: '{interviewee} interview {iso}',
     pins: {
       title: [['B.4 §4', 'Audio interview | [Interviewee] interview by [Interviewer], [date]']],
-      page: [['B.4 §7', 'Audio interview / video | minute [N]:[NN], [topic] (or transcript p. [N], [topic])']],
+      page: [['B.4 §7', 'Audio interview / video | minute [N]:[NN] (or transcript p. [N]); the topic is the Subject (A7)']],
       author: [['B.4 §2', 'Audio interview | The interviewee (EE 4.31)']],
       pubinfo: [['B.4 §6', 'Audio interview | Recorded interview, [city], date.'], ['A10', 'Audio interview | Recorded interview, [city], date.']],
       abbrev: [['B.4 §10', 'Interview | Tom Grund interview 2024-03-12']],
@@ -1672,14 +1620,15 @@ const PUBLISHED = [
     title: '{collection}',
     abbrev: '{collection}',
     author: '{collection}',
-    page: '{locator}, {subject}',
+    page: '{locator}',
+    legacyPage: '{locator}, {subject}',
     frn: '{interviewee}, interview by {interviewer}, {date}, {collection}; {locator}, on {topic}« (documenting {citedFor})»; citing {archive}«, {call}».',
     srn: '{collection}, {interviewee}, {locator}.',
     subjectLabel: 'Topic',
     detailsLabel: 'Topic as worded in the FRN (if different)',
     pins: {
       title: [['B.4 §4', 'Oral-history collection | [Collection title]']],
-      page: [['B.4 §7', 'Audio interview / video | minute [N]:[NN], [topic] (or transcript p. [N], [topic])']],
+      page: [['B.4 §7', 'Audio interview / video | minute [N]:[NN] (or transcript p. [N]); the topic is the Subject (A7)']],
       author: [['B.4 §2', 'Oral-history collection | Collection name']],
     },
     examples: [],
@@ -1702,7 +1651,8 @@ const PUBLISHED = [
     abbrev: '{surname} research',
     author: '{researcher}',
     pubinfo: 'Unpublished research, {custplace}, {years}.',
-    page: '{section}«, {subject}»',
+    page: '{section}',
+    legacyPage: '{section}«, {subject}»',
     frn: `{researcher}, personal research on {rtopic}, accumulated {years}, {details}« (documenting {citedFor})»; ${HELD_BY}«, with copies privately held by {copies}».`,
     srn: '{surname} research, {section}.',
     subjectLabel: 'Topic, subject (optional)',
@@ -1732,14 +1682,57 @@ const PUBLISHED = [
 
 return { PUBLISHED };
 })();
+__modules["records/general.js"] = (() => {
+// A14 · the General form: a record with no record type yet, cited from five questions and tagged until one exists.
+
+const DIGITAL_IMAGE = '{medium}, {platform} ({url} : accessed {accessed})';
+
+const GENERAL = [
+  {
+    id: 'general', chapter: 'ge', group: 'No rule yet', name: 'General form', rules: 'A14', tag: 'General form',
+    hint: 'A record with no record type yet; tagged General form until one exists',
+    source: [
+      ['creator', 'Creator', 'Marshall County Register of Deeds'], ['place', 'Place', 'Minnesota, Marshall County'],
+      ['collection', 'Collection', 'Miscellaneous Record, vol. K'], ['years', 'Years', '1919–1927'], ['call', 'Call number'],
+    ],
+    citation: [['page', 'Page'], ['image', 'Image'], ['entry', 'Entry no.'], ['date', 'Date', '3 May 1919']],
+    note: [['reference', 'Reference', 'Image Group Number 005537573']],
+    nouns: [''], freeNoun: true,
+    defaults: { pubmedium: 'Digital images' },
+    confidence: '', doctype: 'legal',
+    title: '{place}, {collection}«, {years}»',
+    abbrev: '{collection}«, {years}»',
+    author: '{creator}',
+    page: '{pageLoc}«, no. {entry}»',
+    frn: `{creator}, {collection}«, {years}», {pageRef}«, no. {entry}», {subject}« ({date})»« (documenting {citedFor})»; ${DIGITAL_IMAGE}«, {reference}»«; citing {archive}».`,
+    srn: '{collection}«, {years}», {pageRef}«, no. {entry}», {srnSubject}.',
+    pins: {
+      title: [['A14', 'Title: [Place], [Collection], [years] (A8). Abbrev: [Collection], [years].']],
+      page: [['A14', 'Page string: p. [P] (image [I]), no. [N] ([cited for])']],
+      frn: [['A14', 'FRN: [Creator], [Collection], [years], p. [P], [Subject] [record noun] ([date]); digital image, [platform] ([URL] : accessed [date]), [reference]; citing [archive].']],
+      srn: [['A14', 'SRN: [Abbrev], p. [P], [Subject] [record noun].']],
+    },
+    examples: [],
+    a14Example: {
+      creator: 'Marshall County Register of Deeds', place: 'Minnesota, Marshall County', collection: 'Miscellaneous Record, vol. K',
+      years: '1919–1927', image: '32', date: '[date]', name: 'Peter L. Grund', noun: 'power of attorney',
+      platform: 'FamilySearch', url: 'https://www.familysearch.org/ark:/61903/3:1:3QS7-L99T-2SDQ', accessed: '13 October 2026',
+      reference: 'Image Group Number 005537573',
+    },
+  },
+];
+
+return { GENERAL };
+})();
 __modules["records/index.js"] = (() => {
 // Every record type, in sidebar order.
 const { NORWEGIAN } = __modules["records/norwegian.js"];
 const { SWEDISH } = __modules["records/swedish.js"];
 const { US } = __modules["records/us.js"];
 const { PUBLISHED } = __modules["records/published.js"];
+const { GENERAL } = __modules["records/general.js"];
 
-const RECORDS = [...NORWEGIAN, ...SWEDISH, ...US, ...PUBLISHED];
+const RECORDS = [...NORWEGIAN, ...SWEDISH, ...US, ...PUBLISHED, ...GENERAL];
 
 function recordById(id) {
   return RECORDS.find(r => r.id === id) || null;
@@ -1750,7 +1743,7 @@ return { RECORDS, recordById };
 __modules["engine.js"] = (() => {
 // Turns one draft of one record type into every output field.
 const { fill, gap } = __modules["template.js"];
-const { DATE_MEANING, CHAPTER_CODE, PLATFORMS, MEDIA, yearOf } = __modules["tables.js"];
+const { DATE_MEANING, CHAPTER_CODE, PLATFORMS, MEDIA, USUAL_CITED_FOR, yearOf } = __modules["tables.js"];
 
 // Reference-note values that describe the Source, pre-filled from the record type's defaults.
 const REFERENCE_VALUES = ['platform', 'pubmedium', 'archive', 'custodian', 'custplace'];
@@ -1775,8 +1768,14 @@ const STANDARD_LABELS = {
   pubmedium: 'Pubinfo medium', home: 'Platform homepage',
 };
 
+/** A10 · whether a typed Pubinfo medium is film read on a reader. */
+function isFilm(medium) {
+  return String(medium ?? '').trim().toLowerCase() === 'microfilm';
+}
+
 function ruleRef(type, rule) {
-  return rule.startsWith('§') ? `${CHAPTER_CODE[type.chapter]} ${rule}` : rule;
+  if (!rule.startsWith('§')) return rule;
+  return CHAPTER_CODE[type.chapter] ? `${CHAPTER_CODE[type.chapter]} ${rule}` : type.rules || rule;
 }
 
 /** The record type with the draft's page variant merged in. */
@@ -1935,6 +1934,29 @@ function paperlessTitle(draft, c) {
   return year ? `${out} ${year}` : out;
 }
 
+/** A7 · the fact a citation is usually cited for: its record noun's, or with no noun its record type's. */
+function usualCitedFor(type, subject) {
+  const noun = String(subject?.noun ?? '').trim();
+  return (noun ? USUAL_CITED_FOR[noun] : USUAL_CITED_FOR[type.name]) || '';
+}
+
+/** A7 · the citation's attributes: the subject's parts, then the record type and its form. */
+function attributesOf(type, draft) {
+  const t = resolveType(type, draft);
+  const s = draft.subject;
+  const trim = x => String(x ?? '').trim();
+  const head = trim(s.head);
+  return [
+    ['Subject', trim(s.name)],
+    ['Record', recordNoun(s.noun, s.copy)],
+    ['Household', s.nonHead && trim(s.noun) === 'household' && head ? `${head} household` : ''],
+    ['Which entry', trim(s.which)],
+    ['Source says', trim(s.says)],
+    ['Evidence', trim(s.evidence)],
+    ['Record type', type.pageVariants && t.label ? `${type.name} · ${t.label}` : type.name],
+  ].filter(([, value]) => value);
+}
+
 /** Ends a page string or SRN with (what it is cited for), before a closing period or quoted period. */
 function endWith(text, citedFor) {
   if (!citedFor) return text;
@@ -1943,7 +1965,11 @@ function endWith(text, citedFor) {
   return `${text} (${citedFor})`;
 }
 
-function buildOutputs(type, draft) {
+/**
+ * Every output field. `legacy` builds them as the rules before 2026-10-13 did (A15): the page string from the record
+ * type's old template ending in its subject, and what it is cited for only where typed, in the notes as well.
+ */
+function buildOutputs(type, draft, { legacy = false } = {}) {
   const t = resolveType(type, draft);
   const L = labeler(type);
   const v = draft.values, s = draft.subject;
@@ -1963,6 +1989,11 @@ function buildOutputs(type, draft) {
   // A form whose own input holds the record's date (eventDate) takes the event year from it, so a
   // year typed for another form or another citation cannot linger in the SRN or the Paperless title.
   if (t.eventDate) c.eventYear = yearOf(c[t.eventDate]) || gap(L(t.eventDate));
+  // A7 · the page string always ends with what the citation is cited for, starting from its usual fact; the notes say
+  // it only when it differs from that.
+  const usual = legacy ? '' : usualCitedFor(t, s);
+  const citedFor = typed.citedFor || usual;
+  c.citedFor = citedFor === usual ? '' : citedFor;
 
   const o = {};
   o.author = pick('author', fill(t.author, c, L));
@@ -1971,31 +2002,31 @@ function buildOutputs(type, draft) {
   o.abbrev = pick('abbrev', fill(t.abbrev, c, L));
   // A10 · an online medium names the platform and its homepage from the A10 table; film read in person names
   // its maker, the archive, with no URL. A record type's own template gives an imprint instead.
-  const microfilm = c.pubmedium === 'Microfilm';
+  const microfilm = isFilm(c.pubmedium);
   c.home = c.platform ? PLATFORMS[c.platform] || gap(L('home')) : '';
   const genealogical = microfilm ? `Microfilm, ${c.archive || gap(L('archive'))}.`
     : c.platform ? `${c.pubmedium || MEDIA[0]}, ${c.platform} (${c.home}).` : '';
   o.pubinfo = pick('pubinfo', t.pubinfo === undefined ? genealogical : fill(t.pubinfo, c, L).trim());
   o.callNumber = pick('callNumber', typed.call || '');
-  const page = fill(t.page, c, L);
-  // A7 · what the citation is cited for, when given, ends the page string and the SRN, so Gramps lists apart
-  // the citations one item gives; each FRN template says "(documenting …)" after its item.
-  o.page = pick('page', endWith(page, typed.citedFor));
+  const page = fill(legacy ? t.legacyPage ?? t.page : t.page, c, L);
+  const label = citedFor || gap(L('citedFor'));
+  o.page = pick('page', legacy ? endWith(page, citedFor) : page ? endWith(page, label) : `(${label})`);
   o.confidence = draft.confidence;
   // Film read in person takes the digital image's place in the FRN (A10), where the record type has that form.
   const frn = fill(microfilm && t.frnMicrofilm ? t.frnMicrofilm : t.frn, c, L);
   const comment = typed.comment || '';
   o.frn = pick('frn', comment ? `${frn} ${comment}` : frn);
-  o.srn = pick('srn', endWith(fill(t.srn, c, L), typed.citedFor));
+  o.srn = pick('srn', endWith(fill(t.srn, c, L), c.citedFor));
   o.plTitle = pick('plTitle', t.paperlessTitle ? fill(t.paperlessTitle, c, L) : paperlessTitle(draft, c));
   o.plDoctype = pick('plDoctype', t.doctype);
   o.plDateMeaning = pick('plDateMeaning', DATE_MEANING[t.doctype] || 'event');
   o.plCorrespondent = pick('plCorrespondent', microfilm ? '' : typed.platform || '');
   o.plSourceUrl = pick('plSourceUrl', typed.url || '');
+  o.attributes = attributesOf(type, draft);
   return o;
 }
 
-return { REFERENCE_VALUES, STANDARD_VALUES, SUBJECT_KEYS, ENGINE_TOKENS, TEMPLATE_KEYS, OUTPUT_GROUPS, ruleRef, resolveType, inputFields, labeler, usesToken, usesDetails, newDraft, setVariant, nextCitationDraft, exampleLabel, draftFromExample, recordNoun, subjectOf, srnSubjectOf, pageLocators, endWith, buildOutputs };
+return { REFERENCE_VALUES, STANDARD_VALUES, SUBJECT_KEYS, ENGINE_TOKENS, TEMPLATE_KEYS, OUTPUT_GROUPS, isFilm, ruleRef, resolveType, inputFields, labeler, usesToken, usesDetails, newDraft, setVariant, nextCitationDraft, exampleLabel, draftFromExample, recordNoun, subjectOf, srnSubjectOf, pageLocators, usualCitedFor, attributesOf, endWith, buildOutputs };
 })();
 __modules["checks.js"] = (() => {
 // Rule checks shown in the status bar. Each returns { rule, message } problems.
@@ -2163,7 +2194,7 @@ return { STORE_KEY, loadState, restoreDraft, saveState };
 __modules["form.js"] = (() => {
 // Describes what each wizard step asks for and shows, as plain rows the screen draws.
 const { CHAPTERS, LEVELS, PLATFORMS, ARCHIVES, SUGGESTIONS, COPY_FORMS, MEDIA } = __modules["tables.js"];
-const { OUTPUT_GROUPS, TEMPLATE_KEYS, resolveType, usesDetails, usesToken, ruleRef, exampleLabel } = __modules["engine.js"];
+const { OUTPUT_GROUPS, TEMPLATE_KEYS, resolveType, usesDetails, usesToken, ruleRef, exampleLabel, isFilm } = __modules["engine.js"];
 const { expectedFor, diffOutputs } = __modules["compare.js"];
 const { plain } = __modules["template.js"];
 
@@ -2213,10 +2244,10 @@ function referenceRows(type, draft) {
   const rows = [text('values.platform', 'Platform', v.platform, { list: Object.keys(PLATFORMS) })];
   const film = [type, ...(type.pageVariants || [])].some(x => x.frnMicrofilm);
   if (type.pubinfo === undefined || usesToken(type, 'pubmedium')) {
-    rows.push(select('values.pubmedium', 'Pubinfo medium', v.pubmedium, MEDIA.filter(m => film || m !== 'Microfilm').map(m => [m, m])));
+    rows.push(text('values.pubmedium', 'Pubinfo medium', v.pubmedium, { list: MEDIA.filter(m => film || m !== 'Microfilm') }));
   }
   const online = usesToken(type, 'archive', TEMPLATE_KEYS.filter(k => k !== 'frnMicrofilm'));
-  if (online || (film && v.pubmedium === 'Microfilm')) rows.push(text('values.archive', 'Archive', v.archive, { list: ARCHIVES[type.chapter] }));
+  if (online || (film && isFilm(v.pubmedium))) rows.push(text('values.archive', 'Archive', v.archive, { list: ARCHIVES[type.chapter] }));
   if (usesToken(type, 'custodian')) rows.push(text('values.custodian', 'Held by', v.custodian, { placeholder: sampleOf(type, 'custodian') }));
   if (usesToken(type, 'custplace')) rows.push(text('values.custplace', 'Place', v.custplace, { placeholder: sampleOf(type, 'custplace') }));
   return rows;
@@ -2232,7 +2263,8 @@ function citationRows(type, draft) {
   rows.push(...(t.citation || []).map(f => field(type, f, v)));
   rows.push(text('subject.name', t.subjectLabel || 'Subject', s.name, { placeholder: sampleOf(type, 'name') }));
   const nouns = t.nouns || [''];
-  if (nouns.some(Boolean)) rows.push(select('subject.noun', 'Record noun', s.noun, nouns.map(n => [n, n || '(none)'])));
+  if (t.freeNoun) rows.push(text('subject.noun', 'Record noun', s.noun, { placeholder: sampleOf(type, 'noun') }));
+  else if (nouns.some(Boolean)) rows.push(select('subject.noun', 'Record noun', s.noun, nouns.map(n => [n, n || '(none)'])));
   if (s.noun.trim()) rows.push(select('subject.copy', 'Original or copy', s.copy, [['', 'Original'], ...COPY_FORMS.map(f => [f, capital(f)])]));
   if (s.noun.trim() === 'household') {
     rows.push(check('subject.nonHead', 'Not the head of household', s.nonHead));
@@ -2525,7 +2557,7 @@ function readerFor(type, variant, cited) {
   // What the FRN says the citation documents ends the page string too, so that reading goes first.
   const documented = /\(documenting ([^()]+)\)/.exec(cited.frn)?.[1];
   const pageTexts = citedOff(cited.page).sort((a, b) => (b[1] === documented) - (a[1] === documented));
-  const page = c => pageTexts.flatMap(([text, citedFor]) => readings(t.page, {}, text).flatMap((got) => {
+  const page = c => pageTexts.flatMap(([text, citedFor]) => readings(t.legacyPage ?? t.page, {}, text).flatMap((got) => {
     const loc = got.pageLoc === undefined ? {} : locatorsOf(got.pageLoc);
     if (!loc) return [];
     const people = got.subject !== undefined ? subjects(t, got.subject)
@@ -2639,7 +2671,7 @@ function readAs(type, variant, cited) {
   let tried = 0, close = null;
   for (const c of search(start, [page, source, frnOrNot, srn, source])) {
     const d = settle(c);
-    const o = buildOutputs(type, d);
+    const o = buildOutputs(type, d, { legacy: true });
     if (o.page === cited.page) {
       if (o.frn === cited.frn && o.srn === cited.srn) return { draft: d, exact: true };
       if (!close && o.frn === cited.frn) close = { draft: d, exact: false };
@@ -2656,7 +2688,7 @@ function readAs(type, variant, cited) {
  */
 function readCitation(cited, preferred = '') {
   if (!cited?.page || !cited.frn || !cited.srn) return null;
-  const order = [recordById(preferred), ...RECORDS.filter(r => r.id !== preferred)].filter(Boolean);
+  const order = [recordById(preferred), ...RECORDS.filter(r => r.id !== preferred)].filter(r => r && r.chapter !== 'ge');
   let close = null;
   for (const type of order) {
     for (const variant of type.pageVariants ? type.pageVariants.map(v => v.key) : ['']) {
@@ -2679,7 +2711,7 @@ const fixedText = template => String(template ?? '').replace(/\{\w+\}|«|»/g, '
  */
 function readByFrn(cited, preferred = '') {
   if (!cited?.frn) return null;
-  const order = [recordById(preferred), ...RECORDS.filter(r => r.id !== preferred)].filter(Boolean);
+  const order = [recordById(preferred), ...RECORDS.filter(r => r.id !== preferred)].filter(r => r && r.chapter !== 'ge');
   let best = null;
   for (const type of order) {
     for (const variant of type.pageVariants ? type.pageVariants.map(v => v.key) : ['']) {
@@ -2713,12 +2745,12 @@ function readLoosely(cited) {
 return { readCitation, readByFrn, readLoosely };
 })();
 export const { RECORDS, recordById } = __modules["records/index.js"];
-export const { REFERENCE_VALUES, STANDARD_VALUES, SUBJECT_KEYS, ENGINE_TOKENS, TEMPLATE_KEYS, OUTPUT_GROUPS, ruleRef, resolveType, inputFields, labeler, usesToken, usesDetails, newDraft, setVariant, nextCitationDraft, exampleLabel, draftFromExample, recordNoun, subjectOf, srnSubjectOf, pageLocators, endWith, buildOutputs } = __modules["engine.js"];
+export const { REFERENCE_VALUES, STANDARD_VALUES, SUBJECT_KEYS, ENGINE_TOKENS, TEMPLATE_KEYS, OUTPUT_GROUPS, isFilm, ruleRef, resolveType, inputFields, labeler, usesToken, usesDetails, newDraft, setVariant, nextCitationDraft, exampleLabel, draftFromExample, recordNoun, subjectOf, srnSubjectOf, pageLocators, usualCitedFor, attributesOf, endWith, buildOutputs } = __modules["engine.js"];
 export const { GAP_OPEN, GAP_CLOSE, isBlank, gap, hasGap, plain, gapLabels, templateKeys, fill } = __modules["template.js"];
-export const { CHAPTERS, CHAPTER_CODE, LEVELS, PLATFORMS, STATE_ABBREV, ARCHIVES, SUGGESTIONS, DATE_MEANING, MEDIA, COPY_FORMS, isoDate, yearOf, lastWord, allButLastWord, stateAbbrev } = __modules["tables.js"];
+export const { CHAPTERS, CHAPTER_CODE, LEVELS, PLATFORMS, STATE_ABBREV, ARCHIVES, SUGGESTIONS, USUAL_CITED_FOR, DATE_MEANING, MEDIA, COPY_FORMS, isoDate, yearOf, lastWord, allButLastWord, stateAbbrev } = __modules["tables.js"];
 export const { runChecks } = __modules["checks.js"];
 export const { COMPARED_FIELDS, expectedFor, diffOutputs } = __modules["compare.js"];
 export const { STORE_KEY, loadState, restoreDraft, saveState } = __modules["store.js"];
 export const { EDITABLE, sampleOf, recordGroups, sourceRows, referenceRows, citationRows, noteRows, outputRows, exampleNote, repositoryName, paperlessMatch, copyAllText } = __modules["form.js"];
 export const { readCitation, readByFrn, readLoosely } = __modules["read.js"];
-export const GUIDE = {"changed":"2026-10-06","refs":{"A1":{"title":"A1 · Source scoping","text":"A Source is the natural unit a researcher browses or pulls off the shelf. Scope down to that unit, and push everything more granular (rolls, pages, entries, memorial numbers) into the Citation page string."},"A2":{"title":"A2 · Citation date","text":"Leave the Citation date blank. The field is ambiguous (event, record creation, or access?). Every meaning already has a home below:"},"A3":{"title":"A3 · One citation vs. two","text":"Use one citation when all attached facts share the same evidence quality; use separate citations when they do not. The principle is Mills (EE 1.16): each piece of information in a source is appraised separately. Her example is a colonial South Carolina memorial covering the landowner's own acquisition (primary) and a hundred-year chain of title (secondary)."},"A4":{"title":"A4 · Locators","text":"A volume has two identifiers answering different questions. Keep each in its home and never mix them."},"A5":{"title":"A5 · Citation notes","text":"Source-level notes are optional; the Source fields carry the bibliographic data. Each Citation note holds:"},"A6":{"title":"A6 · Confidence","text":"Use the 5-level Gramps scale, anchored to EE's three axes: original vs. derivative source, primary vs. secondary information, direct vs. indirect evidence."},"A7":{"title":"A7 · Page-string subject","text":"The page string ends in a subject: [locators], [name] [record-noun]. Locator words are lower case, even at the start of the page string (p. 57, image 62, certificate no. 1929-MN-XXXXXX, district 009 Blegstad); names keep their capitals."},"A8":{"title":"A8 · Title","text":"Titles are EE locality-led: largest jurisdiction first, then record series/type and identifier, then year-range. A formal collection name may follow but never leads."},"A9":{"title":"A9 · Repository","text":"Decide in this order: A physical archive holds the original → name it (Statsarkivet i Oslo, Riksarkivet, Värmlandsarkiv, National Archives, [State] Historical Society, [County] County Courthouse, Family History Library when a microfilm number applies). A specific NARA facility goes in the FRN, not here. A family member or private party holds it → [Custodian], private collection (EE 4.24 to 4.29). It is a publication or online-only platform → blank. A website is a publication, not a repository (EE 2.34); the same holds for library-held books."},"A10":{"title":"A10 · Pubinfo","text":"Genealogical records: [medium], [platform] (homepage URL)."},"A11":{"title":"A11 · Bibliography","text":"Gramps fields are built for in-app display. For the book's bibliography, transform them into EE Source List Entries; never print the Title field directly."},"A12":{"title":"A12 · Privacy","text":"Apply EE 4.31 to living informants (interviewees, correspondents, custodians): keep their street address in working files, never in a published citation, while they are alive."},"A13":{"title":"A13 · Universal abbreviations","text":"Used in FRN, SRN, and Abbrev wherever a locator is needed (EE 2.53):"},"C1":{"title":"C1 · Title","text":"Format: [Subject] [record-noun] [year]"},"C2":{"title":"C2 · Document type","text":"Classified by genealogical content, not by issuer."},"C3":{"title":"C3 · Date","text":"The underlying event's date when there is one; otherwise when the document was created or issued (C4 says which). Year only: use 1 January + qualifier year only (1 January is then a placeholder, never a real date). A range: use the start year; the range can go in the Title. This is separate from the Gramps Citation date, which stays blank (A2)."},"C4":{"title":"C4 · Date meaning","text":""},"C5":{"title":"C5 · Date qualifier","text":""},"C6":{"title":"C6 · Correspondent","text":"The digital provider hosting the image: a small, stable list matching the A10 platforms (FamilySearch, Ancestry, Digitalarkivet, Riksarkivet, ArkivDigital, Newspapers.com, Nasjonalbiblioteket, Lantmäteriet). A platform, never a physical archive or a person. Blank when the document did not come from a digital provider: microfilm read at a library, interviews, personal research, letters, and family-held artifacts."},"C7":{"title":"C7 · Tags","text":"Open (TBD). The worked examples use person, place, date, format, and status tags such as attributed."},"C8":{"title":"C8 · Source URL","text":"The canonical link that takes you back to the image or its indexed record. This deep link differs from Gramps Pubinfo, which holds only the homepage. Film read at a library has no link, so its Source URL is blank."},"C9":{"title":"C9 · Source URL access","text":""},"C10":{"title":"C10 · Permalink","text":"An alternative URL with a persistent identifier, only when the site advertises it as one: https://urn.digitalarkivet.no/URN:NBN:no-a1450-ft20101203340184.jpg · https://goto.digitalarkivet.no/kb20060926010303."},"C11":{"title":"C11 · Family group, Provenance, Physical location","text":""},"B.1 §1":{"title":"B.1 §1 · Scope","text":"One Source per archival volume / fond (A1). Record types covered: Parish records (kirkebøker): ministerialbok and klokkerbok; baptisms, confirmations, marriages, burials. Census (folketelling): the 1801 nominal census and the decennial 1865+ censuses. Court records (sorenskriverarkiv): tingbøker (court journals)."},"B.1 §2":{"title":"B.1 §2 · Source author","text":"Parish or court name alone, no country or umbrella prefix."},"B.1 §3":{"title":"B.1 §3 · Repository","text":""},"B.1 §4":{"title":"B.1 §4 · Source title","text":"Locality-led (A8), with the series in its Norwegian name followed by an English gloss in square brackets (EE 2.28), as in B.2 §4: Norway, [fylke or amt], [parish or court], [Norwegian series name] [English gloss] [volume], [year-range]. Capitalize the series name, and use the same gloss in the FRN and bibliography. Year-ranges follow the volume identifier with no parentheses (Digitalarkivet's own form), using en dashes."},"B.1 §5":{"title":"B.1 §5 · Locator tokens","text":""},"B.1 §6":{"title":"B.1 §6 · Pubinfo","text":""},"B.1 §7":{"title":"B.1 §7 · Page-string templates","text":""},"B.1 §8":{"title":"B.1 §8 · Confidence","text":""},"B.1 §9":{"title":"B.1 §9 · Subject vocabulary","text":"Record nouns (A7); the first is the default:"},"B.1 §10":{"title":"B.1 §10 · Abbrev","text":"House variation: the record-type word is lowercased (EE 2.29 keeps original capitals; lowercase gives visual contrast with the Title), and the Abbrev drops the gloss. Parish format: [Parish] [kirkebok|klokkerbok] [vol] ([year-range]). Court format: [Sorenskriveri] [tingbok|skifteprotokoll] [vol] ([year-range]). Unlike the Title, the Abbrev puts the year-range in parentheses."},"B.1 §11":{"title":"B.1 §11 · Bibliography","text":"A11 geographic form (EE 2.48): country, fylke, prestegjeld/herred, series + bracketed English gloss (EE 2.28), volume + years, repository + call number, medium, publisher, URL : year. Group under Norway:, alphabetize by fylke then prestegjeld."},"B.1 §12":{"title":"B.1 §12 · Worked examples","text":""},"B.2 §1":{"title":"B.2 §1 · Scope","text":"One Source per discrete NAD fond: each parish kyrkoarkiv volume series, each häradsrätt series, each SVAR database (A1). Record types covered: Parish records (kyrkoarkiv): Husförhörslängder (clerical survey), Lysnings- och Vigselbok (banns and marriage), Födelse- och dopböcker (birth and baptism), Dödbok (death/burial). Court records: Bouppteckningar (estate inventories) and other häradsrätt series. SVAR databases: Folkräkning (census) and other Riksarkivet databases."},"B.2 §2":{"title":"B.2 §2 · Source author","text":""},"B.2 §3":{"title":"B.2 §3 · Repository","text":""},"B.2 §4":{"title":"B.2 §4 · Source title","text":"Locality-led (A8), with the series in its original Swedish name followed by an English gloss in square brackets (EE 2.28): Sweden, [län], [parish or härad], [Swedish series name] [English gloss] [volume], [year-range]. Keep the series name's original capitalization, and use the same gloss as the FRN."},"B.2 §5":{"title":"B.2 §5 · Locator tokens","text":""},"B.2 §6":{"title":"B.2 §6 · Pubinfo","text":""},"B.2 §7":{"title":"B.2 §7 · Page-string templates","text":"Standard: p. [P] (image [I]), [entry], [subject]. Unpaginated fallback is image [I], [entry], [subject]. Each Source is one volume, so the volume is not repeated here (A4)."},"B.2 §8":{"title":"B.2 §8 · Confidence","text":""},"B.2 §9":{"title":"B.2 §9 · Subject vocabulary","text":"Record nouns (A7); the first is the default:"},"B.2 §10":{"title":"B.2 §10 · Abbrev","text":"Record-type word lowercased (Scandinavian house variation, see B.1 §10). Parish: [Parish] [record-type] [vol] ([years]). Court and other state records: [Creating body] [record-type] [vol] ([years]). Land survey: [Parish] [survey type] [act-no] ([years]). The SRN is built as in B.1 §10: the Abbrev, then the locators, then the subject."},"B.2 §11":{"title":"B.2 §11 · Bibliography","text":"A11 geographic form (EE 2.48) with bracketed English glosses (EE 2.28). Group under Sweden:, alphabetize by län then parish or härad. SVAR databases go in a trailing Online databases group by title, with no repository (EE 2.34, 11.53)."},"B.2 §12":{"title":"B.2 §12 · Worked examples","text":"Glosses (in the Title and at the series' first mention in the FRN; the Abbrev and SRN drop them): Husförhörslängder [household examinations] · Lysnings- och Vigselbok [banns and marriage book] · Födelse- och dopböcker [birth and baptism books] · Dödbok [death book] · Bouppteckningar [estate inventories] · Folkräkning [census] · laga skifte [statutory land enclosure]. These match EE 11.47, 11.50, 11.56."},"B.3 §1":{"title":"B.3 §1 · Scope","text":"One Source per unit a researcher browses on Ancestry/FamilySearch or pulls from an archive (A1)."},"B.3 §2":{"title":"B.3 §2 · Source author","text":"Bare body name: Bureau of the Census, never U.S. Bureau of the Census."},"B.3 §3":{"title":"B.3 §3 · Repository","text":""},"B.3 §4":{"title":"B.3 §4 · Source title","text":""},"B.3 §5":{"title":"B.3 §5 · Locator tokens","text":""},"B.3 §6":{"title":"B.3 §6 · Pubinfo","text":"[medium], [platform] (homepage URL). per A10. Examples: Digital images, Ancestry (https://www.ancestry.com). · Database with images, FamilySearch (https://www.familysearch.org). Published directories use the imprint variant (Example 7). Newspapers read on a library's film use Microfilm, Minnesota Historical Society.; a title read both there and online is one Source, and A10 picks its Pubinfo (Example 13). For church records, the named digitized collection (e.g. \"U.S., Evangelical Lutheran Church in America, Swedish American Church Records, 1800–1952\") goes in the FRN, not Pubinfo."},"B.3 §7":{"title":"B.3 §7 · Page-string templates","text":""},"B.3 §8":{"title":"B.3 §8 · Confidence","text":""},"B.3 §9":{"title":"B.3 §9 · Subject vocabulary","text":"Record nouns (A7); the first is the default. Passenger manifest and Find a Grave memorial take no noun: the list or memorial number says what it is."},"B.3 §10":{"title":"B.3 §10 · Abbrev","text":"The US Abbrev keeps whole readable words (St. Louis Co. naturalizations, 1888–1955); heavier abbreviation belongs in the SRN (St. Louis Co. natz.)."},"B.3 §11":{"title":"B.3 §11 · Bibliography","text":"A11 geographic form: [State]. [County]. [Locality/series]. [Series] [volume] ([years]). [Repository], [call number]. [Medium]. [Publisher]. [URL] : [year]. Group under a state header, alphabetize by county. Directories go by publisher (EE 2.46); online-only databases in a trailing group by title."},"B.3 §12":{"title":"B.3 §12 · Worked examples","text":""},"B.4 §1":{"title":"B.4 §1 · Scope","text":"Published works scope by bibliographic unit, artifacts by physical thing, interviews by event (A1)."},"B.4 §2":{"title":"B.4 §2 · Source author","text":""},"B.4 §3":{"title":"B.4 §3 · Repository","text":""},"B.4 §4":{"title":"B.4 §4 · Source title","text":"Most titles here are author-led or artifact-led, not locality-led, because these sources are arranged by author, collection, or custodian (A11). A place-focused history shelved with locality material may use the A8 form. Foreign titles take a bracketed English gloss in the FRN (EE 2.28)."},"B.4 §5":{"title":"B.4 §5 · Locator tokens","text":""},"B.4 §6":{"title":"B.4 §6 · Pubinfo","text":""},"B.4 §7":{"title":"B.4 §7 · Page-string templates","text":""},"B.4 §8":{"title":"B.4 §8 · Confidence","text":""},"B.4 §9":{"title":"B.4 §9 · Subject vocabulary","text":"Record nouns (A7); the first is the default, and (none) means the noun may be left off:"},"B.4 §10":{"title":"B.4 §10 · Abbrev Pending review","text":"Shortest unambiguous work title or artifact identity + year or volume, whole words (heavier abbreviation goes in the SRN):"},"B.4 §11":{"title":"B.4 §11 · Bibliography","text":"Arranged by author (EE 2.46), collection (EE 2.47), or custodian (EE 4.24 to 4.29), not by locality. Authored publications sit alphabetically in the main body; artifacts, interviews, and personal research get trailing headings."},"B.4 §12":{"title":"B.4 §12 · Worked examples","text":"Ordered by EE chapter (4 artifacts, then 13 published works)."}},"examples":{"B.1 Example 1":{"expected":{"title":"Norway, Akershus, Eidsvoll, Klokkerbok [parish register (copy)] I 2, 1866–1871","abbrev":"Eidsvoll klokkerbok I 2 (1866–1871)","author":"Eidsvoll prestekontor","pubinfo":"Digital images, Digitalarkivet (https://www.digitalarkivet.no).","callNumber":"AV/SAO-A-10888/G/Ga/L0002","page":"p. 57 (image 62), no. 21, Thor Emil birth and baptism entry","frn":"Eidsvoll prestekontor, Klokkerbok [parish register (copy)] no. I 2, 1866–1871, p. 57, no. 21, Thor Emil (born 1 September 1869; baptized 16 January 1870), son of Christian Henningsen and Anne Marthe Bergersdatter, baptized at Eidsvoll church; digital image, Digitalarkivet (https://urn.digitalarkivet.no/URN:NBN:no-a1450-kb20060313011115.jpg : accessed 17 April 2026); citing Statsarkivet i Oslo, AV/SAO-A-10888/G/Ga/L0002.","srn":"Eidsvoll klokkerbok I 2 (1866–1871), p. 57, no. 21, Thor Emil birth and baptism entry."},"confidence":"High","citations":[]},"B.1 Example 2":{"expected":{"title":"Norway, Akershus, Eidsvoll, Folketelling [census] 1875","abbrev":"Eidsvoll folketelling 1875","author":"Riksarkivet","pubinfo":"Database with images, Digitalarkivet (https://www.digitalarkivet.no).","callNumber":"AV/RA-S-2231/E","page":"district 009 Blegstad, p. 1270, household 01, person 006, Karen Indiana Evensdatter (tjenestepige, stated age 14) in Hansen household","frn":"Folketelling [census] 1875, Akershus fylke, Eidsvoll prestegjeld, Eidsvoll sokn, district 009 Blegstad, p. 1270, household no. 01, person no. 006, Karen Indiana Evensdatter (tjenestepige, stated age 14, in Jens Hansen's household); digital image, Digitalarkivet (https://www.digitalarkivet.no/ft20110110330371 : accessed 26 April 2026); transcribed entry at https://www.digitalarkivet.no/pf01052052005225; citing Riksarkivet, Statistisk sentralbyrå, Sosioøkonomiske emner, Folketellinger, boliger og boforhold, E: Folketellinger, source ID 52052; archive reference AV/RA-S-2231/E.","srn":"Eidsvoll folketelling 1875, p. 1270, household 01, Karen Indiana Evensdatter in Hansen household."},"confidence":"High","citations":[]},"B.1 Example 3":{"expected":{"title":"Norway, Akershus, Eidsvoll sorenskriveri, Skifteprotokoll [probate register] II 3, 1815–1825","abbrev":"Eidsvoll sorenskriveri skifteprotokoll II 3 (1815–1825)","author":"Eidsvoll sorenskriveri","pubinfo":"Digital images, Digitalarkivet (https://www.digitalarkivet.no).","callNumber":"AV/SAO-A-10063/H/Hb/L0003","page":"folio 145–148, Anders Hansen estate entry","frn":"Eidsvoll sorenskriveri [Eidsvoll district court], Skifteprotokoll [probate register] II 3, 1815–1825, fol. 145–148, estate inventory of Anders Hansen, Vinger gård, died 1822; digital image, Digitalarkivet (https://www.digitalarkivet.no/... : accessed 9 May 2026); citing Statsarkivet i Oslo, AV/SAO-A-10063/H/Hb/L0003.","srn":"Eidsvoll sorenskriveri skifteprotokoll II 3 (1815–1825), fol. 145–148, Anders Hansen estate entry."},"confidence":"High","citations":[]},"B.1 Example 4":{"expected":{"title":"Norway, Akershus amt, Eidsvoll prestegjeld, Matrikkel [land register] 1838","abbrev":"Eidsvoll matrikkel 1838","author":"Riksarkivet","pubinfo":"Database with images, Digitalarkivet (https://www.digitalarkivet.no).","page":"gård no. 234, Vinger gård, løpenummer 12, Anders Hansen matrikkel entry","frn":"Matrikkel [land register] 1838, Akershus amt, Eidsvoll prestegjeld, gård no. 234, Vinger gård, løpenummer 12, listed owner Anders Hansen; digital image, Digitalarkivet (https://www.digitalarkivet.no/... : accessed 9 May 2026); citing Riksarkivet.","srn":"Eidsvoll matrikkel 1838, gård 234 Vinger, løpenr. 12, Anders Hansen matrikkel entry."},"confidence":"High","citations":[]},"B.1 Example 5":{"expected":{"page":"confirmations, p. 88 (image 91), no. 14, Karen Indiana Evensdatter confirmation entry","frn":"Eidsvoll prestekontor, Klokkerbok [parish register (copy)] no. I 2, 1866–1871, confirmations section, p. 88, no. 14, Karen Indiana Evensdatter (daughter of Even Hansen), confirmed at Eidsvoll church 1869; digital image, Digitalarkivet (https://www.digitalarkivet.no/... : accessed 15 June 2026); citing Statsarkivet i Oslo, AV/SAO-A-10888/G/Ga/L0002.","srn":"Eidsvoll klokkerbok I 2 (1866–1871), confirmations, p. 88, no. 14, Karen Indiana Evensdatter confirmation entry."},"confidence":"High","citations":[]},"B.2 Example 1":{"expected":{"title":"Sweden, Värmland, Norra Ny, Husförhörslängder [household examinations] AI:11, 1812–1820","abbrev":"Norra Ny husförhörslängd AI:11 (1812–1820)","author":"Norra Ny församling","pubinfo":"Digital images, Riksarkivet (https://sok.riksarkivet.se).","callNumber":"SE/VA/13398/A I/11","page":"p. 8 (image 19), Per Persson household","frn":"Norra Ny församling, Husförhörslängder [household examinations], vol. AI:11 (1812–1820), p. 8, household of Per Persson, Ambjörby Torpare; digital image, Riksarkivet (https://sok.riksarkivet.se/bildvisning/C0038409_00019 : accessed 20 April 2026); citing Värmlandsarkiv, SE/VA/13398/A I/11.","srn":"Norra Ny husförhörslängd AI:11 (1812–1820), p. 8, Per Persson household."},"confidence":"High","citations":[]},"B.2 Example 2":{"expected":{"title":"Sweden, Värmland, Älvdals härad, Bouppteckningar [estate inventories] FII:26, 1832–1833","abbrev":"Älvdals häradsrätt bouppteckning FII:26 (1832–1833)","author":"Älvdals häradsrätt","pubinfo":"Digital images, ArkivDigital (https://www.arkivdigital.se).","callNumber":"SE/VA/11047/F II/26","page":"pp. 203–205, Per Persson estate inventory","frn":"Älvdals häradsrätt [Älvdal district court], Bouppteckningar [estate inventories], vol. FII:26 (1832–1833), pp. 203–205, estate inventory of Per Persson, Ambjörbymon, Norra Ny parish, died 5 May 1832; digital image, ArkivDigital (https://app.arkivdigital.se/volume/v48177?image=104 : accessed 20 April 2026); citing Värmlandsarkiv, SE/VA/11047/F II/26.","srn":"Älvdals häradsrätt bouppteckning FII:26 (1832–1833), pp. 203–205, Per Persson estate inventory."},"confidence":"High","citations":[]},"B.2 Example 3":{"expected":{"title":"Sweden, Värmland, Norra Ny, Folkräkning [census] 1880","abbrev":"Norra Ny folkräkning 1880","author":"Riksarkivet","pubinfo":"Database with images, Riksarkivet (https://sok.riksarkivet.se).","callNumber":"Folk_817085","page":"p. 4, row 33, family no. 1, Lars Persson Ambjörn household","frn":"Sveriges folkräkning 1880 [Swedish census 1880], Norra Ny församling, Värmlands län, p. 4, row 33, family no. 1, household of Lars Persson Ambjörn, Ambjörby; digital image, Riksarkivet (https://sok.riksarkivet.se/bildvisning/Folk_817085-004 : accessed 21 April 2026).","srn":"Norra Ny folkräkning 1880, p. 4, row 33, Lars Persson Ambjörn household."},"confidence":"High","citations":[]},"B.2 Example 4":{"expected":{"page":"p. 8 (image 19), Lars Persson confirmation entry","frn":"Norra Ny församling, Husförhörslängder [household examinations], vol. AI:11 (1812–1820), p. 8, confirmation entry of Lars Persson; digital image, Riksarkivet (https://sok.riksarkivet.se/... : accessed 20 April 2026); citing Värmlandsarkiv, SE/VA/13398/A I/11.","srn":"Norra Ny husförhörslängd AI:11 (1812–1820), p. 8, Lars Persson confirmation entry."},"confidence":"High","citations":[]},"B.2 Example 5":{"expected":{"title":"Sweden, Värmland, Norra Ny, laga skifte [statutory land enclosure], act 17-NON-148, 1856–1862","abbrev":"Norra Ny laga skifte 17-NON-148 (1856–1862)","author":"Lantmäterimyndigheten i Värmlands län","pubinfo":"Digital images, Lantmäteriet (https://historiskakartor.lantmateriet.se).","page":"delningsbeskrivning p. 40, Marit Andersdotter land allotment entry (Lott A, 64 öre 6 penningar)","frn":"Lantmäterimyndigheten i Värmlands län, laga skifte [statutory land enclosure], Ambjörby, Norra Ny socken, act 17-NON-148, surveyed 1856–1862 by O. Ignelius, confirmed by Älvdals övre tingslags egodelningsrätt 3 October 1863; delningsbeskrivning p. 40, land allotment (Lott A) of the minor Marit Andersdotter, 64 öre 6 penningar skatt; digital image, Lantmäteriet (https://historiskakartor.lantmateriet.se : accessed 16 June 2026).","srn":"Norra Ny laga skifte 17-NON-148 (1856–1862), delningsbeskrivning p. 40, Marit Andersdotter land allotment entry."},"confidence":"High","citations":[]},"B.3 Example 1":{"expected":{"title":"1920 U.S. Federal Census, St. Louis County, Minnesota","abbrev":"St. Louis Co., Minn., 1920 census","author":"Bureau of the Census","pubinfo":"Digital images, Ancestry (https://www.ancestry.com).","callNumber":"T625","page":"roll 859, ED 139, sheet 8A, dwelling [N], family [N], Steve Maisuk household","frn":"1920 U.S. census, St. Louis County, Minnesota, population schedule, Duluth, enumeration district 139, sheet 8A, dwelling [N], family [N], Steve Maisuk household; digital image, Ancestry (https://www.ancestry.com/... : accessed 6 May 2026); citing National Archives microfilm publication T625, roll 859.","srn":"1920 U.S. census, St. Louis Co., Minn., pop. sched., Duluth, ED 139, sheet 8A, Steve Maisuk household."},"confidence":"High","citations":[]},"B.3 Example 2":{"expected":{"title":"Minnesota, death certificates, 1908–2002","abbrev":"Minn. death certificates, 1908–2002","author":"Minnesota Department of Health, Vital Records","pubinfo":"Database with images, FamilySearch (https://www.familysearch.org).","callNumber":"","page":"certificate no. 1929-MN-XXXXXX, Per Larsson Grund death certificate","frn":"Minnesota, death certificate no. 1929-MN-XXXXXX (1929), Per Larsson Grund; Minnesota Department of Health, Vital Records; digital image, FamilySearch (https://www.familysearch.org/... : accessed 6 May 2026); citing Minnesota Historical Society.","srn":"Minn. death cert. 1929-MN-XXXXXX (1929), Per Larsson Grund."},"confidence":"Very High","citations":[]},"B.3 Example 3":{"expected":{"title":"Minnesota, St. Louis County, District Court, Naturalization Records, 1888–1955","abbrev":"St. Louis Co. naturalizations, 1888–1955","author":"St. Louis County District Court","pubinfo":"Digital images, Ancestry (https://www.ancestry.com).","page":"petition no. [N], Per Larsson naturalization petition","frn":"St. Louis County District Court (Duluth, Minnesota), Naturalization Records, petition no. [N] (1894), Per Larsson; digital image, Ancestry (https://www.ancestry.com/... : accessed 6 May 2026); citing Minnesota Historical Society.","srn":"St. Louis Co. natz., pet. no. [N] (1894), Per Larsson."},"confidence":"High","citations":[]},"B.3 Example 4":{"expected":{"title":"Minnesota, St. Louis County, Forest Hill Cemetery, Find a Grave Memorials","abbrev":"Forest Hill, Duluth, FAG","author":"","callNumber":"","pubinfo":"Database with images, Find a Grave (https://www.findagrave.com).","page":"memorial no. [N], Per Larsson Grund","frn":"Find a Grave, memorial no. [N], Per Larsson Grund (1848–1929), Forest Hill Cemetery, Duluth, St. Louis County, Minnesota; database with images, Find a Grave (https://www.findagrave.com/memorial/[N] : accessed 6 May 2026); marker photograph by [contributor name], [date].","srn":"FAG memorial [N], Per Larsson Grund, Forest Hill Cemetery."},"confidence":"High","citations":[]},"B.3 Example 5":{"expected":{"title":"World War II Draft Registration Cards, Minnesota","abbrev":"WWII draft cards, Minn.","author":"Selective Service System","pubinfo":"Digital images, FamilySearch (https://www.familysearch.org).","callNumber":"RG 147","page":"serial no. [N], Axel O. Grund WWII draft card","frn":"Selective Service System, World War II Draft Registration Cards, Minnesota, serial no. [N], Axel O. Grund (1942); digital image, FamilySearch (https://www.familysearch.org/... : accessed 6 May 2026); citing Record Group 147, National Archives.","srn":"WWII draft card, Minn., Axel O. Grund."},"confidence":"High","citations":[]},"B.3 Example 6":{"expected":{"title":"Applications for Headstones for U.S. Military Veterans, 1925–1941","abbrev":"Headstone applications, 1925–1941","author":"Office of the Quartermaster General","pubinfo":"Digital images, Ancestry (https://www.ancestry.com).","callNumber":"RG 92","page":"Axel O. Grund (d. 1948) headstone application","frn":"Office of the Quartermaster General, \"Applications for Headstones for U.S. Military Veterans, 1925–1941,\" application for Axel O. Grund, died 31 October 1948; digital image, Ancestry (https://www.ancestry.com/search/collections/2375/records/45037 : accessed 6 May 2026); citing NAID 596118, Record Group 92, National Archives at Washington, DC.","srn":"Headstone app., Axel O. Grund (d. 1948)."},"confidence":"Normal","citations":[]},"B.3 Example 7":{"expected":{"title":"Polk's Duluth City Directory, 1900","abbrev":"Polk's Duluth directory, 1900","author":"R. L. Polk & Co.","pubinfo":"Duluth: R. L. Polk & Co., 1900. Digital images, Ancestry (https://www.ancestry.com).","page":"p. 412, Per Larsson Grund directory entry","frn":"R. L. Polk & Co., Polk's Duluth City Directory, 1900 (Duluth: R. L. Polk & Co., 1900), p. 412, Per Larsson Grund; digital image, Ancestry (https://www.ancestry.com/... : accessed 6 May 2026).","srn":"Polk's Duluth dir., 1900, p. 412, Per Larsson Grund."},"confidence":"Normal","citations":[]},"B.3 Example 8":{"expected":{"title":"Duluth Herald, Duluth, Minnesota","abbrev":"Duluth Herald","pubinfo":"Digital images, Newspapers.com (https://www.newspapers.com).","author":"","callNumber":"","page":"14 July 1929, p. 7, col. 3, Per Larsson Grund obituary","frn":"\"Per L. Grund, Duluth Pioneer, Dies at Williams Farm,\" Duluth Herald (Duluth, Minnesota), 14 July 1929, p. 7, col. 3, Per Larsson Grund obituary; digital image, Newspapers.com (https://www.newspapers.com/... : accessed 6 May 2026).","srn":"Duluth Herald, 14 July 1929, p. 7, col. 3, Per Larsson Grund obituary."},"confidence":"Normal","citations":[]},"B.3 Example 9":{"expected":{"title":"Warren Sheaf, Warren, Minnesota","abbrev":"Warren Sheaf","pubinfo":"Digital images, Newspapers.com (https://www.newspapers.com).","page":"3 December 1908, p. 1, Grund-Hoiberg marriage announcement","frn":"\"[Headline if present],\" Warren Sheaf (Warren, Minnesota), 3 December 1908, p. 1, Grund-Hoiberg marriage announcement; digital image, Newspapers.com (https://www.newspapers.com/image/[N] : accessed 6 May 2026).","srn":"Warren Sheaf, 3 December 1908, p. 1, Grund-Hoiberg marriage announcement."},"confidence":"High","citations":[]},"B.3 Example 10":{"expected":{},"confidence":"","citations":[{"page":"17 May 1916, p. 7, Alma column, Peter Grund news mention","confidence":"Normal","frn":"\"Alma\" [column], Warren Sheaf (Warren, Minnesota), 17 May 1916, p. 7, Peter Grund news mention; digital image, Newspapers.com (https://www.newspapers.com/image/64259642 : accessed 6 May 2026).","srn":"Warren Sheaf, 17 May 1916, p. 7, Alma column, Peter Grund news mention."},{"page":"17 May 1916, p. 7, Alma column, John Olson news mention","confidence":"Normal","frn":"\"Alma\" [column], Warren Sheaf (Warren, Minnesota), 17 May 1916, p. 7, John Olson news mention; digital image, Newspapers.com (https://www.newspapers.com/image/64259642 : accessed 6 May 2026).","srn":"Warren Sheaf, 17 May 1916, p. 7, Alma column, John Olson news mention."}]},"B.3 Example 11":{"expected":{"title":"Minnesota, Marshall County, Warren, First Lutheran Church records","abbrev":"First Lutheran Church, Warren, Minn., records, 1800–1952","author":"First Lutheran Church, Warren","pubinfo":"Digital images, Ancestry (https://www.ancestry.com).","page":"death and burial register, p. 283 (image 496, right), Emma Söderström death and burial entry","frn":"First Lutheran Church (Warren, Marshall County, Minnesota), death and burial register, p. 283 (image 496, right), death and burial of Emma Söderström, died 7 May 1914, buried 9 May 1914; digital image, Ancestry (https://www.ancestry.com/search/collections/61584/records/63230716 : accessed 16 June 2026), \"U.S., Evangelical Lutheran Church in America, Swedish American Church Records, 1800–1952\"; citing Swenson Swedish Immigration Research Center, Augustana College, Rock Island, Illinois.","srn":"First Lutheran Church (Warren, Minn.), death and burial entry of Emma Söderström, p. 283."},"confidence":"Very High","citations":[]},"B.3 Example 12":{"expected":{"title":"Minnesota, Marshall County, District Court, Naturalization Records, 1853–1967","abbrev":"Marshall Co. naturalizations, 1853–1967","author":"Marshall County District Court","pubinfo":"Digital images, FamilySearch (https://www.familysearch.org).","callNumber":"SAM 227","page":"reel 4, final papers vol. C, p. 296 (image [I]), Peter L. Grund naturalization petition","frn":"Marshall County District Court (Warren, Minnesota), Naturalization Records, final papers vol. C, p. 296 (12 March 1897), Peter L. Grund; digital image, FamilySearch (https://www.familysearch.org/ark:/61903/3:1:... : accessed [date]), Image Group Number 101714756, image [I]; citing Minnesota Historical Society microfilm SAM 227, reel 4.","srn":"Marshall Co. natz., final papers vol. C, p. 296 (1897), Peter L. Grund."},"confidence":"High","citations":[]},"B.3 Example 13":{"expected":{"title":"Warren Sheaf, Warren, Minnesota","abbrev":"Warren Sheaf","pubinfo":"Digital images, Newspapers.com (https://www.newspapers.com).","author":"","callNumber":""},"confidence":"","citations":[{"page":"3 December 1908, p. 1, Grund-Hoiberg marriage announcement","confidence":"High","frn":"\"[Headline if present],\" Warren Sheaf (Warren, Minnesota), 3 December 1908, p. 1, Grund-Hoiberg marriage announcement; digital image, Newspapers.com (https://www.newspapers.com/image/[N] : accessed 6 May 2026).","srn":"Warren Sheaf, 3 December 1908, p. 1, Grund-Hoiberg marriage announcement."},{"page":"[date], p. [N], col. [N], [Name] obituary","confidence":"Normal","frn":"\"[Headline],\" Warren Sheaf (Warren, Minnesota), [date], p. [N], col. [N], [Name] obituary; Minnesota Historical Society microfilm.","srn":"Warren Sheaf, [date], p. [N], col. [N], [Name] obituary."}]},"B.3 Example 14":{"expected":{"title":"Warren Sheaf, Warren, Minnesota","abbrev":"Warren Sheaf","pubinfo":"Digital images, Newspapers.com (https://www.newspapers.com).","author":"","callNumber":"","page":"11 July 1917, p. 3, col. 1, Olaf Nygren household news mention (date and attendees)","frn":"\"This Honored Couple Celebrate Golden Wedding,\" Warren Sheaf (Warren, Minnesota), 11 July 1917, p. 3, col. 1, Olaf Nygren household news mention (documenting date and attendees); digital image, Newspapers.com (https://www.newspapers.com/article/warren-sheaf-mr-mrs-olaf-nygren-50th/12517574/ : accessed 4 October 2026).","srn":"Warren Sheaf, 11 July 1917, p. 3, col. 1, Olaf Nygren household news mention (date and attendees)."},"confidence":"Normal","citations":[]},"B.4 Family Bible":{"expected":{"title":"Grund Family Bible Records, 1848–1932","abbrev":"Grund Family Bible","author":"[Per Larsson Grund]","pubinfo":"","page":"family page 2, Per Larsson Grund birth entry","frn":"[Per Larsson Grund], compiler, Grund Family Bible Records, 1848–1932, in The Holy Bible Containing the Old and New Testaments (Stockholm: [Bible publisher], [year]), family page 2, entry for Per Larsson Grund born 14 January 1848 at Ambjörby, Norra Ny parish; privately held by Peter Grund, Duluth, Minnesota. Entries appear in two distinct hands: an early hand for events 1848–1880, a later hand for events 1881–1932. The earliest entries appear to have been copied into this Bible from an earlier family record after the Bible's purchase.","srn":"Grund Family Bible, family page 2, Per Larsson Grund birth entry."},"confidence":"High","citations":[]},"B.4 Funeral program":{"expected":{"title":"Funeral program, Thomas Emil Siggerud","abbrev":"Siggerud funeral program 1953","author":"Helgeson Funeral Home","pubinfo":"Williams, Minnesota: Helgeson Funeral Home, 16 February 1953.","page":"Thomas Emil Siggerud funeral program","frn":"Helgeson Funeral Home, \"In Memory of Thomas Emil Siggerud,\" funeral program for services held 16 February 1953 at Lutheran Church, Williams, Minnesota; Rev. Edstrom officiating; burial at Pine Hill Cemetery, Williams, Minnesota; privately held by Peter Grund, Duluth, Minnesota.","srn":"Siggerud funeral program 1953."},"confidence":"High","citations":[]},"B.4 Photograph":{"expected":{"title":"Per Larsson Grund cabinet card, ca. 1890s","abbrev":"Grund cabinet card 1890s","author":"","page":"cabinet card front, Per Larsson Grund portrait; inscription on mount, \"Grandma's Grandpa\"","frn":"Per Larsson Grund cabinet card portrait, ca. 1890s, taken at Miller Studio, St. Cloud, Minnesota; inscription on top of mount in cursive: \"Grandma's Grandpa\"; printed studio mark on bottom of mount: \"Miller\" (with M-M monogram), \"ST. CLOUD, MINN.\"; privately held by Peter Grund, Duluth, Minnesota. Subject identification is family attribution by inscription rather than caption with full name.","srn":"Per Larsson Grund cabinet card, ca. 1890s."},"confidence":"High","citations":[]},"B.4 Audio interview":{"expected":{"title":"Tom Grund interview by Peter Grund, 12 March 2024","abbrev":"Tom Grund interview 2024-03-12","author":"Tom Grund","pubinfo":"Recorded interview, Duluth, Minnesota, 12 March 2024.","page":"minute 23:15, Edmund Gene Grund's military service in WWII","frn":"Tom Grund (Duluth, Minnesota), recorded interview by Peter Grund, 12 March 2024; audio recording and transcript privately held by Peter Grund, [ADDRESS FOR PRIVATE USE,] Duluth, Minnesota; minute 23:15, on Edmund Gene Grund's WWII service. Tom is a son of Edmund Gene Grund and reports here on events he learned of from his parents (he was born after the war).","srn":"Tom Grund interview, 12 March 2024, minute 23:15."},"confidence":"Normal","citations":[]},"B.4 Personal research":{"expected":{"title":"Personal research of Siw Alfreddson, Ambjörby, Sweden","abbrev":"Alfreddson research","author":"Siw Alfreddson","pubinfo":"Unpublished research, Ambjörby, Sweden, 2024–2026.","page":"Ambmyra typed page, received 30 April 2026","frn":"Siw Alfreddson, personal research on the Grund family of Ambjörby, Sweden, accumulated 2024–2026, typed page on Ambmyra torpare holdings, received by Peter Grund via email 30 April 2026; privately held by Siw Alfreddson, Ambjörby, Sweden, with copies privately held by Peter Grund, Duluth, Minnesota. Siw's notes cite Norra Ny kyrkoarkiv volumes for each fact she records; for facts she draws from those primary records, the underlying primary record should also be cited directly when used in narrative.","srn":"Alfreddson research, Ambmyra typed page, received 30 April 2026."},"confidence":"Normal","citations":[]},"B.4 Published book":{"expected":{"title":"Eidsvoll Bygds Historie: Gardene på vestside av Vorma","abbrev":"Eidsvoll bygdebok 2:2","author":"Birger Kirkeby","pubinfo":"Vol. 2, pt. 2. Oslo: Eidsvoll Bygdebokkomite, 1959.","page":"pp. 432–440, Vinger gård entry","frn":"Birger Kirkeby, Eidsvoll Bygds Historie: Gardene på vestside av Vorma [Eidsvoll Parish History: The Farms on the West Side of the Vorma River], vol. 2, pt. 2 (Oslo: Eidsvoll Bygdebokkomite, 1959), pp. 432–440, \"Vinger gård.\"","srn":"Kirkeby, Eidsvoll bygdebok 2:2, pp. 432–440."},"confidence":"Normal","citations":[]},"B.4 Membership directory":{"expected":{"title":"Medlemmer av Den norske sakførerforening 1. juli 1950","abbrev":"Sakførerforening medlemmer 1950","author":"Den norske sakførerforening","pubinfo":"Oslo: Den norske sakførerforening, 1951. Digital images, Nasjonalbiblioteket (https://www.nb.no).","page":"p. 440 (image 443), Frithjof Siggerud directory entry","frn":"Den norske sakførerforening, Medlemmer av Den norske sakførerforening 1. juli 1950 [Members of the Norwegian Bar Association as of 1 July 1950] (Oslo: Den norske sakførerforening, 1951), p. 440, entry for Frithjof Siggerud; digital image, Nasjonalbiblioteket (https://www.nb.no/items/b3f9413b2125c7f26063abb8896d95bf?page=443 : accessed 26 April 2026).","srn":"Sakførerforening medlemmer 1950, p. 440, Frithjof Siggerud."},"confidence":"Normal","citations":[]},"B.4 School enrollment register":{"expected":{"title":"Elever ved Kristiania katedralskole som begynte på skolen i årene 1891–1901, hefte 8","abbrev":"Kristiania katedralskole 1891–1901","author":"Anders Langangen","pubinfo":"[Place]: [Publisher], [year]. Digital images, Nasjonalbiblioteket (https://www.nb.no).","page":"p. 112 (image 111), entry no. 498, Erling Frithjof Siggerud register entry","frn":"Anders Langangen, Elever ved Kristiania katedralskole som begynte på skolen i årene 1891–1901, hefte 8 [Pupils at Kristiania Cathedral School Who Began in the Years 1891–1901, Booklet 8] ([Place]: [Publisher], [year]), p. 112, entry no. 498, Erling Frithjof Siggerud; digital image, Nasjonalbiblioteket (https://www.nb.no : accessed 26 April 2026).","srn":"Langangen, Kristiania katedralskole 1891–1901, p. 112, no. 498, Erling Frithjof Siggerud."},"confidence":"Normal","citations":[]},"B.4 Online video":{"expected":{"title":"Norra Ny parish history walking tour","abbrev":"Norra Ny walking tour","author":"Värmland Local History Channel","pubinfo":"Online video, YouTube (https://www.youtube.com), 2025.","page":"minute 12:30–14:15, Ambjörby torpare landscape","frn":"Värmland Local History Channel, \"Norra Ny parish history walking tour,\" YouTube video (https://www.youtube.com/watch?v=[ID] : accessed 9 May 2026), minute 12:30–14:15, on the Ambjörby torpare landscape.","srn":"Värmland History YouTube, \"Norra Ny walking tour,\" minute 12:30–14:15."},"confidence":"Low","citations":[]}}};
+export const GUIDE = {"changed":"2026-10-13","refs":{"A1":{"title":"A1 · Source scoping","text":"A Source is the natural unit a researcher browses or pulls off the shelf. Scope down to that unit, and push everything more granular (rolls, pages, entries, memorial numbers) into the Citation page string."},"A2":{"title":"A2 · Citation date","text":"Leave the Citation date blank. The field is ambiguous (event, record creation, or access?). Every meaning already has a home below:"},"A3":{"title":"A3 · One citation vs. two","text":"Use one citation when all attached facts share the same evidence quality; use separate citations when they do not. The principle is Mills (EE 1.16): each piece of information in a source is appraised separately. Her example is a colonial South Carolina memorial covering the landowner's own acquisition (primary) and a hundred-year chain of title (secondary)."},"A4":{"title":"A4 · Locators","text":"A volume has two identifiers answering different questions. Keep each in its home and never mix them."},"A5":{"title":"A5 · Citation notes","text":"Source-level notes are optional; the Source fields carry the bibliographic data. Each Citation note holds:"},"A6":{"title":"A6 · Confidence","text":"Use the 5-level Gramps scale, anchored to EE's three axes: original vs. derivative source, primary vs. secondary information, direct vs. indirect evidence."},"A7":{"title":"A7 · Page string and attributes","text":"The page string says where the entry is in the Source, then what the citation is cited for: [locators] ([cited for]). The locators come from the chapter's §7. Locator words are lower case, even at the start of the page string (p. 57, image 62, certificate no. 1929-MN-XXXXXX, district 009 Blegstad). A record type with no locator (a headstone application, a compiled service record, a family letter) has only ([cited for])."},"A8":{"title":"A8 · Title","text":"Titles are EE locality-led: largest jurisdiction first, then record series/type and identifier, then year-range. A formal collection name may follow but never leads."},"A9":{"title":"A9 · Repository","text":"Decide in this order: A physical archive holds the original → name it (Statsarkivet i Oslo, Riksarkivet, Värmlandsarkiv, National Archives, [State] Historical Society, [County] County Courthouse, Family History Library when a microfilm number applies). A specific NARA facility goes in the FRN, not here. A family member or private party holds it → [Custodian], private collection (EE 4.24 to 4.29). It is a publication or online-only platform → blank. A website is a publication, not a repository (EE 2.34); the same holds for library-held books."},"A10":{"title":"A10 · Pubinfo","text":"Genealogical records: [medium], [platform] (homepage URL)."},"A11":{"title":"A11 · Bibliography","text":"Gramps fields are built for in-app display. For the book's bibliography, transform them into EE Source List Entries; never print the Title field directly."},"A12":{"title":"A12 · Privacy","text":"Apply EE 4.31 to living informants (interviewees, correspondents, custodians): keep their street address in working files, never in a published citation, while they are alive."},"A13":{"title":"A13 · Universal abbreviations","text":"Used in FRN, SRN, and Abbrev wherever a locator is needed (EE 2.53):"},"A14":{"title":"A14 · General form Pending review","text":"A record with no record type yet (a US deed, a power of attorney, a court order) is cited now from five questions and upgraded once its chapter has a rule (A15). Its citations carry the Gramps tag General form, so they can be found again."},"A15":{"title":"A15 · Rebuilding citations Pending review","text":"A rule change reaches the citations already in Gramps through Bifrost's rebuild, so a citation made under today's rules can be brought up to date later."},"C1":{"title":"C1 · Title","text":"Format: [Subject] [record-noun] [year]"},"C2":{"title":"C2 · Document type","text":"Classified by genealogical content, not by issuer."},"C3":{"title":"C3 · Date","text":"The underlying event's date when there is one; otherwise when the document was created or issued (C4 says which). Year only: use 1 January + qualifier year only (1 January is then a placeholder, never a real date). A range: use the start year; the range can go in the Title. This is separate from the Gramps Citation date, which stays blank (A2)."},"C4":{"title":"C4 · Date meaning","text":""},"C5":{"title":"C5 · Date qualifier","text":""},"C6":{"title":"C6 · Correspondent","text":"The digital provider hosting the image: a small, stable list matching the A10 platforms (FamilySearch, Ancestry, Digitalarkivet, Riksarkivet, ArkivDigital, Newspapers.com, Nasjonalbiblioteket, Lantmäteriet). A platform, never a physical archive or a person. Blank when the document did not come from a digital provider: microfilm read at a library, interviews, personal research, letters, and family-held artifacts."},"C7":{"title":"C7 · Tags","text":"Open (TBD). The worked examples use person, place, date, format, and status tags such as attributed."},"C8":{"title":"C8 · Source URL","text":"The canonical link that takes you back to the image or its indexed record. This deep link differs from Gramps Pubinfo, which holds only the homepage. Film read at a library has no link, so its Source URL is blank."},"C9":{"title":"C9 · Source URL access","text":""},"C10":{"title":"C10 · Permalink","text":"An alternative URL with a persistent identifier, only when the site advertises it as one: https://urn.digitalarkivet.no/URN:NBN:no-a1450-ft20101203340184.jpg · https://goto.digitalarkivet.no/kb20060926010303."},"C11":{"title":"C11 · Family group, Provenance, Physical location","text":""},"B.1 §1":{"title":"B.1 §1 · Scope","text":"One Source per archival volume / fond (A1). Record types covered: Parish records (kirkebøker): ministerialbok and klokkerbok; baptisms, confirmations, marriages, burials. Census (folketelling): the 1801 nominal census and the decennial 1865+ censuses. Court records (sorenskriverarkiv): tingbøker (court journals)."},"B.1 §2":{"title":"B.1 §2 · Source author","text":"Parish or court name alone, no country or umbrella prefix."},"B.1 §3":{"title":"B.1 §3 · Repository","text":""},"B.1 §4":{"title":"B.1 §4 · Source title","text":"Locality-led (A8), with the series in its Norwegian name followed by an English gloss in square brackets (EE 2.28), as in B.2 §4: Norway, [fylke or amt], [parish or court], [Norwegian series name] [English gloss] [volume], [year-range]. Capitalize the series name, and use the same gloss in the FRN and bibliography. Year-ranges follow the volume identifier with no parentheses (Digitalarkivet's own form), using en dashes."},"B.1 §5":{"title":"B.1 §5 · Locator tokens","text":""},"B.1 §6":{"title":"B.1 §6 · Pubinfo","text":""},"B.1 §7":{"title":"B.1 §7 · Page-string templates","text":""},"B.1 §8":{"title":"B.1 §8 · Confidence","text":""},"B.1 §9":{"title":"B.1 §9 · Subject vocabulary","text":"Record nouns (A7); the first is the default:"},"B.1 §10":{"title":"B.1 §10 · Abbrev","text":"House variation: the record-type word is lowercased (EE 2.29 keeps original capitals; lowercase gives visual contrast with the Title), and the Abbrev drops the gloss. Parish format: [Parish] [kirkebok|klokkerbok] [vol] ([year-range]). Court format: [Sorenskriveri] [tingbok|skifteprotokoll] [vol] ([year-range]). Unlike the Title, the Abbrev puts the year-range in parentheses."},"B.1 §11":{"title":"B.1 §11 · Bibliography","text":"A11 geographic form (EE 2.48): country, fylke, prestegjeld/herred, series + bracketed English gloss (EE 2.28), volume + years, repository + call number, medium, publisher, URL : year. Group under Norway:, alphabetize by fylke then prestegjeld."},"B.1 §12":{"title":"B.1 §12 · Worked examples","text":""},"B.2 §1":{"title":"B.2 §1 · Scope","text":"One Source per discrete NAD fond: each parish kyrkoarkiv volume series, each häradsrätt series, each SVAR database (A1). Record types covered: Parish records (kyrkoarkiv): Husförhörslängder (clerical survey), Lysnings- och Vigselbok (banns and marriage), Födelse- och dopböcker (birth and baptism), Dödbok (death/burial). Court records: Bouppteckningar (estate inventories) and other häradsrätt series. SVAR databases: Folkräkning (census) and other Riksarkivet databases."},"B.2 §2":{"title":"B.2 §2 · Source author","text":""},"B.2 §3":{"title":"B.2 §3 · Repository","text":""},"B.2 §4":{"title":"B.2 §4 · Source title","text":"Locality-led (A8), with the series in its original Swedish name followed by an English gloss in square brackets (EE 2.28): Sweden, [län], [parish or härad], [Swedish series name] [English gloss] [volume], [year-range]. Keep the series name's original capitalization, and use the same gloss as the FRN."},"B.2 §5":{"title":"B.2 §5 · Locator tokens","text":""},"B.2 §6":{"title":"B.2 §6 · Pubinfo","text":""},"B.2 §7":{"title":"B.2 §7 · Page-string templates","text":"Standard: p. [P] (image [I]), [entry]. Unpaginated fallback is image [I], [entry]. Each Source is one volume, so the volume is not repeated here (A4)."},"B.2 §8":{"title":"B.2 §8 · Confidence","text":""},"B.2 §9":{"title":"B.2 §9 · Subject vocabulary","text":"Record nouns (A7); the first is the default:"},"B.2 §10":{"title":"B.2 §10 · Abbrev","text":"Record-type word lowercased (Scandinavian house variation, see B.1 §10). Parish: [Parish] [record-type] [vol] ([years]). Court and other state records: [Creating body] [record-type] [vol] ([years]). Land survey: [Parish] [survey type] [act-no] ([years]). The SRN is built as in B.1 §10: the Abbrev, then the locators, then the subject."},"B.2 §11":{"title":"B.2 §11 · Bibliography","text":"A11 geographic form (EE 2.48) with bracketed English glosses (EE 2.28). Group under Sweden:, alphabetize by län then parish or härad. SVAR databases go in a trailing Online databases group by title, with no repository (EE 2.34, 11.53)."},"B.2 §12":{"title":"B.2 §12 · Worked examples","text":"Glosses (in the Title and at the series' first mention in the FRN; the Abbrev and SRN drop them): Husförhörslängder [household examinations] · Lysnings- och Vigselbok [banns and marriage book] · Födelse- och dopböcker [birth and baptism books] · Dödbok [death book] · Bouppteckningar [estate inventories] · Folkräkning [census] · laga skifte [statutory land enclosure]. These match EE 11.47, 11.50, 11.56."},"B.3 §1":{"title":"B.3 §1 · Scope","text":"One Source per unit a researcher browses on Ancestry/FamilySearch or pulls from an archive (A1)."},"B.3 §2":{"title":"B.3 §2 · Source author","text":"Bare body name: Bureau of the Census, never U.S. Bureau of the Census."},"B.3 §3":{"title":"B.3 §3 · Repository","text":""},"B.3 §4":{"title":"B.3 §4 · Source title","text":""},"B.3 §5":{"title":"B.3 §5 · Locator tokens","text":""},"B.3 §6":{"title":"B.3 §6 · Pubinfo","text":"[medium], [platform] (homepage URL). per A10. Examples: Digital images, Ancestry (https://www.ancestry.com). · Database with images, FamilySearch (https://www.familysearch.org). Published directories use the imprint variant (Example 7). Newspapers read on a library's film use Microfilm, Minnesota Historical Society.; a title read both there and online is one Source, and A10 picks its Pubinfo (Example 13). For church records, the named digitized collection (e.g. \"U.S., Evangelical Lutheran Church in America, Swedish American Church Records, 1800–1952\") goes in the FRN, not Pubinfo."},"B.3 §7":{"title":"B.3 §7 · Page-string templates","text":""},"B.3 §8":{"title":"B.3 §8 · Confidence","text":""},"B.3 §9":{"title":"B.3 §9 · Subject vocabulary","text":"Record nouns (A7); the first is the default. Passenger manifest and Find a Grave memorial take no noun: the list or memorial number says what it is."},"B.3 §10":{"title":"B.3 §10 · Abbrev","text":"The US Abbrev keeps whole readable words (St. Louis Co. naturalizations, 1888–1955); heavier abbreviation belongs in the SRN (St. Louis Co. natz.)."},"B.3 §11":{"title":"B.3 §11 · Bibliography","text":"A11 geographic form: [State]. [County]. [Locality/series]. [Series] [volume] ([years]). [Repository], [call number]. [Medium]. [Publisher]. [URL] : [year]. Group under a state header, alphabetize by county. Directories go by publisher (EE 2.46); online-only databases in a trailing group by title."},"B.3 §12":{"title":"B.3 §12 · Worked examples","text":""},"B.4 §1":{"title":"B.4 §1 · Scope","text":"Published works scope by bibliographic unit, artifacts by physical thing, interviews by event (A1)."},"B.4 §2":{"title":"B.4 §2 · Source author","text":""},"B.4 §3":{"title":"B.4 §3 · Repository","text":""},"B.4 §4":{"title":"B.4 §4 · Source title","text":"Most titles here are author-led or artifact-led, not locality-led, because these sources are arranged by author, collection, or custodian (A11). A place-focused history shelved with locality material may use the A8 form. Foreign titles take a bracketed English gloss in the FRN (EE 2.28)."},"B.4 §5":{"title":"B.4 §5 · Locator tokens","text":""},"B.4 §6":{"title":"B.4 §6 · Pubinfo","text":""},"B.4 §7":{"title":"B.4 §7 · Page-string templates","text":""},"B.4 §8":{"title":"B.4 §8 · Confidence","text":""},"B.4 §9":{"title":"B.4 §9 · Subject vocabulary","text":"Record nouns (A7); the first is the default, and (none) means the noun may be left off:"},"B.4 §10":{"title":"B.4 §10 · Abbrev Pending review","text":"Shortest unambiguous work title or artifact identity + year or volume, whole words (heavier abbreviation goes in the SRN):"},"B.4 §11":{"title":"B.4 §11 · Bibliography","text":"Arranged by author (EE 2.46), collection (EE 2.47), or custodian (EE 4.24 to 4.29), not by locality. Authored publications sit alphabetically in the main body; artifacts, interviews, and personal research get trailing headings."},"B.4 §12":{"title":"B.4 §12 · Worked examples","text":"Ordered by EE chapter (4 artifacts, then 13 published works)."}},"examples":{"B.1 Example 1":{"expected":{"title":"Norway, Akershus, Eidsvoll, Klokkerbok [parish register (copy)] I 2, 1866–1871","abbrev":"Eidsvoll klokkerbok I 2 (1866–1871)","author":"Eidsvoll prestekontor","pubinfo":"Digital images, Digitalarkivet (https://www.digitalarkivet.no).","callNumber":"AV/SAO-A-10888/G/Ga/L0002","page":"p. 57 (image 62), no. 21 (birth and baptism)","frn":"Eidsvoll prestekontor, Klokkerbok [parish register (copy)] no. I 2, 1866–1871, p. 57, no. 21, Thor Emil (born 1 September 1869; baptized 16 January 1870), son of Christian Henningsen and Anne Marthe Bergersdatter, baptized at Eidsvoll church; digital image, Digitalarkivet (https://urn.digitalarkivet.no/URN:NBN:no-a1450-kb20060313011115.jpg : accessed 17 April 2026); citing Statsarkivet i Oslo, AV/SAO-A-10888/G/Ga/L0002.","srn":"Eidsvoll klokkerbok I 2 (1866–1871), p. 57, no. 21, Thor Emil birth and baptism entry."},"confidence":"High","citations":[]},"B.1 Example 2":{"expected":{"title":"Norway, Akershus, Eidsvoll, Folketelling [census] 1875","abbrev":"Eidsvoll folketelling 1875","author":"Riksarkivet","pubinfo":"Database with images, Digitalarkivet (https://www.digitalarkivet.no).","callNumber":"AV/RA-S-2231/E","page":"district 009 Blegstad, p. 1270, household 01, person 006 (residence)","frn":"Folketelling [census] 1875, Akershus fylke, Eidsvoll prestegjeld, Eidsvoll sokn, district 009 Blegstad, p. 1270, household no. 01, person no. 006, Karen Indiana Evensdatter (tjenestepige, stated age 14, in Jens Hansen's household); digital image, Digitalarkivet (https://www.digitalarkivet.no/ft20110110330371 : accessed 26 April 2026); transcribed entry at https://www.digitalarkivet.no/pf01052052005225; citing Riksarkivet, Statistisk sentralbyrå, Sosioøkonomiske emner, Folketellinger, boliger og boforhold, E: Folketellinger, source ID 52052; archive reference AV/RA-S-2231/E.","srn":"Eidsvoll folketelling 1875, p. 1270, household 01, Karen Indiana Evensdatter in Hansen household."},"confidence":"High","citations":[]},"B.1 Example 3":{"expected":{"title":"Norway, Akershus, Eidsvoll sorenskriveri, Skifteprotokoll [probate register] II 3, 1815–1825","abbrev":"Eidsvoll sorenskriveri skifteprotokoll II 3 (1815–1825)","author":"Eidsvoll sorenskriveri","pubinfo":"Digital images, Digitalarkivet (https://www.digitalarkivet.no).","callNumber":"AV/SAO-A-10063/H/Hb/L0003","page":"folio 145–148 (estate)","frn":"Eidsvoll sorenskriveri [Eidsvoll district court], Skifteprotokoll [probate register] II 3, 1815–1825, fol. 145–148, estate inventory of Anders Hansen, Vinger gård, died 1822; digital image, Digitalarkivet (https://www.digitalarkivet.no/... : accessed 9 May 2026); citing Statsarkivet i Oslo, AV/SAO-A-10063/H/Hb/L0003.","srn":"Eidsvoll sorenskriveri skifteprotokoll II 3 (1815–1825), fol. 145–148, Anders Hansen estate entry."},"confidence":"High","citations":[]},"B.1 Example 4":{"expected":{"title":"Norway, Akershus amt, Eidsvoll prestegjeld, Matrikkel [land register] 1838","abbrev":"Eidsvoll matrikkel 1838","author":"Riksarkivet","pubinfo":"Database with images, Digitalarkivet (https://www.digitalarkivet.no).","page":"gård no. 234, Vinger gård, løpenummer 12 (land holding)","frn":"Matrikkel [land register] 1838, Akershus amt, Eidsvoll prestegjeld, gård no. 234, Vinger gård, løpenummer 12, listed owner Anders Hansen; digital image, Digitalarkivet (https://www.digitalarkivet.no/... : accessed 9 May 2026); citing Riksarkivet.","srn":"Eidsvoll matrikkel 1838, gård 234 Vinger, løpenr. 12, Anders Hansen matrikkel entry."},"confidence":"High","citations":[]},"B.1 Example 5":{"expected":{"page":"confirmations, p. 88 (image 91), no. 14 (confirmation)","frn":"Eidsvoll prestekontor, Klokkerbok [parish register (copy)] no. I 2, 1866–1871, confirmations section, p. 88, no. 14, Karen Indiana Evensdatter (daughter of Even Hansen), confirmed at Eidsvoll church 1869; digital image, Digitalarkivet (https://www.digitalarkivet.no/... : accessed 15 June 2026); citing Statsarkivet i Oslo, AV/SAO-A-10888/G/Ga/L0002.","srn":"Eidsvoll klokkerbok I 2 (1866–1871), confirmations, p. 88, no. 14, Karen Indiana Evensdatter confirmation entry."},"confidence":"High","citations":[]},"B.2 Example 1":{"expected":{"title":"Sweden, Värmland, Norra Ny, Husförhörslängder [household examinations] AI:11, 1812–1820","abbrev":"Norra Ny husförhörslängd AI:11 (1812–1820)","author":"Norra Ny församling","pubinfo":"Digital images, Riksarkivet (https://sok.riksarkivet.se).","callNumber":"SE/VA/13398/A I/11","page":"p. 8 (image 19) (residence)","frn":"Norra Ny församling, Husförhörslängder [household examinations], vol. AI:11 (1812–1820), p. 8, household of Per Persson, Ambjörby Torpare; digital image, Riksarkivet (https://sok.riksarkivet.se/bildvisning/C0038409_00019 : accessed 20 April 2026); citing Värmlandsarkiv, SE/VA/13398/A I/11.","srn":"Norra Ny husförhörslängd AI:11 (1812–1820), p. 8, Per Persson household."},"confidence":"High","citations":[]},"B.2 Example 2":{"expected":{"title":"Sweden, Värmland, Älvdals härad, Bouppteckningar [estate inventories] FII:26, 1832–1833","abbrev":"Älvdals häradsrätt bouppteckning FII:26 (1832–1833)","author":"Älvdals häradsrätt","pubinfo":"Digital images, ArkivDigital (https://www.arkivdigital.se).","callNumber":"SE/VA/11047/F II/26","page":"pp. 203–205 (estate)","frn":"Älvdals häradsrätt [Älvdal district court], Bouppteckningar [estate inventories], vol. FII:26 (1832–1833), pp. 203–205, estate inventory of Per Persson, Ambjörbymon, Norra Ny parish, died 5 May 1832; digital image, ArkivDigital (https://app.arkivdigital.se/volume/v48177?image=104 : accessed 20 April 2026); citing Värmlandsarkiv, SE/VA/11047/F II/26.","srn":"Älvdals häradsrätt bouppteckning FII:26 (1832–1833), pp. 203–205, Per Persson estate inventory."},"confidence":"High","citations":[]},"B.2 Example 3":{"expected":{"title":"Sweden, Värmland, Norra Ny, Folkräkning [census] 1880","abbrev":"Norra Ny folkräkning 1880","author":"Riksarkivet","pubinfo":"Database with images, Riksarkivet (https://sok.riksarkivet.se).","callNumber":"Folk_817085","page":"p. 4, row 33, family no. 1 (residence)","frn":"Sveriges folkräkning 1880 [Swedish census 1880], Norra Ny församling, Värmlands län, p. 4, row 33, family no. 1, household of Lars Persson Ambjörn, Ambjörby; digital image, Riksarkivet (https://sok.riksarkivet.se/bildvisning/Folk_817085-004 : accessed 21 April 2026).","srn":"Norra Ny folkräkning 1880, p. 4, row 33, Lars Persson Ambjörn household."},"confidence":"High","citations":[]},"B.2 Example 4":{"expected":{"page":"p. 8 (image 19) (confirmation)","frn":"Norra Ny församling, Husförhörslängder [household examinations], vol. AI:11 (1812–1820), p. 8, confirmation entry of Lars Persson; digital image, Riksarkivet (https://sok.riksarkivet.se/... : accessed 20 April 2026); citing Värmlandsarkiv, SE/VA/13398/A I/11.","srn":"Norra Ny husförhörslängd AI:11 (1812–1820), p. 8, Lars Persson confirmation entry."},"confidence":"High","citations":[]},"B.2 Example 5":{"expected":{"title":"Sweden, Värmland, Norra Ny, laga skifte [statutory land enclosure], act 17-NON-148, 1856–1862","abbrev":"Norra Ny laga skifte 17-NON-148 (1856–1862)","author":"Lantmäterimyndigheten i Värmlands län","pubinfo":"Digital images, Lantmäteriet (https://historiskakartor.lantmateriet.se).","page":"delningsbeskrivning p. 40 (land allotment)","frn":"Lantmäterimyndigheten i Värmlands län, laga skifte [statutory land enclosure], Ambjörby, Norra Ny socken, act 17-NON-148, surveyed 1856–1862 by O. Ignelius, confirmed by Älvdals övre tingslags egodelningsrätt 3 October 1863; delningsbeskrivning p. 40, land allotment (Lott A) of the minor Marit Andersdotter, 64 öre 6 penningar skatt; digital image, Lantmäteriet (https://historiskakartor.lantmateriet.se : accessed 16 June 2026).","srn":"Norra Ny laga skifte 17-NON-148 (1856–1862), delningsbeskrivning p. 40, Marit Andersdotter land allotment entry."},"confidence":"High","citations":[]},"B.3 Example 1":{"expected":{"title":"1920 U.S. Federal Census, St. Louis County, Minnesota","abbrev":"St. Louis Co., Minn., 1920 census","author":"Bureau of the Census","pubinfo":"Digital images, Ancestry (https://www.ancestry.com).","callNumber":"T625","page":"roll 859, ED 139, sheet 8A, dwelling [N], family [N] (residence)","frn":"1920 U.S. census, St. Louis County, Minnesota, population schedule, Duluth, enumeration district 139, sheet 8A, dwelling [N], family [N], Steve Maisuk household; digital image, Ancestry (https://www.ancestry.com/... : accessed 6 May 2026); citing National Archives microfilm publication T625, roll 859.","srn":"1920 U.S. census, St. Louis Co., Minn., pop. sched., Duluth, ED 139, sheet 8A, Steve Maisuk household."},"confidence":"High","citations":[]},"B.3 Example 2":{"expected":{"title":"Minnesota, death certificates, 1908–2002","abbrev":"Minn. death certificates, 1908–2002","author":"Minnesota Department of Health, Vital Records","pubinfo":"Database with images, FamilySearch (https://www.familysearch.org).","callNumber":"","page":"certificate no. 1929-MN-XXXXXX (death)","frn":"Minnesota, death certificate no. 1929-MN-XXXXXX (1929), Per Larsson Grund; Minnesota Department of Health, Vital Records; digital image, FamilySearch (https://www.familysearch.org/... : accessed 6 May 2026); citing Minnesota Historical Society.","srn":"Minn. death cert. 1929-MN-XXXXXX (1929), Per Larsson Grund."},"confidence":"Very High","citations":[]},"B.3 Example 3":{"expected":{"title":"Minnesota, St. Louis County, District Court, Naturalization Records, 1888–1955","abbrev":"St. Louis Co. naturalizations, 1888–1955","author":"St. Louis County District Court","pubinfo":"Digital images, Ancestry (https://www.ancestry.com).","page":"petition no. [N] (naturalization)","frn":"St. Louis County District Court (Duluth, Minnesota), Naturalization Records, petition no. [N] (1894), Per Larsson; digital image, Ancestry (https://www.ancestry.com/... : accessed 6 May 2026); citing Minnesota Historical Society.","srn":"St. Louis Co. natz., pet. no. [N] (1894), Per Larsson."},"confidence":"High","citations":[]},"B.3 Example 4":{"expected":{"title":"Minnesota, St. Louis County, Forest Hill Cemetery, Find a Grave Memorials","abbrev":"Forest Hill, Duluth, FAG","author":"","callNumber":"","pubinfo":"Database with images, Find a Grave (https://www.findagrave.com).","page":"memorial no. [N] (burial)","frn":"Find a Grave, memorial no. [N], Per Larsson Grund (1848–1929), Forest Hill Cemetery, Duluth, St. Louis County, Minnesota; database with images, Find a Grave (https://www.findagrave.com/memorial/[N] : accessed 6 May 2026); marker photograph by [contributor name], [date].","srn":"FAG memorial [N], Per Larsson Grund, Forest Hill Cemetery."},"confidence":"High","citations":[]},"B.3 Example 5":{"expected":{"title":"World War II Draft Registration Cards, Minnesota","abbrev":"WWII draft cards, Minn.","author":"Selective Service System","pubinfo":"Digital images, FamilySearch (https://www.familysearch.org).","callNumber":"RG 147","page":"serial no. [N] (draft registration)","frn":"Selective Service System, World War II Draft Registration Cards, Minnesota, serial no. [N], Axel O. Grund (1942); digital image, FamilySearch (https://www.familysearch.org/... : accessed 6 May 2026); citing Record Group 147, National Archives.","srn":"WWII draft card, Minn., Axel O. Grund."},"confidence":"High","citations":[]},"B.3 Example 6":{"expected":{"title":"Applications for Headstones for U.S. Military Veterans, 1925–1941","abbrev":"Headstone applications, 1925–1941","author":"Office of the Quartermaster General","pubinfo":"Digital images, Ancestry (https://www.ancestry.com).","callNumber":"RG 92","page":"(burial)","frn":"Office of the Quartermaster General, \"Applications for Headstones for U.S. Military Veterans, 1925–1941,\" application for Axel O. Grund, died 31 October 1948; digital image, Ancestry (https://www.ancestry.com/search/collections/2375/records/45037 : accessed 6 May 2026); citing NAID 596118, Record Group 92, National Archives at Washington, DC.","srn":"Headstone app., Axel O. Grund (d. 1948)."},"confidence":"Normal","citations":[]},"B.3 Example 7":{"expected":{"title":"Polk's Duluth City Directory, 1900","abbrev":"Polk's Duluth directory, 1900","author":"R. L. Polk & Co.","pubinfo":"Duluth: R. L. Polk & Co., 1900. Digital images, Ancestry (https://www.ancestry.com).","page":"p. 412 (residence)","frn":"R. L. Polk & Co., Polk's Duluth City Directory, 1900 (Duluth: R. L. Polk & Co., 1900), p. 412, Per Larsson Grund; digital image, Ancestry (https://www.ancestry.com/... : accessed 6 May 2026).","srn":"Polk's Duluth dir., 1900, p. 412, Per Larsson Grund."},"confidence":"Normal","citations":[]},"B.3 Example 8":{"expected":{"title":"Duluth Herald, Duluth, Minnesota","abbrev":"Duluth Herald","pubinfo":"Digital images, Newspapers.com (https://www.newspapers.com).","author":"","callNumber":"","page":"14 July 1929, p. 7, col. 3 (death)","frn":"\"Per L. Grund, Duluth Pioneer, Dies at Williams Farm,\" Duluth Herald (Duluth, Minnesota), 14 July 1929, p. 7, col. 3, Per Larsson Grund obituary; digital image, Newspapers.com (https://www.newspapers.com/... : accessed 6 May 2026).","srn":"Duluth Herald, 14 July 1929, p. 7, col. 3, Per Larsson Grund obituary."},"confidence":"Normal","citations":[]},"B.3 Example 9":{"expected":{"title":"Warren Sheaf, Warren, Minnesota","abbrev":"Warren Sheaf","pubinfo":"Digital images, Newspapers.com (https://www.newspapers.com).","page":"3 December 1908, p. 1 (marriage)","frn":"\"[Headline if present],\" Warren Sheaf (Warren, Minnesota), 3 December 1908, p. 1, Grund-Hoiberg marriage announcement; digital image, Newspapers.com (https://www.newspapers.com/image/[N] : accessed 6 May 2026).","srn":"Warren Sheaf, 3 December 1908, p. 1, Grund-Hoiberg marriage announcement."},"confidence":"High","citations":[]},"B.3 Example 10":{"expected":{},"confidence":"","citations":[{"page":"17 May 1916, p. 7, Alma column (lost horse)","confidence":"Normal","frn":"\"Alma\" [column], Warren Sheaf (Warren, Minnesota), 17 May 1916, p. 7, Peter Grund news mention (documenting lost horse); digital image, Newspapers.com (https://www.newspapers.com/image/64259642 : accessed 6 May 2026).","srn":"Warren Sheaf, 17 May 1916, p. 7, Alma column, Peter Grund news mention (lost horse)."},{"page":"17 May 1916, p. 7, Alma column (visit to John Nilson)","confidence":"Normal","frn":"\"Alma\" [column], Warren Sheaf (Warren, Minnesota), 17 May 1916, p. 7, John Olson news mention (documenting visit to John Nilson); digital image, Newspapers.com (https://www.newspapers.com/image/64259642 : accessed 6 May 2026).","srn":"Warren Sheaf, 17 May 1916, p. 7, Alma column, John Olson news mention (visit to John Nilson)."}]},"B.3 Example 11":{"expected":{"title":"Minnesota, Marshall County, Warren, First Lutheran Church records","abbrev":"First Lutheran Church, Warren, Minn., records, 1800–1952","author":"First Lutheran Church, Warren","pubinfo":"Digital images, Ancestry (https://www.ancestry.com).","page":"death and burial register, p. 283 (image 496, right) (death and burial)","frn":"First Lutheran Church (Warren, Marshall County, Minnesota), death and burial register, p. 283 (image 496, right), death and burial of Emma Söderström, died 7 May 1914, buried 9 May 1914; digital image, Ancestry (https://www.ancestry.com/search/collections/61584/records/63230716 : accessed 16 June 2026), \"U.S., Evangelical Lutheran Church in America, Swedish American Church Records, 1800–1952\"; citing Swenson Swedish Immigration Research Center, Augustana College, Rock Island, Illinois.","srn":"First Lutheran Church (Warren, Minn.), death and burial entry of Emma Söderström, p. 283."},"confidence":"Very High","citations":[]},"B.3 Example 12":{"expected":{"title":"Minnesota, Marshall County, District Court, Naturalization Records, 1853–1967","abbrev":"Marshall Co. naturalizations, 1853–1967","author":"Marshall County District Court","pubinfo":"Digital images, FamilySearch (https://www.familysearch.org).","callNumber":"SAM 227","page":"reel 4, final papers vol. C, p. 296 (image [I]) (naturalization)","frn":"Marshall County District Court (Warren, Minnesota), Naturalization Records, final papers vol. C, p. 296 (12 March 1897), Peter L. Grund; digital image, FamilySearch (https://www.familysearch.org/ark:/61903/3:1:... : accessed [date]), Image Group Number 101714756, image [I]; citing Minnesota Historical Society microfilm SAM 227, reel 4.","srn":"Marshall Co. natz., final papers vol. C, p. 296 (1897), Peter L. Grund."},"confidence":"High","citations":[]},"B.3 Example 13":{"expected":{"title":"Warren Sheaf, Warren, Minnesota","abbrev":"Warren Sheaf","pubinfo":"Digital images, Newspapers.com (https://www.newspapers.com).","author":"","callNumber":""},"confidence":"","citations":[{"page":"3 December 1908, p. 1 (marriage)","confidence":"High","frn":"\"[Headline if present],\" Warren Sheaf (Warren, Minnesota), 3 December 1908, p. 1, Grund-Hoiberg marriage announcement; digital image, Newspapers.com (https://www.newspapers.com/image/[N] : accessed 6 May 2026).","srn":"Warren Sheaf, 3 December 1908, p. 1, Grund-Hoiberg marriage announcement."},{"page":"[date], p. [N], col. [N] (death)","confidence":"Normal","frn":"\"[Headline],\" Warren Sheaf (Warren, Minnesota), [date], p. [N], col. [N], [Name] obituary; Minnesota Historical Society microfilm.","srn":"Warren Sheaf, [date], p. [N], col. [N], [Name] obituary."}]},"B.3 Example 14":{"expected":{"title":"Warren Sheaf, Warren, Minnesota","abbrev":"Warren Sheaf","pubinfo":"Digital images, Newspapers.com (https://www.newspapers.com).","author":"","callNumber":"","page":"11 July 1917, p. 3, col. 1 (date and attendees)","frn":"\"This Honored Couple Celebrate Golden Wedding,\" Warren Sheaf (Warren, Minnesota), 11 July 1917, p. 3, col. 1, Olaf Nygren household news mention (documenting date and attendees); digital image, Newspapers.com (https://www.newspapers.com/article/warren-sheaf-mr-mrs-olaf-nygren-50th/12517574/ : accessed 4 October 2026).","srn":"Warren Sheaf, 11 July 1917, p. 3, col. 1, Olaf Nygren household news mention (date and attendees)."},"confidence":"Normal","citations":[]},"B.4 Photograph":{"expected":{"title":"Per Larsson Grund cabinet card, ca. 1890s","abbrev":"Grund cabinet card 1890s","author":"","page":"cabinet card front; inscription on mount, \"Grandma's Grandpa\" ([Cited for])","frn":"Per Larsson Grund cabinet card portrait, ca. 1890s, taken at Miller Studio, St. Cloud, Minnesota; inscription on top of mount in cursive: \"Grandma's Grandpa\"; printed studio mark on bottom of mount: \"Miller\" (with M-M monogram), \"ST. CLOUD, MINN.\"; privately held by Peter Grund, Duluth, Minnesota. Subject identification is family attribution by inscription rather than caption with full name.","srn":"Per Larsson Grund cabinet card, ca. 1890s."},"confidence":"High","citations":[]},"B.4 Audio interview":{"expected":{"title":"Tom Grund interview by Peter Grund, 12 March 2024","abbrev":"Tom Grund interview 2024-03-12","author":"Tom Grund","pubinfo":"Recorded interview, Duluth, Minnesota, 12 March 2024.","page":"minute 23:15 ([Cited for])","frn":"Tom Grund (Duluth, Minnesota), recorded interview by Peter Grund, 12 March 2024; audio recording and transcript privately held by Peter Grund, [ADDRESS FOR PRIVATE USE,] Duluth, Minnesota; minute 23:15, on Edmund Gene Grund's WWII service. Tom is a son of Edmund Gene Grund and reports here on events he learned of from his parents (he was born after the war).","srn":"Tom Grund interview, 12 March 2024, minute 23:15."},"confidence":"Normal","citations":[]},"B.4 Personal research":{"expected":{"title":"Personal research of Siw Alfreddson, Ambjörby, Sweden","abbrev":"Alfreddson research","author":"Siw Alfreddson","pubinfo":"Unpublished research, Ambjörby, Sweden, 2024–2026.","page":"Ambmyra typed page, received 30 April 2026 ([Cited for])","frn":"Siw Alfreddson, personal research on the Grund family of Ambjörby, Sweden, accumulated 2024–2026, typed page on Ambmyra torpare holdings, received by Peter Grund via email 30 April 2026; privately held by Siw Alfreddson, Ambjörby, Sweden, with copies privately held by Peter Grund, Duluth, Minnesota. Siw's notes cite Norra Ny kyrkoarkiv volumes for each fact she records; for facts she draws from those primary records, the underlying primary record should also be cited directly when used in narrative.","srn":"Alfreddson research, Ambmyra typed page, received 30 April 2026."},"confidence":"Normal","citations":[]},"B.4 Published book":{"expected":{"title":"Eidsvoll Bygds Historie: Gardene på vestside av Vorma","abbrev":"Eidsvoll bygdebok 2:2","author":"Birger Kirkeby","pubinfo":"Vol. 2, pt. 2. Oslo: Eidsvoll Bygdebokkomite, 1959.","page":"pp. 432–440 ([Cited for])","frn":"Birger Kirkeby, Eidsvoll Bygds Historie: Gardene på vestside av Vorma [Eidsvoll Parish History: The Farms on the West Side of the Vorma River], vol. 2, pt. 2 (Oslo: Eidsvoll Bygdebokkomite, 1959), pp. 432–440, \"Vinger gård.\"","srn":"Kirkeby, Eidsvoll bygdebok 2:2, pp. 432–440."},"confidence":"Normal","citations":[]},"B.4 Membership directory":{"expected":{"title":"Medlemmer av Den norske sakførerforening 1. juli 1950","abbrev":"Sakførerforening medlemmer 1950","author":"Den norske sakførerforening","pubinfo":"Oslo: Den norske sakførerforening, 1951. Digital images, Nasjonalbiblioteket (https://www.nb.no).","page":"p. 440 (image 443) (residence)","frn":"Den norske sakførerforening, Medlemmer av Den norske sakførerforening 1. juli 1950 [Members of the Norwegian Bar Association as of 1 July 1950] (Oslo: Den norske sakførerforening, 1951), p. 440, entry for Frithjof Siggerud; digital image, Nasjonalbiblioteket (https://www.nb.no/items/b3f9413b2125c7f26063abb8896d95bf?page=443 : accessed 26 April 2026).","srn":"Sakførerforening medlemmer 1950, p. 440, Frithjof Siggerud."},"confidence":"Normal","citations":[]},"B.4 School enrollment register":{"expected":{"title":"Elever ved Kristiania katedralskole som begynte på skolen i årene 1891–1901, hefte 8","abbrev":"Kristiania katedralskole 1891–1901","author":"Anders Langangen","pubinfo":"[Place]: [Publisher], [year]. Digital images, Nasjonalbiblioteket (https://www.nb.no).","page":"p. 112 (image 111), entry no. 498 ([Cited for])","frn":"Anders Langangen, Elever ved Kristiania katedralskole som begynte på skolen i årene 1891–1901, hefte 8 [Pupils at Kristiania Cathedral School Who Began in the Years 1891–1901, Booklet 8] ([Place]: [Publisher], [year]), p. 112, entry no. 498, Erling Frithjof Siggerud; digital image, Nasjonalbiblioteket (https://www.nb.no : accessed 26 April 2026).","srn":"Langangen, Kristiania katedralskole 1891–1901, p. 112, no. 498, Erling Frithjof Siggerud."},"confidence":"Normal","citations":[]},"B.4 Online video":{"expected":{"title":"Norra Ny parish history walking tour","abbrev":"Norra Ny walking tour","author":"Värmland Local History Channel","pubinfo":"Online video, YouTube (https://www.youtube.com), 2025.","page":"minute 12:30–14:15 ([Cited for])","frn":"Värmland Local History Channel, \"Norra Ny parish history walking tour,\" YouTube video (https://www.youtube.com/watch?v=[ID] : accessed 9 May 2026), minute 12:30–14:15, on the Ambjörby torpare landscape.","srn":"Värmland History YouTube, \"Norra Ny walking tour,\" minute 12:30–14:15."},"confidence":"Low","citations":[]}}};

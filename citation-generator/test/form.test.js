@@ -12,10 +12,11 @@ const allRows = (type, draft) => [...sourceRows(type, draft), ...referenceRows(t
 
 test('record types group by chapter and filter by name or group', () => {
   const groups = recordGroups(RECORDS);
-  assert.deepEqual(groups.map(g => [g.label, g.records.length]), [['Norwegian', 9], ['Swedish', 9], ['US', 13], ['Published & personal', 13]]);
+  assert.deepEqual(groups.map(g => [g.label, g.records.length]), [['Norwegian', 9], ['Swedish', 9], ['US', 13], ['Published & personal', 9], ['General', 1]]);
   const census = recordGroups(RECORDS, 'census').flatMap(g => g.records.map(r => r.name));
   assert.ok(census.includes('Federal census'));
-  assert.ok(!census.includes('Klokkerbok'));
+  assert.ok(census.includes('Census (SVAR)'));
+  assert.ok(!census.includes('Parish register (copy)'));
   assert.deepEqual(recordGroups(RECORDS, 'zzzz'), []);
 });
 
@@ -41,7 +42,7 @@ test('Archive shows only when a template uses {archive}, and Held by and Place o
   const folkRows = referenceRows(folk, newDraft(folk));
   assert.equal(row(folkRows, 'values.platform').value, 'Riksarkivet');
   assert.equal(row(folkRows, 'values.archive'), undefined);
-  const bible = recordById('pp-bible');
+  const bible = recordById('pp-family-record');
   const bibleRows = referenceRows(bible, newDraft(bible));
   assert.equal(row(bibleRows, 'values.platform').value, '');
   assert.equal(row(bibleRows, 'values.archive'), undefined);
@@ -96,14 +97,15 @@ test('the Event year box is hidden where the form\'s own date gives the year', (
 test('the Pubinfo medium is chosen under Platform where the Pubinfo uses it', () => {
   const medium = type => row(referenceRows(type, newDraft(type)), 'values.pubmedium') ?? null;
   const folk = medium(recordById('se-folkrakning'));
-  assert.deepEqual(folk.options.map(([value]) => value), ['Digital images', 'Database with images', 'Database']);
+  assert.deepEqual(folk.list, ['Digital images', 'Database with images', 'Database']);
+  assert.equal(folk.kind, 'text', 'typed, so a medium the list lacks can be written');
   assert.equal(folk.value, 'Database with images');
   assert.notEqual(medium(recordById('pp-book')), null, 'an online book appends the medium');
   assert.equal(medium(recordById('pp-interview')), null, 'a recorded interview has its own imprint');
 });
 
 test('Microfilm is a Pubinfo medium only where the record type can cite the film itself', () => {
-  const media = type => (row(referenceRows(type, newDraft(type)), 'values.pubmedium')?.options ?? []).map(([value]) => value);
+  const media = type => row(referenceRows(type, newDraft(type)), 'values.pubmedium')?.list ?? [];
   assert.deepEqual(media(recordById('us-naturalization')), ['Digital images', 'Database with images', 'Database', 'Microfilm']);
   assert.ok(media(recordById('us-federal-census')).includes('Microfilm'));
   assert.ok(media(recordById('us-newspaper')).includes('Microfilm'));
@@ -198,7 +200,7 @@ test('outputs keep gap markers for display and plain text for copying', () => {
 
 test('the example note says whether the outputs still match the guide', () => {
   const e = example();
-  const guide = { examples: { 'B.1 Example 1': { expected: { page: 'p. 57 (image 62), no. 21, Thor Emil birth and baptism entry' }, confidence: 'High' } } };
+  const guide = { examples: { 'B.1 Example 1': { expected: { page: 'p. 57 (image 62), no. 21 (birth and baptism)' }, confidence: 'High' } } };
   assert.equal(exampleNote(klokk, e, buildOutputs(klokk, e), guide), 'Matches guide example B.1 Example 1');
   e.overrides.page = 'other';
   assert.equal(exampleNote(klokk, e, buildOutputs(klokk, e), guide), 'Differs from guide example B.1 Example 1: Page');
@@ -209,7 +211,7 @@ test('a new Source names the archive the FRN cites, or the private holder, as it
   assert.equal(repositoryName(klokk, newDraft(klokk)), 'Statsarkivet i Oslo');
   const census = recordById('us-federal-census');
   assert.equal(repositoryName(census, newDraft(census)), 'National Archives');
-  const bible = recordById('pp-bible');
+  const bible = recordById('pp-family-record');
   assert.equal(repositoryName(bible, newDraft(bible)), 'Peter Grund, private collection');
   const paper = recordById('us-newspaper');
   const film = newDraft(paper);
@@ -248,7 +250,7 @@ test('copy all uses the Gramps block layout', () => {
     'Call number: AV/SAO-A-10888/G/Ga/L0002',
     '',
     'CITATION',
-    'Page: p. 57 (image 62), no. 21, Thor Emil birth and baptism entry',
+    'Page: p. 57 (image 62), no. 21 (birth and baptism)',
     'Confidence: High',
     '',
     'FIRST REFERENCE NOTE:',

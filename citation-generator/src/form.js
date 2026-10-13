@@ -1,6 +1,6 @@
 // Describes what each wizard step asks for and shows, as plain rows the screen draws.
 import { CHAPTERS, LEVELS, PLATFORMS, ARCHIVES, SUGGESTIONS, COPY_FORMS, MEDIA } from './tables.js';
-import { OUTPUT_GROUPS, TEMPLATE_KEYS, resolveType, usesDetails, usesToken, ruleRef, exampleLabel } from './engine.js';
+import { OUTPUT_GROUPS, TEMPLATE_KEYS, resolveType, usesDetails, usesToken, ruleRef, exampleLabel, isFilm } from './engine.js';
 import { expectedFor, diffOutputs } from './compare.js';
 import { plain } from './template.js';
 
@@ -50,10 +50,10 @@ export function referenceRows(type, draft) {
   const rows = [text('values.platform', 'Platform', v.platform, { list: Object.keys(PLATFORMS) })];
   const film = [type, ...(type.pageVariants || [])].some(x => x.frnMicrofilm);
   if (type.pubinfo === undefined || usesToken(type, 'pubmedium')) {
-    rows.push(select('values.pubmedium', 'Pubinfo medium', v.pubmedium, MEDIA.filter(m => film || m !== 'Microfilm').map(m => [m, m])));
+    rows.push(text('values.pubmedium', 'Pubinfo medium', v.pubmedium, { list: MEDIA.filter(m => film || m !== 'Microfilm') }));
   }
   const online = usesToken(type, 'archive', TEMPLATE_KEYS.filter(k => k !== 'frnMicrofilm'));
-  if (online || (film && v.pubmedium === 'Microfilm')) rows.push(text('values.archive', 'Archive', v.archive, { list: ARCHIVES[type.chapter] }));
+  if (online || (film && isFilm(v.pubmedium))) rows.push(text('values.archive', 'Archive', v.archive, { list: ARCHIVES[type.chapter] }));
   if (usesToken(type, 'custodian')) rows.push(text('values.custodian', 'Held by', v.custodian, { placeholder: sampleOf(type, 'custodian') }));
   if (usesToken(type, 'custplace')) rows.push(text('values.custplace', 'Place', v.custplace, { placeholder: sampleOf(type, 'custplace') }));
   return rows;
@@ -69,7 +69,8 @@ export function citationRows(type, draft) {
   rows.push(...(t.citation || []).map(f => field(type, f, v)));
   rows.push(text('subject.name', t.subjectLabel || 'Subject', s.name, { placeholder: sampleOf(type, 'name') }));
   const nouns = t.nouns || [''];
-  if (nouns.some(Boolean)) rows.push(select('subject.noun', 'Record noun', s.noun, nouns.map(n => [n, n || '(none)'])));
+  if (t.freeNoun) rows.push(text('subject.noun', 'Record noun', s.noun, { placeholder: sampleOf(type, 'noun') }));
+  else if (nouns.some(Boolean)) rows.push(select('subject.noun', 'Record noun', s.noun, nouns.map(n => [n, n || '(none)'])));
   if (s.noun.trim()) rows.push(select('subject.copy', 'Original or copy', s.copy, [['', 'Original'], ...COPY_FORMS.map(f => [f, capital(f)])]));
   if (s.noun.trim() === 'household') {
     rows.push(check('subject.nonHead', 'Not the head of household', s.nonHead));

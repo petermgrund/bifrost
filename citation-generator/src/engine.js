@@ -1,6 +1,6 @@
 // Turns one draft of one record type into every output field.
 import { fill, gap } from './template.js';
-import { DATE_MEANING, CHAPTER_CODE, PLATFORMS, MEDIA, yearOf } from './tables.js';
+import { DATE_MEANING, CHAPTER_CODE, PLATFORMS, MEDIA, USUAL_CITED_FOR, yearOf } from './tables.js';
 
 // Reference-note values that describe the Source, pre-filled from the record type's defaults.
 export const REFERENCE_VALUES = ['platform', 'pubmedium', 'archive', 'custodian', 'custplace'];
@@ -25,8 +25,14 @@ const STANDARD_LABELS = {
   pubmedium: 'Pubinfo medium', home: 'Platform homepage',
 };
 
+/** A10 · whether a typed Pubinfo medium is film read on a reader. */
+export function isFilm(medium) {
+  return String(medium ?? '').trim().toLowerCase() === 'microfilm';
+}
+
 export function ruleRef(type, rule) {
-  return rule.startsWith('§') ? `${CHAPTER_CODE[type.chapter]} ${rule}` : rule;
+  if (!rule.startsWith('§')) return rule;
+  return CHAPTER_CODE[type.chapter] ? `${CHAPTER_CODE[type.chapter]} ${rule}` : type.rules || rule;
 }
 
 /** The record type with the draft's page variant merged in. */
@@ -185,6 +191,29 @@ function paperlessTitle(draft, c) {
   return year ? `${out} ${year}` : out;
 }
 
+/** A7 · the fact a citation is usually cited for: its record noun's, or with no noun its record type's. */
+export function usualCitedFor(type, subject) {
+  const noun = String(subject?.noun ?? '').trim();
+  return (noun ? USUAL_CITED_FOR[noun] : USUAL_CITED_FOR[type.name]) || '';
+}
+
+/** A7 · the citation's attributes: the subject's parts, then the record type and its form. */
+export function attributesOf(type, draft) {
+  const t = resolveType(type, draft);
+  const s = draft.subject;
+  const trim = x => String(x ?? '').trim();
+  const head = trim(s.head);
+  return [
+    ['Subject', trim(s.name)],
+    ['Record', recordNoun(s.noun, s.copy)],
+    ['Household', s.nonHead && trim(s.noun) === 'household' && head ? `${head} household` : ''],
+    ['Which entry', trim(s.which)],
+    ['Source says', trim(s.says)],
+    ['Evidence', trim(s.evidence)],
+    ['Record type', type.pageVariants && t.label ? `${type.name} · ${t.label}` : type.name],
+  ].filter(([, value]) => value);
+}
+
 /** Ends a page string or SRN with (what it is cited for), before a closing period or quoted period. */
 export function endWith(text, citedFor) {
   if (!citedFor) return text;
@@ -193,7 +222,11 @@ export function endWith(text, citedFor) {
   return `${text} (${citedFor})`;
 }
 
-export function buildOutputs(type, draft) {
+/**
+ * Every output field. `legacy` builds them as the rules before 2026-10-13 did (A15): the page string from the record
+ * type's old template ending in its subject, and what it is cited for only where typed, in the notes as well.
+ */
+export function buildOutputs(type, draft, { legacy = false } = {}) {
   const t = resolveType(type, draft);
   const L = labeler(type);
   const v = draft.values, s = draft.subject;
@@ -213,6 +246,11 @@ export function buildOutputs(type, draft) {
   // A form whose own input holds the record's date (eventDate) takes the event year from it, so a
   // year typed for another form or another citation cannot linger in the SRN or the Paperless title.
   if (t.eventDate) c.eventYear = yearOf(c[t.eventDate]) || gap(L(t.eventDate));
+  // A7 · the page string always ends with what the citation is cited for, starting from its usual fact; the notes say
+  // it only when it differs from that.
+  const usual = legacy ? '' : usualCitedFor(t, s);
+  const citedFor = typed.citedFor || usual;
+  c.citedFor = citedFor === usual ? '' : citedFor;
 
   const o = {};
   o.author = pick('author', fill(t.author, c, L));
@@ -221,26 +259,26 @@ export function buildOutputs(type, draft) {
   o.abbrev = pick('abbrev', fill(t.abbrev, c, L));
   // A10 · an online medium names the platform and its homepage from the A10 table; film read in person names
   // its maker, the archive, with no URL. A record type's own template gives an imprint instead.
-  const microfilm = c.pubmedium === 'Microfilm';
+  const microfilm = isFilm(c.pubmedium);
   c.home = c.platform ? PLATFORMS[c.platform] || gap(L('home')) : '';
   const genealogical = microfilm ? `Microfilm, ${c.archive || gap(L('archive'))}.`
     : c.platform ? `${c.pubmedium || MEDIA[0]}, ${c.platform} (${c.home}).` : '';
   o.pubinfo = pick('pubinfo', t.pubinfo === undefined ? genealogical : fill(t.pubinfo, c, L).trim());
   o.callNumber = pick('callNumber', typed.call || '');
-  const page = fill(t.page, c, L);
-  // A7 · what the citation is cited for, when given, ends the page string and the SRN, so Gramps lists apart
-  // the citations one item gives; each FRN template says "(documenting …)" after its item.
-  o.page = pick('page', endWith(page, typed.citedFor));
+  const page = fill(legacy ? t.legacyPage ?? t.page : t.page, c, L);
+  const label = citedFor || gap(L('citedFor'));
+  o.page = pick('page', legacy ? endWith(page, citedFor) : page ? endWith(page, label) : `(${label})`);
   o.confidence = draft.confidence;
   // Film read in person takes the digital image's place in the FRN (A10), where the record type has that form.
   const frn = fill(microfilm && t.frnMicrofilm ? t.frnMicrofilm : t.frn, c, L);
   const comment = typed.comment || '';
   o.frn = pick('frn', comment ? `${frn} ${comment}` : frn);
-  o.srn = pick('srn', endWith(fill(t.srn, c, L), typed.citedFor));
+  o.srn = pick('srn', endWith(fill(t.srn, c, L), c.citedFor));
   o.plTitle = pick('plTitle', t.paperlessTitle ? fill(t.paperlessTitle, c, L) : paperlessTitle(draft, c));
   o.plDoctype = pick('plDoctype', t.doctype);
   o.plDateMeaning = pick('plDateMeaning', DATE_MEANING[t.doctype] || 'event');
   o.plCorrespondent = pick('plCorrespondent', microfilm ? '' : typed.platform || '');
   o.plSourceUrl = pick('plSourceUrl', typed.url || '');
+  o.attributes = attributesOf(type, draft);
   return o;
 }

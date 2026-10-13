@@ -1,12 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readCitation, readByFrn, readLoosely } from '../src/read.js';
-import { RECORDS, recordById } from '../src/records/index.js';
+import { RECORDS as ALL_RECORDS, recordById } from '../src/records/index.js';
 import { newDraft, draftFromExample, buildOutputs, setVariant, resolveType, usesDetails } from '../src/engine.js';
 import { hasGap } from '../src/template.js';
 
+const RECORDS = ALL_RECORDS.filter(r => r.chapter !== 'ge');
+const built = (type, draft) => buildOutputs(type, draft, { legacy: true });
 const cite = o => ({ page: o.page, frn: o.frn, srn: o.srn, title: o.title, abbrev: o.abbrev, author: o.author, pubinfo: o.pubinfo, call: o.callNumber });
-const rebuilt = read => buildOutputs(recordById(read.type), read.draft);
+const rebuilt = read => built(recordById(read.type), read.draft);
 const same = (a, b) => ['page', 'frn', 'srn'].every(k => a[k] === b[k]);
 const complete = o => !['page', 'frn', 'srn'].some(k => hasGap(o[k]));
 
@@ -27,7 +29,7 @@ test('every worked example reads back into a draft that rebuilds it', () => {
   let read = 0;
   for (const type of RECORDS) {
     for (const claim of type.examples) {
-      const o = buildOutputs(type, draftFromExample(type, claim));
+      const o = built(type, draftFromExample(type, claim));
       if (!complete(o)) continue;
       const got = readCitation(cite(o), type.id);
       assert.ok(got?.exact, `${type.id} ${claim.guide}`);
@@ -43,7 +45,7 @@ test('every record type and page form reads back, with page, image, subject, and
   for (const type of RECORDS) {
     for (const variant of type.pageVariants ? type.pageVariants.map(v => v.key) : ['']) {
       const d = filledDraft(type, variant);
-      const o = buildOutputs(type, d);
+      const o = built(type, d);
       const got = readCitation(cite(o), type.id);
       assert.ok(got?.exact, `${type.id} ${variant}`);
       assert.ok(same(rebuilt(got), o), `${type.id} ${variant}`);
@@ -58,7 +60,7 @@ test('every record type and page form reads back, with page, image, subject, and
 
 test('without a hint the reader finds the record type itself', () => {
   const klokk = recordById('no-klokkerbok');
-  const o = buildOutputs(klokk, draftFromExample(klokk, klokk.examples[0]));
+  const o = built(klokk, draftFromExample(klokk, klokk.examples[0]));
   const got = readCitation(cite(o));
   assert.equal(got.type, 'no-klokkerbok');
   assert.deepEqual([got.draft.values.page, got.draft.values.image, got.draft.values.entry, got.draft.subject.name, got.draft.values.accessed], ['57', '62', '21', 'Thor Emil', '17 April 2026']);
@@ -68,7 +70,7 @@ test('the SRN tells which entry from what the source says', () => {
   const dop = recordById('se-dopbok');
   const d = filledDraft(dop, '');
   Object.assign(d.subject, { which: 'b. 1801, at Vik', says: 'widow', evidence: 'stated age 40' });
-  const o = buildOutputs(dop, d);
+  const o = built(dop, d);
   const got = readCitation(cite(o), 'se-dopbok');
   assert.deepEqual([got.draft.subject.which, got.draft.subject.says], ['b. 1801, at Vik', 'widow, stated age 40']);
   assert.ok(same(rebuilt(got), o));
@@ -76,7 +78,7 @@ test('the SRN tells which entry from what the source says', () => {
 
 test('a citation with a note edited by hand reads closely; one written another way not at all', () => {
   const klokk = recordById('no-klokkerbok');
-  const o = buildOutputs(klokk, draftFromExample(klokk, klokk.examples[0]));
+  const o = built(klokk, draftFromExample(klokk, klokk.examples[0]));
   const close = readCitation({ ...cite(o), srn: 'Eidsvoll klokkerbok, p. 57, edited by hand.' });
   assert.equal(readCitation({ ...cite(o), frn: 'Eidsvoll prestekontor, edited by hand.' }), null);
   assert.equal(close.exact, false);
@@ -102,7 +104,7 @@ test('a citation whose page string was edited by hand still gives its record typ
   Object.assign(d.values, { church: 'First Lutheran Church', town: 'Alma', county: 'Marshall', state: 'Minnesota', register: 'death and burial register',
     page: '5', image: '7', details: 'aged 80', url: 'https://www.ancestry.com/x', accessed: '9 October 2026' });
   Object.assign(d.subject, { name: 'Mike', noun: church.nouns[0] });
-  const o = buildOutputs(church, d);
+  const o = built(church, d);
   const edited = { ...cite(o), page: o.page.replace(church.nouns[0], 'death entry') };
   assert.equal(readCitation(edited), null);
   const got = readByFrn(edited);

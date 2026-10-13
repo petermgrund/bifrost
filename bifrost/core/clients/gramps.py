@@ -306,6 +306,12 @@ class GrampsClient:
         resp = await self._request("GET", f"/media/{handle}/thumbnail/{size}")
         return resp.content, resp.headers.get("Content-Type", "image/jpeg")
 
+    async def cited_media_ids(self) -> set[str]:
+        """Gramps IDs of the media objects some citation shows"""
+        items = await self._paged("/media/", page_size=500, keys="gramps_id,backlinks", backlinks="true")
+        return {i["gramps_id"] for i in items
+                if i.get("gramps_id") and (i.get("backlinks") or {}).get("citation")}
+
     async def get_media_backlinks(self, handle: str) -> dict:
         """Objects referencing a media object"""
         resp = await self._request(

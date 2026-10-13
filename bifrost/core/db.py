@@ -320,6 +320,32 @@ MIGRATIONS: list[str] = [
         created_at      TEXT NOT NULL
     );
     """,
+    # 26 records captured on the Inbox page, and older documents hidden from it
+    """
+    CREATE TABLE captures (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        title       TEXT NOT NULL,
+        link        TEXT NOT NULL DEFAULT '',
+        details     TEXT NOT NULL DEFAULT '{}',
+        note        TEXT NOT NULL DEFAULT '',
+        transcribe  INTEGER NOT NULL DEFAULT 0,
+        file_name   TEXT NOT NULL,
+        pages       INTEGER NOT NULL DEFAULT 1,
+        task_id     TEXT,
+        doc_id      INTEGER,
+        gramps_id   TEXT,
+        state       TEXT NOT NULL,
+        error       TEXT,
+        created_at  TEXT NOT NULL,
+        updated_at  TEXT NOT NULL,
+        cited_at    TEXT,
+        removed_at  TEXT
+    );
+    CREATE TABLE inbox_hidden (
+        doc_id    INTEGER PRIMARY KEY,
+        hidden_at TEXT NOT NULL
+    );
+    """,
 ]
 
 

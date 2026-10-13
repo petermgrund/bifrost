@@ -135,6 +135,13 @@ class CitationsWizard extends BifrostElement {
     } catch (e) {
       this.loadError = errText(e);
     }
+    const asked = Number(new URLSearchParams(location.search).get('doc'));
+    if (asked) {
+      history.replaceState(null, '', location.pathname);
+      this.step = DOC;
+      await this.pickDoc(asked);
+      return;
+    }
     if (!this.docId) { this.step = DOC; return; }
     try {
       this.doc = await api(`${API}/doc/${this.docId}`);

@@ -10,6 +10,8 @@ import './ancestry-links-page.js';
 import './codes-page.js';
 
 const SECTIONS = [
+  { id: 'inbox', title: 'Inbox', desc: 'Capture records during research and cite them later',
+    body: html`<a class="button" href="/inbox"><span>Open Inbox</span></a>` },
   { id: 'sync', title: 'Sync',
     desc: 'Sync Paperless docs and Immich photos to Gramps media objects',
     body: html`<paperless-sync-page></paperless-sync-page>

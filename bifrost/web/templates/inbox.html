@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}Inbox · Bifrost{% endblock %}
+{% block main_class %}max inbox-main{% endblock %}
+{% block header %}
+{% with bar_name="Inbox", bar_back="/#inbox" %}{% include "_bar.html" %}{% endwith %}
+{% endblock %}
+{% block content %}<capture-inbox></capture-inbox>{% endblock %}
+{% block scripts %}<script type="module" src="/static/app/inbox-page.js"></script>{% endblock %}

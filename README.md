@@ -14,6 +14,7 @@ Your family-tree data itself always lives in Gramps and the source systems. Bifr
 
 # Features
 
+* Capture records while you research. Paste the link and whatever you copied from FamilySearch, drop in the downloaded images and type a note; Bifrost files them in Paperless and Gramps as one document. The Inbox lists every capture until a citation shows it.
 * Sync Immich photos into Gramps as media objects. Use Tags in Immich to mark a photo for sync and define a fuzzy date (like about 1920 or before June 1955).
 * Sync documents in Paperless-ngx to Gramps Web as media objects, and keep their versions, titles, dates, and transcription text up to date.
 * Link Immich's face recognition to Gramps people by pairing each recognized face with its Gramps person once. Then, every synced photo gets face boxes in Gramps.

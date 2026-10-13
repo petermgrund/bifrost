@@ -84,6 +84,7 @@ from .routes.citations import router as citations_router  # noqa: E402
 from .routes.codes import router as codes_router  # noqa: E402
 from .runs import ACTIVE  # noqa: E402
 from .routes.faces import router as faces_router  # noqa: E402
+from .routes.inbox import router as inbox_router  # noqa: E402
 from .routes.photos import router as photos_router  # noqa: E402
 from .routes.places import router as places_router  # noqa: E402
 from .routes.reprocess import router as reprocess_router  # noqa: E402
@@ -96,6 +97,7 @@ app.include_router(ancestry_router)
 app.include_router(citations_router)
 app.include_router(codes_router)
 app.include_router(faces_router)
+app.include_router(inbox_router)
 app.include_router(photos_router)
 app.include_router(places_router)
 app.include_router(reprocess_router)

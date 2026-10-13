@@ -19,6 +19,9 @@ WIZARD_ATTRIBUTES = ("Subject", "Record", "Household", "Which entry", "Source sa
 TAG_COLOR = "#7b5ea7"
 DATE_MEANING = "date meaning"
 REFERENCE_NOTES = re.compile(r"FIRST REFERENCE NOTE:\s*(?P<frn>.*?)\s*SHORT REFERENCE NOTE:\s*(?P<srn>.*?)\s*$", re.S)
+KINDS = {"person": "people", "family": "families", "event": "events"}
+SEARCH_LIMITS = (("person", 8), ("family", 4), ("event", 6))
+PROFILE = {"profile": "self", "keys": "handle,gramps_id,profile"}
 
 
 class CitationError(Exception):
@@ -105,6 +108,85 @@ def kept_drafts(conn: sqlite3.Connection, handles) -> dict[str, dict]:
     return {r["citation_handle"]: {"type": r["record_type"], "draft": json.loads(r["draft"])} for r in rows}
 
 
+def _year(date) -> str:
+    m = re.search(r"\d{3,4}", str(date or ""))
+    return m.group(0) if m else ""
+
+
+def _name(prof: dict) -> str:
+    parts = (str(prof.get(k) or "").strip() for k in ("name_given", "name_surname", "name_suffix"))
+    return " ".join(p for p in parts if p) or prof.get("name_display") or ""
+
+
+def row(kind: str, obj: dict) -> dict:
+    """How a person, family or event shows in the attach list, from its Gramps profile"""
+    prof = obj.get("profile") or {}
+    gid = obj.get("gramps_id") or ""
+    if kind == "person":
+        years = [_year((prof.get(k) or {}).get("date")) for k in ("birth", "death")]
+        name = short = _name(prof) or gid
+        detail = "–".join(years) if any(years) else ""
+    elif kind == "family":
+        couple = [_name(prof.get(k) or {}) for k in ("father", "mother")]
+        name = short = " & ".join(n for n in couple if n) or prof.get("family_surname") or gid
+        detail = prof.get("relationship") or ""
+    else:
+        short = prof.get("type") or gid
+        name = prof.get("summary") or short
+        detail = " · ".join(p for p in (prof.get("date"), prof.get("place_name")) if p)
+    return {"kind": kind, "handle": obj["handle"], "gramps_id": gid, "name": name, "short": short, "detail": detail}
+
+
+async def rows(gramps: GrampsClient, pairs) -> list[dict]:
+    """Attach-list rows for (kind, handle) pairs, in order, skipping repeats and handles Gramps no longer has"""
+    pairs = list(dict.fromkeys(pairs))
+    objs = await asyncio.gather(*(gramps.find_object(KINDS[k], h, **PROFILE) for k, h in pairs))
+    return [row(k, o) for (k, _), o in zip(pairs, objs) if o]
+
+
+async def find(gramps: GrampsClient, q: str) -> list[dict]:
+    """People, then families, then events with every typed word, through Gramps' full-text search"""
+    words = re.findall(r"\w+", q)
+    if not words:
+        return []
+    query = " ".join(f"{w}*" for w in words)
+    found = await asyncio.gather(*(gramps.search(query, kind, limit) for kind, limit in SEARCH_LIMITS))
+    return [row(kind, hit["object"]) for (kind, _), hits in zip(SEARCH_LIMITS, found)
+            for hit in hits if hit.get("object")]
+
+
+async def related(gramps: GrampsClient, kind: str, handle: str) -> list[dict]:
+    """A person's events and families with their events, or a family's events and people, with depth"""
+    if kind == "person":
+        person = await gramps.find_object("people", handle, keys="event_ref_list,family_list,parent_family_list")
+        if not person:
+            return []
+        events, families = await asyncio.gather(
+            rows(gramps, [("event", r["ref"]) for r in person.get("event_ref_list") or []]),
+            _families(gramps, (person.get("family_list") or []) + (person.get("parent_family_list") or [])))
+        return [{**r, "depth": 1} for r in events] + families
+    family = await gramps.find_object(
+        "families", handle, keys="event_ref_list,father_handle,mother_handle,child_ref_list")
+    if not family:
+        return []
+    people = [h for h in (family.get("father_handle"), family.get("mother_handle")) if h]
+    people += [r["ref"] for r in family.get("child_ref_list") or []]
+    found = await rows(gramps, [("event", r["ref"]) for r in family.get("event_ref_list") or []]
+                       + [("person", h) for h in people])
+    return [{**r, "depth": 1} for r in found]
+
+
+async def _families(gramps: GrampsClient, handles: list[str]) -> list[dict]:
+    fams = await asyncio.gather(*(gramps.find_object("families", h, profile="self",
+                                                     keys="handle,gramps_id,profile,event_ref_list")
+                                  for h in dict.fromkeys(handles)))
+    fams = [f for f in fams if f]
+    events = await asyncio.gather(*(rows(gramps, [("event", r["ref"]) for r in f.get("event_ref_list") or []])
+                                    for f in fams))
+    return [r for f, evs in zip(fams, events)
+            for r in ({**row("family", f), "depth": 1}, *({**e, "depth": 2} for e in evs))]
+
+
 async def context(gramps: GrampsClient, paperless: PaperlessClient, conn: sqlite3.Connection) -> dict:
     """The Sources and Repositories in Gramps, and the Paperless names a scan is filed under"""
     sources, repos, doctypes, people, fields = await asyncio.gather(
@@ -135,16 +217,16 @@ async def context(gramps: GrampsClient, paperless: PaperlessClient, conn: sqlite
 
 async def document(gramps: GrampsClient, paperless: PaperlessClient, cfg: SyncPaperlessConfig,
                    doc_id: int, conn: sqlite3.Connection) -> dict:
-    """The Paperless document, its Gramps media, and the citations already on that media, newest first"""
+    """The Paperless document, its Gramps media with its citations newest first, and the records both are attached to"""
     doc, fields = await asyncio.gather(paperless.get_document(doc_id), paperless.custom_fields())
     pid = gramps_id_of(cfg, doc)
     if not pid:
         raise CitationError(403, f"Paperless document #{doc_id} isn't synced to Gramps")
     media = await gramps.get_media_by_gramps_id(pid)
-    cited = []
+    cited, suggestions = [], []
     if media:
         links = await gramps.get_media_backlinks(media["handle"])
-        cits = await asyncio.gather(*(gramps.get_object("citations", h)
+        cits = await asyncio.gather(*(gramps.get_object("citations", h, backlinks="true")
                                       for h in links.get("citation") or []))
         handles = sorted({c.get("source_handle") for c in cits if c.get("source_handle")})
         srcs = dict(zip(handles, await asyncio.gather(*(gramps.get_object("sources", h) for h in handles))))
@@ -167,6 +249,10 @@ async def document(gramps: GrampsClient, paperless: PaperlessClient, cfg: SyncPa
                           "source": (srcs.get(c.get("source_handle")) or {}).get("title") or "",
                           "frn": frn, "srn": srn, "draft": kept.get(c["handle"])})
         cited.sort(key=lambda c: (-c["change"], c["gramps_id"]))
+        back = {c["handle"]: c.get("backlinks") or {} for c in cits}
+        order = ("event", "person", "family")
+        suggestions = await rows(gramps, [(k, h) for c in cited for k in order for h in back[c["handle"]].get(k) or []]
+                                 + [(k, h) for k in order for h in links.get(k) or []])
     meaning = date_meaning_field(fields)
     url = cfg.source_url_field_id
     return {
@@ -177,6 +263,7 @@ async def document(gramps: GrampsClient, paperless: PaperlessClient, cfg: SyncPa
         "date_meaning": paperless.custom_field_value(doc, meaning["id"]) if meaning else None,
         "media": {"handle": media["handle"], "gramps_id": media.get("gramps_id") or pid} if media else None,
         "citations": cited,
+        "suggestions": suggestions,
     }
 
 
@@ -191,8 +278,11 @@ async def _next_ids(gramps: GrampsClient, kinds: list[tuple[str, str]]) -> list[
 
 
 async def create(gramps: GrampsClient, paperless: PaperlessClient, cfg: SyncPaperlessConfig,
-                 doc_id: int, source: dict, citation: dict, scan: dict | None) -> dict:
-    """Make the Source when new and the Citation with its note on the document's media, then file the scan"""
+                 doc_id: int, source: dict, citation: dict, scan: dict | None, attach: list[dict] | None = None) -> dict:
+    """Make the Source when new and the Citation with its note on the document's media, attach it, file the scan"""
+    picks = list(dict.fromkeys((p.get("kind"), p.get("handle")) for p in attach or []))
+    if any(kind not in KINDS or not handle for kind, handle in picks):
+        raise CitationError(400, "A citation attaches only to people, families and events")
     page, frn, srn = (citation.get(k, "").strip() for k in ("page", "frn", "srn"))
     confidence = citation.get("confidence")
     if confidence not in CONFIDENCE:
@@ -218,6 +308,10 @@ async def create(gramps: GrampsClient, paperless: PaperlessClient, cfg: SyncPape
     media = await gramps.get_media_by_gramps_id(pid)
     if not media:
         raise CitationError(409, f"Gramps has no media {pid}")
+    found = await asyncio.gather(*(gramps.find_object(KINDS[k], h, keys="handle,gramps_id") for k, h in picks))
+    if gone := next((k for (k, _), o in zip(picks, found) if not o), None):
+        raise CitationError(409, f"A picked {gone} is no longer in Gramps")
+    targets = [(k, h, o.get("gramps_id") or h) for (k, h), o in zip(picks, found)]
 
     kinds = ([] if source.get("handle") else [("sources", "S")]) + [("notes", "N"), ("citations", "C")]
     minted = dict(zip((prefix for _, prefix in kinds), await _next_ids(gramps, kinds)))
@@ -247,10 +341,19 @@ async def create(gramps: GrampsClient, paperless: PaperlessClient, cfg: SyncPape
                  "attribute_list": citation_attributes([], citation.get("attributes")), "tag_list": tags, "private": False})
     made += [{"kind": "citation", "gramps_id": minted["C"], "title": page},
              {"kind": "note", "gramps_id": minted["N"], "title": "Reference notes"}]
-    await gramps.create_objects(objs)
+    records, done = list(await gramps.create_objects(objs)), []
+    for kind, handle, gid in targets:
+        try:
+            obj = await gramps.get_object(KINDS[kind], handle)
+            obj["citation_list"] = [*(obj.get("citation_list") or []), cit_handle]
+            records += await gramps.update_object(KINDS[kind], handle, obj)
+        except Exception as exc:  # noqa: BLE001
+            await _take_back(gramps, records, [m["gramps_id"] for m in made], done, gid, exc)
+        done.append(gid)
 
     result = {"created": made, "source": {"handle": src_handle, "gramps_id": src_id, "title": src_title},
               "citation": {"handle": cit_handle, "gramps_id": minted["C"]}, "media": media.get("gramps_id") or pid,
+              "attached": [{"kind": k, "handle": h, "gramps_id": gid} for k, h, gid in targets],
               "scan": None, "scan_error": None}
     if scan is not None:
         try:
@@ -259,6 +362,19 @@ async def create(gramps: GrampsClient, paperless: PaperlessClient, cfg: SyncPape
         except Exception as exc:  # noqa: BLE001
             result["scan_error"] = str(exc)
     return result
+
+
+async def _take_back(gramps: GrampsClient, records: list[dict], made: list[str], done: list[str], target: str,
+                     exc: Exception):
+    """Undo a create whose attach failed, in one Gramps transaction, and refuse the create"""
+    reason = str(exc)[:300]
+    try:
+        await gramps.undo(records, f"Undo {', '.join(made)}")
+    except Exception as undo_exc:  # noqa: BLE001
+        on = f", attached to {', '.join(done)}," if done else ""
+        raise CitationError(502, f"Couldn't attach the citation to {target}: {reason}. Undoing failed too, "
+                                 f"so {', '.join(made)}{on} stay in Gramps: {str(undo_exc)[:300]}") from exc
+    raise CitationError(502, f"Couldn't attach the citation to {target}, so nothing was made: {reason}") from exc
 
 
 async def file_scan(paperless: PaperlessClient, cfg: SyncPaperlessConfig, doc: dict, scan: dict) -> None:

@@ -8,9 +8,14 @@ import {
 } from '/static/citations/citations.js';
 
 const API = '/citations/api';
-const STEPS = ['Document', 'Source', 'Citation', 'Note', 'Create'];
-const [DOC, SOURCE, CITATION, NOTE, CREATE] = STEPS.keys();
+const STEPS = ['Document', 'Source', 'Citation', 'Note', 'Attach', 'Create'];
+const [DOC, SOURCE, CITATION, NOTE, ATTACH, CREATE] = STEPS.keys();
 const RECENT = 5;
+const KIND_NAMES = { person: 'Person', family: 'Family', event: 'Event' };
+const KIND_ICONS = { person: 'person', family: 'family_restroom', event: 'event' };
+const keyOf = (r) => `${r.kind}:${r.handle}`;
+const pickOf = ({ kind, handle, gramps_id, name, short, detail }) => ({ kind, handle, gramps_id, name, short, detail });
+const pickLabel = (p) => [p.gramps_id, p.name, p.detail].filter(Boolean).join(' · ');
 const WIZARD_KEY = 'bifrost-citations';
 const SOURCE_KEYS = ['title', 'author', 'abbrev', 'pubinfo', 'callNumber'];
 const FIELD_NAMES = { title: 'Title', author: 'Author', abbrev: 'Abbrev', pubinfo: 'Pubinfo', callNumber: 'Call number',
@@ -59,6 +64,7 @@ class CitationsWizard extends BifrostElement {
     docQ: { state: true }, docHits: { state: true }, srcQ: { state: true }, busy: { state: true },
     msg: { state: true }, result: { state: true }, editing: { state: true }, pop: { state: true },
     clearArmed: { state: true }, focus: { state: true }, typeQ: { state: true }, typeHi: { state: true },
+    picks: { state: true }, attQ: { state: true }, attHits: { state: true }, attFor: { state: true }, opened: { state: true },
   };
 
   constructor() {
@@ -73,6 +79,12 @@ class CitationsWizard extends BifrostElement {
     this.fileScan = w.fileScan === true;
     this.result = w.result || null;
     this.basis = w.basis || null;
+    this.picks = Array.isArray(w.picks) ? w.picks : [];
+    this.attQ = '';
+    this.attHits = [];
+    this.attFor = '';
+    this.opened = {};
+    this._findSeq = 0;
     this.ctx = null;
     this.loadError = registryError;
     this.doc = null;
@@ -163,7 +175,15 @@ class CitationsWizard extends BifrostElement {
   save() {
     saveState(store, this.gen);
     writeWizard({ step: this.step, docId: this.doc?.id ?? this.docId, gsrc: this.gsrc, repo: this.repo,
-      scanPick: this.scanPick, fileScan: this.fileScan, result: this.result, basis: this.basis });
+      scanPick: this.scanPick, fileScan: this.fileScan, result: this.result, basis: this.basis, picks: this.picks });
+  }
+
+  clearPicks() {
+    this.picks = [];
+    this.attQ = '';
+    this.attHits = [];
+    this.attFor = '';
+    this.opened = {};
   }
 
   changed() {
@@ -223,6 +243,7 @@ class CitationsWizard extends BifrostElement {
     this.fileScan = false;
     this.result = null;
     this.basis = null;
+    this.clearPicks();
     if (this.doc.citations.length) this.startFrom(this.doc.citations[0]);
     else {
       this.applyDoc();
@@ -464,11 +485,14 @@ class CitationsWizard extends BifrostElement {
         draft: { values: draft.values, subject: draft.subject, confidence: draft.confidence, variant: draft.variant,
           overrides: draft.overrides, guide: GUIDE.changed, typeVersion: type.version || 0 },
       },
+      attach: this.picks.map(({ kind, handle }) => ({ kind, handle })),
     };
+    const picked = Object.fromEntries(this.picks.map((p) => [keyOf(p), p]));
     this.busy = true;
     this.say('busy', 'Creating');
     try {
-      this.result = await post(`${API}/create`, body);
+      const made = await post(`${API}/create`, body);
+      this.result = { ...made, attached: (made.attached || []).map((a) => ({ ...picked[keyOf(a)], ...a })) };
     } catch (e) {
       this.busy = false;
       this.say('error', errText(e));
@@ -494,6 +518,7 @@ class CitationsWizard extends BifrostElement {
     this.docId = null;
     this.scanPick = {};
     this.fileScan = false;
+    this.clearPicks();
     this.go(DOC);
     this.searchDocs();
   }
@@ -504,7 +529,58 @@ class CitationsWizard extends BifrostElement {
     this.basis = this.result?.citation?.handle || this.basis;
     this.result = null;
     this.fileScan = false;
+    this.clearPicks();
     this.go(CITATION);
+  }
+
+  queueFind(q) {
+    this.attQ = q;
+    clearTimeout(this._findTimer);
+    this._findTimer = setTimeout(() => this.findPicks(), 250);
+  }
+
+  async findPicks() {
+    const q = this.attQ.trim(), seq = ++this._findSeq;
+    let hits = [];
+    if (q) {
+      try {
+        hits = await api(`${API}/find?q=${encodeURIComponent(q)}`);
+      } catch (e) {
+        this.say('error', errText(e));
+      }
+    }
+    if (seq !== this._findSeq) return;
+    this.attHits = hits;
+    this.attFor = q;
+  }
+
+  togglePick(r) {
+    const key = keyOf(r);
+    this.picks = this.picks.some((p) => keyOf(p) === key) ? this.picks.filter((p) => keyOf(p) !== key) : [...this.picks, pickOf(r)];
+    this.edited();
+  }
+
+  async toggleOpen(r) {
+    const key = keyOf(r);
+    if (Object.hasOwn(this.opened, key)) {
+      this.setOpened(key, undefined);
+      return;
+    }
+    this.setOpened(key, null);
+    let found;
+    try {
+      found = await api(`${API}/related/${r.kind}/${encodeURIComponent(r.handle)}`);
+    } catch (e) {
+      this.say('error', errText(e));
+    }
+    if (this.opened[key] === null) this.setOpened(key, found);
+  }
+
+  setOpened(key, rows) {
+    const opened = { ...this.opened };
+    if (rows === undefined) delete opened[key];
+    else opened[key] = rows;
+    this.opened = opened;
   }
 
   updated(changed) {
@@ -667,7 +743,8 @@ class CitationsWizard extends BifrostElement {
     if (this.loadError) return html`<p class="error-text">${this.loadError}</p>`;
     if (!this.ctx) return html`<p>${statusLine('busy', 'Loading')}</p>`;
     const outputs = buildOutputs(this.type, this.draft);
-    const body = [this.stepDoc, this.stepSource, this.stepCitation, this.stepNote, this.stepCreate][this.step].call(this, outputs);
+    const body = [this.stepDoc, this.stepSource, this.stepCitation, this.stepNote, this.stepAttach,
+      this.stepCreate][this.step].call(this, outputs);
     return html`
       <nav class="cw-steps" aria-label="Steps">${STEPS.map((name, i) => html`
         <button class="cw-step ${i === this.step ? 'active' : ''} ${i < this.step ? 'done' : ''}"
@@ -864,6 +941,60 @@ class CitationsWizard extends BifrostElement {
     </div>`;
   }
 
+  stepAttach() {
+    const q = this.attQ.trim();
+    const list = q ? (this.attFor === q ? this.attHits : []) : this.doc?.suggestions || [];
+    return html`<div class="cw-cols">
+      <div class="cw-form">
+        <div class="field prefix border small cw-filter">
+          <i class="front">search</i>
+          <input type="text" .value=${this.attQ} placeholder="Find a person, family or event" autocomplete="off"
+            @input=${(e) => this.queueFind(e.target.value)}>
+        </div>
+        ${list.length ? html`<ul class="list border cw-att">${list.map((r) => this.attRow(r))}</ul>` : nothing}
+        ${q && this.attFor === q && !list.length ? html`<p class="secondary-text">No matches</p>` : nothing}
+      </div>
+      <div class="cw-side">
+        <table class="cw-out">${COLS}<tbody>
+          <tr class="cw-group"><td colspan="4">Attach to</td></tr>
+          ${this.attachRows(true)}
+        </tbody></table>
+      </div>
+    </div>`;
+  }
+
+  attRow(r, depth = 0) {
+    const key = keyOf(r), on = this.picks.some((p) => keyOf(p) === key);
+    const opens = !depth && r.kind !== 'event';
+    const open = opens && Object.hasOwn(this.opened, key);
+    const pickKey = (e) => {
+      if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); this.togglePick(r); }
+    };
+    return html`<li tabindex="0" class="${on ? 'active' : ''} ${depth ? `cw-sub${depth}` : ''}"
+        @click=${() => this.togglePick(r)} @keydown=${pickKey}>
+        <label class="checkbox" @click=${(e) => e.preventDefault()}><input type="checkbox" tabindex="-1" .checked=${on}><span></span></label>
+        <i class="cw-kind">${KIND_ICONS[r.kind]}</i>
+        <span class="mono cw-src-id">${r.gramps_id}</span>
+        <div class="max">
+          <div class="cw-hit-title">${depth ? r.short : r.name}</div>
+          ${r.detail ? html`<div class="small-text secondary-text">${r.detail}</div>` : nothing}
+        </div>
+        ${opens ? html`<button class="transparent circle small" aria-label=${open ? 'Close' : 'Open'}
+          @click=${(e) => { e.stopPropagation(); this.toggleOpen(r); }}><i>${open ? 'expand_less' : 'expand_more'}</i></button>` : nothing}
+      </li>
+      ${open ? (this.opened[key] || []).map((c) => this.attRow(c, c.depth || 1)) : nothing}`;
+  }
+
+  attachRows(removable) {
+    const d = this.doc || {};
+    return html`${d.media ? html`<tr><th>Media</th><td class="cw-val">${[d.media.gramps_id, d.title].join(' · ')}</td>
+        <td class="cw-rule"></td><td class="cw-acts"></td></tr>` : nothing}
+      ${this.picks.map((p) => html`<tr><th>${KIND_NAMES[p.kind]}</th><td class="cw-val">${pickLabel(p)}</td>
+        <td class="cw-rule"></td>
+        <td class="cw-acts">${removable ? html`<button class="transparent circle small" title="Remove ${p.gramps_id}"
+          aria-label="Remove ${p.gramps_id}" @click=${() => this.togglePick(p)}><i>close</i></button>` : nothing}</td></tr>`)}`;
+  }
+
   scanSelect(r, scan) {
     const key = SELECTS[r.key];
     const ctx = this.ctx;
@@ -912,6 +1043,7 @@ class CitationsWizard extends BifrostElement {
         body: source ? this.gramps(source) : nothing,
       },
       Citation: { head: this.doc?.media ? html` <span class="cw-chip mono">${this.doc.media.gramps_id}</span>` : nothing },
+      'Attach to': { body: this.attachRows(false) },
       'Paperless scan': {
         off: !this.fileScan,
         head: html` <label class="checkbox cw-scan-toggle"><input type="checkbox" .checked=${this.fileScan}
@@ -922,10 +1054,14 @@ class CitationsWizard extends BifrostElement {
         },
       },
     };
-    const lines = [...blockers.map((m) => ['error', m]), ...checks.map((p) => ['warn', p.message, p.rule]), ...unmatched.map((m) => ['warn', m])];
+    const lines = [...blockers.map((m) => ['error', m]), ...(this.picks.length ? [] : [['warn', 'Not attached to an event, person or family']]),
+      ...checks.map((p) => ['warn', p.message, p.rule]), ...unmatched.map((m) => ['warn', m])];
+    const groups = outputRows(t, d, outputs);
+    const at = groups.findIndex((g) => g.name === 'Paperless scan');
+    groups.splice(at < 0 ? groups.length : at, 0, { name: 'Attach to', rows: [] });
     return html`<div class="cw-create">
       ${this.result ? this.resultCard() : nothing}
-      ${this.outTable(outputRows(t, d, outputs), extra)}
+      ${this.outTable(groups, extra)}
       <div class="cw-checks">
         ${lines.map(([kind, m, rule]) => html`<div class="cw-check-line ${kind}">
           <i>${kind === 'error' ? 'block' : 'warning'}</i>${rule ? html`${this.ref(rule)} ` : nothing}<span>${m}</span></div>`)}
@@ -950,6 +1086,8 @@ class CitationsWizard extends BifrostElement {
       <table class="cw-cited">
         ${r.created.map((c) => html`<tr><td>${c.kind[0].toUpperCase() + c.kind.slice(1)}</td><td>${link(c.kind, c.gramps_id)}</td><td>${c.title}</td></tr>`)}
         ${r.created.some((c) => c.kind === 'source') ? nothing : html`<tr><td>Source</td><td>${link('source', r.source.gramps_id)}</td><td>${r.source.title}</td></tr>`}
+        ${(r.attached || []).map((a) => html`<tr><td>${KIND_NAMES[a.kind]}</td><td>${link(a.kind, a.gramps_id)}</td>
+          <td>${[a.name, a.detail].filter(Boolean).join(' · ')}</td></tr>`)}
         ${r.scan ? html`<tr><td>Paperless</td><td>${pl ? html`<a class="link mono" href="${pl}/documents/${r.scan}/details" target="_blank" rel="noopener">#${r.scan}</a>` : html`<span class="mono">#${r.scan}</span>`}</td><td>${this.doc?.title || ''}</td></tr>` : nothing}
       </table>
       ${r.scan_error ? html`<p class="error-text">Paperless: ${r.scan_error}</p>` : nothing}

@@ -549,6 +549,15 @@ mark.cw-hit { padding: 0 0.125rem; border-radius: 0.25rem; background: color-mix
 .cw-sources > li.active { background: var(--secondary-container); color: var(--on-secondary-container); }
 .cw-src-id { flex: none; min-inline-size: 3.5rem; font-size: 0.8125rem; }
 .cw-picked { margin: 0 0 1rem; }
+.cw-att { margin: 0; }
+.cw-att > li { cursor: pointer; gap: 0.625rem; padding: 0.375rem 0.75rem; white-space: normal; min-block-size: 3rem; }
+.cw-att > li > .max { min-inline-size: 0; }
+.cw-att > li:hover { background: var(--surface-container); }
+.cw-att > li.active { background: var(--secondary-container); color: var(--on-secondary-container); }
+.cw-att > li.cw-sub1 { padding-inline-start: 2.5rem; }
+.cw-att > li.cw-sub2 { padding-inline-start: 4.25rem; }
+.cw-att > li > :is(.checkbox, button) { margin: 0; }
+.cw-kind { flex: none; color: var(--on-surface-variant); }
 .cw-clash { margin: 1rem 0 0; }
 .cw-clash > button { margin: 0 0 0 0.5rem; }
 .cw-checks { display: grid; gap: 0.375rem; margin: 1.25rem 0 0; }

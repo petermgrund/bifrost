@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
@@ -66,6 +67,23 @@ async def get_document(request: Request, doc_id: int) -> dict:
         raise _failed(exc) from exc
 
 
+@router.get("/api/find")
+async def find(request: Request, q: str = "") -> list[dict]:
+    """People, families and events to attach a citation to"""
+    try:
+        return await citations.find(request.app.state.gramps, q)
+    except GrampsError as exc:
+        raise _failed(exc) from exc
+
+
+@router.get("/api/related/{kind}/{handle}")
+async def related(request: Request, kind: Literal["person", "family"], handle: str) -> list[dict]:
+    try:
+        return await citations.related(request.app.state.gramps, kind, handle)
+    except GrampsError as exc:
+        raise _failed(exc) from exc
+
+
 class RepositoryBody(BaseModel):
     handle: str
 
@@ -107,6 +125,11 @@ class DraftBody(BaseModel):
     draft: dict
 
 
+class AttachBody(BaseModel):
+    kind: Literal["person", "family", "event"]
+    handle: str
+
+
 class CreateBody(BaseModel):
     doc_id: int
     source: SourceBody
@@ -114,6 +137,7 @@ class CreateBody(BaseModel):
     scan: ScanBody | None = None
     inputs: InputsBody | None = None
     draft: DraftBody | None = None
+    attach: list[AttachBody] = []
 
 
 @router.post("/api/create")
@@ -122,7 +146,8 @@ async def create(request: Request, body: CreateBody) -> dict:
     try:
         result = await citations.create(
             st.gramps, st.paperless, st.cfg.sync_paperless, body.doc_id, body.source.model_dump(),
-            body.citation.model_dump(), body.scan.model_dump() if body.scan else None)
+            body.citation.model_dump(), body.scan.model_dump() if body.scan else None,
+            [a.model_dump() for a in body.attach])
     except (citations.CitationError, GrampsError, PaperlessError) as exc:
         raise _failed(exc) from exc
     if body.inputs:

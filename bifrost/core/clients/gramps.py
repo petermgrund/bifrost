@@ -188,6 +188,14 @@ class GrampsClient:
         items = resp.json()
         return items if isinstance(items, list) else []
 
+    async def search(self, query: str, kind: str, limit: int = 10) -> list[dict]:
+        """Objects of one kind matching a Gramps full-text query, each with its profile"""
+        resp = await self._request(
+            "GET", "/search/",
+            params={"query": query, "type": kind, "pagesize": limit, "page": 1, "profile": "self"})
+        items = resp.json()
+        return items if isinstance(items, list) else []
+
     async def count(self, path: str) -> int:
         """Total objects"""
         resp = await self._request("GET", path, params={"pagesize": 1, "page": 1})
@@ -324,10 +332,24 @@ class GrampsClient:
             "GET", f"/{api_path}/{handle}", params=params or None)
         return resp.json()
 
+    async def find_object(self, api_path: str, handle: str, **params) -> dict | None:
+        """One object, or None when Gramps has no such handle"""
+        resp = await self._request(
+            "GET", f"/{api_path}/{handle}", ok_404=True, params=params or None)
+        return None if resp.status_code == 404 else resp.json()
+
     async def update_object(self, api_path: str, handle: str, obj: dict) -> dict:
         resp = await self._request(
             "PUT", f"/{api_path}/{handle}",
             json=obj, headers={"Content-Type": "application/json"},
+        )
+        return resp.json()
+
+    async def undo(self, records: list[dict], message: str) -> list[dict]:
+        """Reverse earlier writes in one transaction, from the records Gramps answered them with"""
+        resp = await self._request(
+            "POST", "/transactions/", params={"undo": "true", "message": message},
+            json=records, headers={"Content-Type": "application/json"},
         )
         return resp.json()
 

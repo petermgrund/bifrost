@@ -6,12 +6,16 @@ import copy
 import pytest
 
 from bifrost.core import db
+from bifrost.core.clients.gramps import GrampsError
 from bifrost.core.clients.paperless import PaperlessClient, PaperlessError
 from bifrost.core.config import SyncPaperlessConfig
 from bifrost.modules import citations
 from bifrost.modules.citations import CitationError
 
 CFG = SyncPaperlessConfig(gramps_id_field_id=1, source_url_field_id=4)
+PATHS = {"Source": "sources", "Note": "notes", "Citation": "citations", "Person": "people", "Family": "families",
+         "Event": "events", "Tag": "tags"}
+CLASSES = {path: cls for cls, path in PATHS.items()}
 
 
 @pytest.fixture
@@ -38,8 +42,40 @@ class FakeGramps:
                       "n1": {"handle": "n1", "gramps_id": "N0099",
                              "text": {"string": "FIRST REFERENCE NOTE:\nOld FRN.\n\nSHORT REFERENCE NOTE:\nOld SRN.\n"}}},
             "media": {"med1": {"handle": "med1", "gramps_id": "NC3MPQ"}},
+            "people": {
+                "p1": {"handle": "p1", "gramps_id": "I0001", "citation_list": ["c0"], "event_ref_list": [
+                    {"ref": "e1"}, {"ref": "e2"}], "family_list": ["f1"], "parent_family_list": ["f0"],
+                       "profile": {"name_given": "Anders Johan", "name_surname": "Lindqvist",
+                                   "birth": {"date": "1868-03-14"}, "death": {"date": "about 1941"}}},
+                "p2": {"handle": "p2", "gramps_id": "I0002", "citation_list": [],
+                       "profile": {"name_given": "Maria", "name_surname": "Lindqvist", "birth": {"date": "1872"}}}},
+            "families": {
+                "f0": {"handle": "f0", "gramps_id": "F0000", "citation_list": [], "event_ref_list": [],
+                       "father_handle": "", "mother_handle": "", "child_ref_list": [{"ref": "p1"}],
+                       "profile": {"family_surname": "Lindqvist", "relationship": "Unknown"}},
+                "f1": {"handle": "f1", "gramps_id": "F0001", "citation_list": [], "event_ref_list": [{"ref": "e3"}],
+                       "father_handle": "p1", "mother_handle": "p2", "child_ref_list": [],
+                       "profile": {"father": {"name_given": "Anders Johan", "name_surname": "Lindqvist"},
+                                   "mother": {"name_given": "Maria", "name_surname": "Lindqvist"},
+                                   "relationship": "Married"}}},
+            "events": {
+                "e1": {"handle": "e1", "gramps_id": "E0001", "citation_list": [],
+                       "profile": {"type": "Birth", "summary": "Birth - Lindqvist, Anders Johan",
+                                   "date": "1868-03-14", "place_name": "Vimmerby"}},
+                "e2": {"handle": "e2", "gramps_id": "E0002", "citation_list": ["c7"],
+                       "profile": {"type": "Death", "summary": "Death - Lindqvist, Anders Johan", "date": "1941"}},
+                "e3": {"handle": "e3", "gramps_id": "E0003", "citation_list": [],
+                       "profile": {"type": "Marriage", "summary": "Marriage - Lindqvist, Anders Johan and Lindqvist, Maria",
+                                   "date": "1894-05-20", "place_name": "Center City"}}},
         }
+        self.media_links = {}
         self.created = []
+        self.updated = []
+        self.undone = []
+        self.searches = []
+        self.hits = {}
+        self.fail_on = set()
+        self.undo_fails = False
 
     async def _paged(self, path, **params):
         return [copy.deepcopy(o) for o in self.objects[path.strip("/")].values()]
@@ -47,14 +83,41 @@ class FakeGramps:
     async def get_object(self, api_path, handle, **params):
         return copy.deepcopy(self.objects[api_path][handle])
 
+    async def find_object(self, api_path, handle, **params):
+        return copy.deepcopy(self.objects[api_path].get(handle))
+
+    async def search(self, query, kind, limit=10):
+        self.searches.append((query, kind, limit))
+        return [{"object": copy.deepcopy(self.objects[citations.KINDS[kind]][h])} for h in self.hits.get(kind, [])]
+
     async def get_media_by_gramps_id(self, gramps_id):
         return next((copy.deepcopy(m) for m in self.objects["media"].values() if m["gramps_id"] == gramps_id), None)
 
     async def get_media_backlinks(self, handle):
-        return {"citation": [h for h in self.objects["citations"] if handle == "med1"]}
+        return {"citation": [h for h in self.objects["citations"] if handle == "med1"], **self.media_links}
 
     async def create_objects(self, objs):
         self.created.append(objs)
+        for o in objs:
+            self.objects[PATHS[o["_class"]]][o["handle"]] = o
+        return [{"type": "add", "_class": o["_class"], "handle": o["handle"], "old": None, "new": o} for o in objs]
+
+    async def update_object(self, api_path, handle, obj):
+        if handle in self.fail_on:
+            raise GrampsError(f"PUT /{api_path}/{handle} → 400: refused")
+        old, self.objects[api_path][handle] = self.objects[api_path][handle], copy.deepcopy(obj)
+        self.updated.append((api_path, handle))
+        return [{"type": "update", "_class": CLASSES[api_path], "handle": handle, "old": old, "new": obj}]
+
+    async def undo(self, records, message):
+        if self.undo_fails:
+            raise GrampsError("POST /transactions/ → 500: down")
+        self.undone.append(records)
+        for r in reversed(records):
+            if r["type"] == "add":
+                del self.objects[PATHS[r["_class"]]][r["handle"]]
+            else:
+                self.objects[PATHS[r["_class"]]][r["handle"]] = r["old"]
         return []
 
 
@@ -100,9 +163,9 @@ SCAN = {"title": "Anders Johan birth and baptism entry 1868", "document_type": 2
         "date_meaning": "ev", "source_url": "https://www.arkivdigital.se/aid/show/v1.b48.s45"}
 
 
-def create(gramps, paperless, source=SOURCE, citation=CITATION, scan=SCAN, doc_id=7):
+def create(gramps, paperless, source=SOURCE, citation=CITATION, scan=SCAN, doc_id=7, attach=None):
     return asyncio.run(citations.create(gramps, paperless, CFG, doc_id, copy.deepcopy(source),
-                                        copy.deepcopy(citation), copy.deepcopy(scan)))
+                                        copy.deepcopy(citation), copy.deepcopy(scan), copy.deepcopy(attach)))
 
 
 def test_note_holds_both_reference_notes_under_their_headings():
@@ -205,6 +268,110 @@ def test_a_paperless_failure_after_gramps_is_reported_not_raised():
     assert result["scan"] is None and result["scan_error"] == "PATCH → 500: down"
 
 
+PICKS = [{"kind": "event", "handle": "e1"}, {"kind": "person", "handle": "p1"}, {"kind": "family", "handle": "f1"},
+         {"kind": "event", "handle": "e1"}]
+
+
+def test_the_citation_is_attached_to_the_picked_events_people_and_families():
+    gramps = FakeGramps()
+    result = create(gramps, FakePaperless(), attach=PICKS)
+    cit = result["citation"]["handle"]
+    assert gramps.updated == [("events", "e1"), ("people", "p1"), ("families", "f1")]
+    assert gramps.objects["events"]["e1"]["citation_list"] == [cit]
+    assert gramps.objects["people"]["p1"]["citation_list"] == ["c0", cit]
+    assert gramps.objects["families"]["f1"]["citation_list"] == [cit]
+    assert result["attached"] == [{"kind": "event", "handle": "e1", "gramps_id": "E0001"},
+                                  {"kind": "person", "handle": "p1", "gramps_id": "I0001"},
+                                  {"kind": "family", "handle": "f1", "gramps_id": "F0001"}]
+    assert len(gramps.created) == 1 and gramps.undone == [] and result["scan"] == 7
+
+
+def test_no_picks_make_the_citation_as_before():
+    gramps = FakeGramps()
+    result = create(gramps, FakePaperless())
+    assert gramps.updated == [] and result["attached"] == []
+
+
+def test_a_failed_attach_takes_back_everything_and_files_nothing():
+    gramps, paperless = FakeGramps(), FakePaperless()
+    gramps.fail_on = {"f1"}
+    before = copy.deepcopy(gramps.objects)
+    with pytest.raises(CitationError) as err:
+        create(gramps, paperless, attach=PICKS)
+    assert err.value.status == 502
+    assert str(err.value) == ("Couldn't attach the citation to F0001, so nothing was made: "
+                              "PUT /families/f1 → 400: refused")
+    [records] = gramps.undone
+    assert [(r["type"], r["_class"]) for r in records] == [
+        ("add", "Source"), ("add", "Note"), ("add", "Citation"), ("update", "Event"), ("update", "Person")]
+    assert gramps.objects == before
+    assert paperless.patches == []
+
+
+def test_when_undoing_fails_too_the_error_names_what_stays_in_gramps():
+    gramps = FakeGramps()
+    gramps.fail_on, gramps.undo_fails = {"p1"}, True
+    with pytest.raises(CitationError) as err:
+        create(gramps, FakePaperless(), attach=PICKS)
+    assert str(err.value) == ("Couldn't attach the citation to I0001: PUT /people/p1 → 400: refused. Undoing failed "
+                              "too, so S0008, C0044, N0100, attached to E0001, stay in Gramps: "
+                              "POST /transactions/ → 500: down")
+
+
+@pytest.mark.parametrize("attach, status, message", [
+    ([{"kind": "person", "handle": "p9"}], 409, "A picked person is no longer in Gramps"),
+    ([{"kind": "place", "handle": "pl1"}], 400, "A citation attaches only to people, families and events"),
+])
+def test_bad_picks_are_refused_before_anything_is_written(attach, status, message):
+    gramps, paperless = FakeGramps(), FakePaperless()
+    with pytest.raises(CitationError) as err:
+        create(gramps, paperless, attach=attach)
+    assert (err.value.status, str(err.value)) == (status, message)
+    assert gramps.created == [] and gramps.updated == [] and paperless.patches == []
+
+
+def test_find_asks_gramps_search_for_each_kind_with_every_word_as_a_prefix():
+    gramps = FakeGramps()
+    gramps.hits = {"person": ["p1"], "family": ["f1"], "event": ["e1"]}
+    found = asyncio.run(citations.find(gramps, ' anders "lindq" '))
+    assert gramps.searches == [("anders* lindq*", "person", 8), ("anders* lindq*", "family", 4),
+                               ("anders* lindq*", "event", 6)]
+    assert found == [
+        {"kind": "person", "handle": "p1", "gramps_id": "I0001", "name": "Anders Johan Lindqvist",
+         "short": "Anders Johan Lindqvist", "detail": "1868–1941"},
+        {"kind": "family", "handle": "f1", "gramps_id": "F0001", "name": "Anders Johan Lindqvist & Maria Lindqvist",
+         "short": "Anders Johan Lindqvist & Maria Lindqvist", "detail": "Married"},
+        {"kind": "event", "handle": "e1", "gramps_id": "E0001", "name": "Birth - Lindqvist, Anders Johan",
+         "short": "Birth", "detail": "1868-03-14 · Vimmerby"}]
+    assert asyncio.run(citations.find(gramps, ' "-" ')) == [] and len(gramps.searches) == 3
+
+
+def test_a_person_opens_to_their_events_and_families_with_the_families_events():
+    found = asyncio.run(citations.related(FakeGramps(), "person", "p1"))
+    assert [(r["depth"], r["gramps_id"]) for r in found] == [
+        (1, "E0001"), (1, "E0002"), (1, "F0001"), (2, "E0003"), (1, "F0000")]
+    assert found[1]["short"] == "Death" and found[1]["detail"] == "1941"
+    assert found[4]["name"] == "Lindqvist" and found[4]["detail"] == "Unknown"
+
+
+def test_a_family_opens_to_its_events_and_people():
+    found = asyncio.run(citations.related(FakeGramps(), "family", "f1"))
+    assert [(r["depth"], r["kind"], r["gramps_id"]) for r in found] == [
+        (1, "event", "E0003"), (1, "person", "I0001"), (1, "person", "I0002")]
+    assert found[2]["detail"] == "1872–"
+    assert asyncio.run(citations.related(FakeGramps(), "person", "p9")) == []
+
+
+def test_document_suggests_what_its_citations_and_its_media_are_attached_to(conn):
+    gramps = FakeGramps()
+    gramps.objects["citations"]["cit1"]["backlinks"] = {"event": ["e1", "e2"], "media": ["med1"]}
+    gramps.objects["citations"]["cit2"]["backlinks"] = {"person": ["p1"], "event": ["e1"]}
+    gramps.media_links = {"person": ["p2", "p9"], "family": ["f1"]}
+    doc = asyncio.run(citations.document(gramps, FakePaperless(), CFG, 7, conn))
+    assert [(r["kind"], r["gramps_id"]) for r in doc["suggestions"]] == [
+        ("event", "E0001"), ("person", "I0001"), ("event", "E0002"), ("person", "I0002"), ("family", "F0001")]
+
+
 def test_document_lists_its_media_citations_newest_first_with_their_drafts(conn):
     citations.keep_draft(conn, "cit1", "se-dopbok", {"values": {"parish": "Vimmerby"}, "confidence": "High"})
     doc = asyncio.run(citations.document(FakeGramps(), FakePaperless(), CFG, 7, conn))
@@ -295,6 +462,31 @@ def test_create_route_answers_with_what_was_made_or_why_not(conn):
     assert len(citations.remembered(conn)) == 1
     r = call(app, "GET", "/citations/api/doc/9")
     assert r.status_code == 404
+
+
+def test_create_route_attaches_and_refuses_other_kinds(conn):
+    gramps = FakeGramps()
+    app = citations_app(gramps, FakePaperless(), conn)
+    body = {"doc_id": 7, "source": SOURCE, "citation": CITATION, "attach": PICKS[:2]}
+    r = call(app, "POST", "/citations/api/create", json=body)
+    assert r.status_code == 200
+    assert [a["gramps_id"] for a in r.json()["attached"]] == ["E0001", "I0001"]
+    r = call(app, "POST", "/citations/api/create", json={**body, "attach": [{"kind": "place", "handle": "pl1"}]})
+    assert r.status_code == 422
+    gramps.fail_on = {"p1"}
+    r = call(app, "POST", "/citations/api/create", json=body)
+    assert r.status_code == 502 and r.json()["detail"].startswith("Couldn't attach the citation to I0001")
+
+
+def test_find_and_related_routes(conn):
+    gramps = FakeGramps()
+    gramps.hits = {"person": ["p2"]}
+    app = citations_app(gramps, FakePaperless(), conn)
+    r = call(app, "GET", "/citations/api/find", params={"q": "maria"})
+    assert [x["gramps_id"] for x in r.json()] == ["I0002"]
+    r = call(app, "GET", "/citations/api/related/family/f1")
+    assert [x["gramps_id"] for x in r.json()] == ["E0003", "I0001", "I0002"]
+    assert call(app, "GET", "/citations/api/related/event/e1").status_code == 422
 
 
 def test_the_page_is_served(conn):

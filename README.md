@@ -18,7 +18,7 @@ Your family-tree data itself always lives in Gramps and the source systems. Bifr
 * Sync Immich photos into Gramps as media objects. Use Tags in Immich to mark a photo for sync and define a fuzzy date (like about 1920 or before June 1955).
 * Sync documents in Paperless-ngx to Gramps Web as media objects, and keep their versions, titles, dates, and transcription text up to date.
 * Link Immich's face recognition to Gramps people by pairing each recognized face with its Gramps person once. Then, every synced photo gets face boxes in Gramps.
-* Build a Gramps Source and Citation for a Paperless document step by step, by the rules of the citation style guide, and file the scan in Paperless with matching metadata. Change the record types the rules follow, or add your own, on the Record types page; Rebuild brings existing citations up to date.
+* Build a Gramps Source and Citation for a Paperless document step by step, by the rules of the citation style guide, attach the citation to the events, people and families it supports, and file the scan in Paperless with matching metadata. Change the record types the rules follow, or add your own, on the Record types page; Rebuild brings existing citations up to date.
 * Old handwriting and faded print often defeat regular OCR. Bifrost sends the page to an AI model and writes the transcription back into Paperless and Gramps.
 * Rebuild a Paperless PDF so every page shares the same width.
 * Give places boundaries on the minimap so you can see the extent of their jurisdiction.

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { recordGroups, sourceRows, referenceRows, citationRows, noteRows, outputRows, exampleNote, copyAllText, repositoryName, paperlessMatch } from '../src/form.js';
 import { RECORDS, recordById } from '../src/records/index.js';
-import { newDraft, draftFromExample, buildOutputs } from '../src/engine.js';
+import { newDraft, draftFromExample, buildOutputs, mediaOf } from '../src/engine.js';
 
 const klokk = recordById('no-klokkerbok');
 const example = () => draftFromExample(klokk, klokk.examples[0]);
@@ -110,6 +110,15 @@ test('Microfilm is a Pubinfo medium only where the record type can cite the film
   assert.ok(media(recordById('us-federal-census')).includes('Microfilm'));
   assert.ok(media(recordById('us-newspaper')).includes('Microfilm'));
   assert.ok(!media(recordById('se-dopbok')).includes('Microfilm'));
+});
+
+test('a record type\'s own Pubinfo mediums replace the usual list, the first one the default', () => {
+  const type = { ...recordById('se-folkrakning'), media: ['Digital images and index', 'Digital images'], defaults: { platform: 'FamilySearch', pubmedium: 'Digital images and index' } };
+  const d = newDraft(type);
+  assert.deepEqual(row(referenceRows(type, d), 'values.pubmedium').list, ['Digital images and index', 'Digital images']);
+  assert.equal(d.values.pubmedium, 'Digital images and index');
+  assert.equal(buildOutputs(type, d).pubinfo, 'Digital images and index, FamilySearch (https://www.familysearch.org).');
+  assert.deepEqual(mediaOf({ ...type, media: ['', ' '] }), ['Digital images', 'Database with images', 'Database'], 'an emptied list falls back');
 });
 
 test('Archive shows where an FRN names it; a newspaper names it only on film, so shows it only then', () => {

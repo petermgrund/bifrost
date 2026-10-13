@@ -1,4 +1,5 @@
 import { BifrostElement, html, nothing, api, post, statusLine, searchField } from './core.js';
+import { loadRecordTypes } from './record-registry.js';
 import {
   RECORDS, recordById, newDraft, draftFromExample, buildOutputs, exampleLabel, setVariant, nextCitationDraft,
   runChecks, plain, hasGap, yearOf, loadState, saveState, recordGroups, sourceRows, referenceRows, citationRows,
@@ -73,7 +74,7 @@ class CitationsWizard extends BifrostElement {
     this.result = w.result || null;
     this.basis = w.basis || null;
     this.ctx = null;
-    this.loadError = '';
+    this.loadError = registryError;
     this.doc = null;
     this.docQ = '';
     this.docHits = [];
@@ -461,7 +462,7 @@ class CitationsWizard extends BifrostElement {
       draft: {
         type: type.id,
         draft: { values: draft.values, subject: draft.subject, confidence: draft.confidence, variant: draft.variant,
-          overrides: draft.overrides, guide: GUIDE.changed },
+          overrides: draft.overrides, guide: GUIDE.changed, typeVersion: type.version || 0 },
       },
     };
     this.busy = true;
@@ -548,6 +549,7 @@ class CitationsWizard extends BifrostElement {
   }
 
   ref(ref, field = '') {
+    if (!ref) return nothing;
     if (!GUIDE.refs[ref]) return html`<span class="cw-ref plain">${ref}</span>`;
     return html`<span class="cw-ref" tabindex="0" @mouseenter=${(e) => this.showPop(e, ref, field)}
       @focus=${(e) => this.showPop(e, ref, field)} @mouseleave=${() => { this.pop = null; }}
@@ -959,4 +961,10 @@ class CitationsWizard extends BifrostElement {
   }
 }
 
+let registryError = '';
+try {
+  await loadRecordTypes();
+} catch (e) {
+  registryError = `Record types: ${errText(e)}`;
+}
 customElements.define('citations-wizard', CitationsWizard);

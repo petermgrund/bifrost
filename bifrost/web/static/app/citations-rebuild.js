@@ -1,5 +1,6 @@
 import { BifrostElement, html, nothing, api, post, spinner, statusLine } from './core.js';
-import { recordById, buildOutputs, restoreDraft, plain, hasGap, GUIDE } from '/static/citations/citations.js';
+import { loadRecordTypes } from './record-registry.js';
+import { SHIPPED, RECORDS, recordById, buildOutputs, restoreDraft, typeAtVersion, plain, hasGap, GUIDE } from '/static/citations/citations.js';
 
 const API = '/citations/api';
 const TAG = 'General form';
@@ -15,24 +16,52 @@ function errText(e) {
 
 const sameList = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
+/** The record types as they were at the saved versions the citations were made with, by "id@version". */
+async function typesThen(items) {
+  const wanted = new Map();
+  for (const item of items) {
+    const id = item.draft?.type, version = item.draft?.draft?.typeVersion;
+    if (!id || typeof version !== 'number' || (recordById(id)?.version || 0) === version) continue;
+    if (!wanted.has(id)) wanted.set(id, new Set());
+    wanted.get(id).add(version);
+  }
+  const then = new Map();
+  await Promise.all([...wanted].map(async ([id, versions]) => {
+    const rows = (await api(`${API}/types/${encodeURIComponent(id)}/versions`)).versions;
+    for (const version of versions) {
+      const row = rows.find((r) => r.version === version);
+      const type = row ? typeAtVersion(SHIPPED, id, row.definition, row.kind) : typeAtVersion(SHIPPED, id, null, 'shipped');
+      if (type) then.set(`${id}@${version}`, type);
+    }
+  }));
+  return then;
+}
+
 /**
- * What the current rules would change on one citation (A15): a field still as the old rules built it takes the new
- * text; a field that differs from both was edited by hand and stays.
+ * What the current rules would change on one citation (A15): a field still as the record type built it then takes
+ * the new text; a field that differs from both was edited by hand and stays. A General form citation can be rebuilt
+ * under the record type chosen for it (A14).
  */
-function plan(item) {
+function plan(item, then, retype = '') {
   const saved = item.draft?.draft || {};
-  const type = recordById(item.draft?.type || '');
-  if (!type) return { item, state: 'gone' };
+  const id = item.draft?.type || '';
+  const built = recordById(id);
+  const type = retype ? recordById(retype) : built;
+  if (!type) return { item, state: 'gone', retype };
+  const base = built || SHIPPED.find((t) => t.id === id) || type;
+  const version = saved.typeVersion;
+  const was = typeof version !== 'number' ? SHIPPED.find((t) => t.id === id) || base
+    : version === (base.version || 0) ? base : then.get(`${id}@${version}`) || base;
   const draft = restoreDraft(type, saved);
   const legacy = !saved.guide || saved.guide < LEGACY_BEFORE;
-  const before = buildOutputs(type, draft, { legacy });
+  const before = buildOutputs(was, restoreDraft(was, saved), { legacy });
   const now = buildOutputs(type, draft);
   const changes = {}, kept = [];
   for (const [key, label] of TEXT_FIELDS) {
     const have = item[key], want = plain(now[key]);
     if (have === want) continue;
     if (have === plain(before[key])) {
-      if (hasGap(now[key])) return { item, type, state: 'input', missing: label };
+      if (hasGap(now[key])) return { item, type, state: 'input', missing: label, retype };
       changes[key] = want;
     } else kept.push([label, have]);
   }
@@ -42,7 +71,7 @@ function plan(item) {
   const tagged = Boolean(type.tag);
   if (item.tags.includes(TAG) !== tagged) changes.tagged = tagged;
   const state = Object.keys(changes).length ? 'change' : kept.length ? 'kept' : 'current';
-  return { item, type, draft, saved, changes, kept, state };
+  return { item, type, draft, saved, changes, kept, state, retype };
 }
 
 const STATE = {
@@ -65,6 +94,8 @@ class CitationsRebuild extends BifrostElement {
     super();
     this.plans = null;
     this.gramps = '';
+    this.then = new Map();
+    this.retype = {};
     this.busy = '';
     this.msg = null;
   }
@@ -75,15 +106,35 @@ class CitationsRebuild extends BifrostElement {
   }
 
   async load() {
+    if (registryError) {
+      this.plans = [];
+      this.msg = ['error', registryError];
+      return;
+    }
     try {
       const got = await api(`${API}/rebuild`);
+      this.then = await typesThen(got.items);
       this.gramps = got.gramps_url || '';
-      this.plans = got.items.map(plan);
+      this.plans = got.items.map((item) => plan(item, this.then, this.retype[item.handle]));
       this.msg = null;
     } catch (e) {
       this.plans = [];
       this.msg = ['error', errText(e)];
     }
+  }
+
+  retypeTo(p, id) {
+    this.retype = { ...this.retype, [p.item.handle]: id };
+    this.plans = this.plans.map((x) => (x.item.handle === p.item.handle ? plan(x.item, this.then, id) : x));
+  }
+
+  retypeField(p) {
+    const choices = RECORDS.filter((t) => t.id !== 'general').sort((a, b) => a.name.localeCompare(b.name));
+    return html`<div class="field suffix border small rb-retype"><select ?disabled=${Boolean(this.busy)}
+      @change=${(e) => this.retypeTo(p, e.target.value)}>
+      <option value="" ?selected=${!p.retype}>General form</option>
+      ${choices.map((t) => html`<option value=${t.id} ?selected=${t.id === p.retype}>${t.name}</option>`)}
+    </select><i>arrow_drop_down</i></div>`;
   }
 
   body(p) {
@@ -97,7 +148,7 @@ class CitationsRebuild extends BifrostElement {
       note: text ? p.item.note : '',
       frn: text ? c.frn ?? p.item.frn : null,
       srn: text ? c.srn ?? p.item.srn : null,
-      draft: { type: p.type.id, draft: { ...p.saved, guide: GUIDE.changed } },
+      draft: { type: p.type.id, draft: { ...p.saved, guide: GUIDE.changed, typeVersion: p.type.version || 0 } },
     };
   }
 
@@ -107,6 +158,8 @@ class CitationsRebuild extends BifrostElement {
     try {
       const got = await post(`${API}/rebuild`, { items: list.map((p) => this.body(p)) });
       this.msg = got.failed.length ? ['error', got.failed.map((f) => f.error).join('; ')] : null;
+      const failed = new Set(got.failed.map((f) => f.handle));
+      this.retype = Object.fromEntries(Object.entries(this.retype).filter(([handle]) => failed.has(handle)));
       await this.load();
     } catch (e) {
       this.msg = ['error', errText(e)];
@@ -140,7 +193,8 @@ class CitationsRebuild extends BifrostElement {
         <div class="max">
           <div>${link ? html`<a class="link" href=${link} target="_blank" rel="noopener">${p.item.gramps_id}</a>` : p.item.gramps_id}
             · ${p.item.source.title || p.item.source.gramps_id}</div>
-          <div class="small-text secondary-text">${p.type?.name || p.item.draft?.type}</div>
+          ${p.item.draft?.type === 'general' ? this.retypeField(p)
+    : html`<div class="small-text secondary-text">${p.type?.name || p.item.draft?.type}</div>`}
         </div>
         <span class="chip small ${cls}">${label}</span>
         ${p.state === 'change' ? html`<button class="border small" ?disabled=${Boolean(this.busy)}
@@ -165,5 +219,11 @@ class CitationsRebuild extends BifrostElement {
       </nav>
       ${this.plans.map((p) => this.card(p))}`;
   }
+}
+let registryError = '';
+try {
+  await loadRecordTypes();
+} catch (e) {
+  registryError = `Record types: ${errText(e)}`;
 }
 customElements.define('citations-rebuild', CitationsRebuild);

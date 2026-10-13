@@ -1,6 +1,6 @@
 // Describes what each wizard step asks for and shows, as plain rows the screen draws.
-import { CHAPTERS, LEVELS, PLATFORMS, ARCHIVES, SUGGESTIONS, COPY_FORMS, MEDIA } from './tables.js';
-import { OUTPUT_GROUPS, TEMPLATE_KEYS, resolveType, usesDetails, usesToken, ruleRef, exampleLabel, isFilm } from './engine.js';
+import { CHAPTERS, LEVELS, PLATFORMS, ARCHIVES, SUGGESTIONS, COPY_FORMS } from './tables.js';
+import { OUTPUT_GROUPS, TEMPLATE_KEYS, resolveType, usesDetails, usesToken, ruleRef, exampleLabel, isFilm, mediaOf } from './engine.js';
 import { expectedFor, diffOutputs } from './compare.js';
 import { plain } from './template.js';
 
@@ -50,7 +50,7 @@ export function referenceRows(type, draft) {
   const rows = [text('values.platform', 'Platform', v.platform, { list: Object.keys(PLATFORMS) })];
   const film = [type, ...(type.pageVariants || [])].some(x => x.frnMicrofilm);
   if (type.pubinfo === undefined || usesToken(type, 'pubmedium')) {
-    rows.push(text('values.pubmedium', 'Pubinfo medium', v.pubmedium, { list: MEDIA.filter(m => film || m !== 'Microfilm') }));
+    rows.push(text('values.pubmedium', 'Pubinfo medium', v.pubmedium, { list: mediaOf(type) }));
   }
   const online = usesToken(type, 'archive', TEMPLATE_KEYS.filter(k => k !== 'frnMicrofilm'));
   if (online || (film && isFilm(v.pubmedium))) rows.push(text('values.archive', 'Archive', v.archive, { list: ARCHIVES[type.chapter] }));

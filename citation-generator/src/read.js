@@ -2,7 +2,7 @@
 // citations made before the wizard kept its drafts. A reading is exact when it rebuilds the same page string, FRN,
 // and SRN; one whose page string and FRN rebuild is close (an SRN edited by hand); anything less is none.
 import { RECORDS, recordById } from './records/index.js';
-import { REFERENCE_VALUES, STANDARD_VALUES, ENGINE_TOKENS, newDraft, setVariant, resolveType, inputFields, recordNoun, subjectOf, srnSubjectOf, pageLocators, buildOutputs } from './engine.js';
+import { REFERENCE_VALUES, STANDARD_VALUES, ENGINE_TOKENS, newDraft, setVariant, resolveType, inputFields, recordNoun, subjectOf, srnSubjectOf, pageLocators, buildOutputs, mediaOf } from './engine.js';
 import { COPY_FORMS, MEDIA, PLATFORMS } from './tables.js';
 import { fill, hasGap } from './template.js';
 
@@ -30,9 +30,10 @@ function shapes(template) {
 function pattern(template, known) {
   let src = '';
   const seen = new Set();
-  for (const part of template.split(/(«|»|\{\w+\})/)) {
+  for (const part of template.split(/(«|»|\{\w+(?:\|\w+)?\})/)) {
     if (part === '«') src += '(?:';
     else if (part === '»') src += ')?';
+    else if (/^\{\w+\|\w+\}$/.test(part)) src += '.+?';
     else if (/^\{\w+\}$/.test(part)) {
       const key = part.slice(1, -1);
       if (filled(known[key])) src += escapeRe(known[key]);
@@ -233,7 +234,7 @@ function readerFor(type, variant, cited) {
       return n;
     }
     const online = /^(.+?), (.+) \((\S+)\)\.$/s.exec(text);
-    if (!online || !MEDIA.includes(online[1])) return c;
+    if (!online || !(MEDIA.includes(online[1]) || mediaOf(t).includes(online[1]))) return c;
     const n = taking(c, { platform: online[2] });
     if (!filled(n.d.values.pubmedium)) n.d.values.pubmedium = online[1];
     return n;

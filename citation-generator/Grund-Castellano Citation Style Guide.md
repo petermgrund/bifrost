@@ -14,7 +14,7 @@ Every source and citation in the Grund-Castellano tree is built from a formula, 
 
 ### How each chapter is laid out
 
-Every Part B chapter uses the same 12 numbered sections, so the same question always lives in the same place:
+Every Part B chapter uses the same 12 numbered sections, so the same question always lives in the same place. Bifrost holds the record types: they are changed or added on its Record types page, and its printout gives the record-type tables as Bifrost holds them.
 
 | § | Answers | § | Answers |
 | --- | --- | --- | --- |
@@ -446,6 +446,7 @@ A rule change reaches the citations already in Gramps through Bifrost's rebuild,
 - A field you edited by hand keeps your edit and is listed, so you decide whether the new rule replaces it.
 - A citation made outside the wizard is read back first, and only an exact or close reading is rebuilt.
 - A General form citation (A14) is upgraded by choosing its record type once one exists; the tag comes off when it is rebuilt under that type.
+- A record type changed on Bifrost's Record types page is a rule change too. Each citation keeps the version of its record type it was made with, and Rebuild compares the citation with that version.
 
 ## Part B.1: Norwegian sources
 
@@ -2149,6 +2150,7 @@ Newest first. Add a row for every rule change: date, rule ID or section, what ch
 
 | Date | Rule / section | Change | Why |
 | --- | --- | --- | --- |
+| 2026-10-13 | Start here; A15 | Bifrost holds the record types, built-in ones included: they are changed or added on its Record types page, which prints the record-type tables. Each citation keeps the version of its record type it was made with, so Rebuild compares it with that version. | User decision: Bifrost becomes the master for record types |
 | 2026-10-13 | A10 | The Pubinfo medium is free text; the Medium table lists the usual ones. | User decision: a record's medium isn't always one of the four |
 | 2026-10-13 | A10; B.1, B.2, B.4 §9; B.4 §1–§12; C1 | Record types are named in English: Parish register, Parish register (copy), Census 1801, Census 1865 and later, Court journal, Probate register, Land register; Household examination, Birth and baptism book, Banns and marriage book, Death book, Parish meeting minutes, Estate inventory, Census (SVAR), Land survey act; Book. The Family Bible, funeral program, edited collection and periodical article record types are removed with their rows and worked examples; such items are cited with the General form (A14). | User decision: a shorter, English list of record types |
 | 2026-10-13 | Start here; Gramps field map; A3; A4; A7; A14; A15; B.1–B.4 §7; worked examples | The page string is where the entry is in the Source, then what the citation is cited for, always: `certificate no. 1929-MN-XXXXXX (death)`. The subject, record noun and parentheticals move to citation attributes (Subject, Record, Household, Which entry, Source says, Evidence, with Record type and Guide); the notes still name them. What a citation is cited for starts from the record noun's usual fact (new A7 table) and reaches the FRN and SRN only when it differs. Headstone applications, compiled service records and letters have no locator, so their page string is only `([cited for])`. New A14 (General form, tagged `General form`) and A15 (rebuilding citations after a rule change). | User decision: a Gramps list needs where and what for; the rest is kept structured in attributes |

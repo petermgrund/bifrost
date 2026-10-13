@@ -39,6 +39,17 @@ Copy `config.example.yaml` to `config.yaml` and fill it in. Make sure you create
 
 At the moment Bifrost has no authentication. Keep it on a trusted network, bind it to localhost, or put an authenticating reverse proxy in front.
 
+# API
+
+Read-only JSON for what only Bifrost holds. `/docs` lists every endpoint.
+
+| Endpoint | Returns |
+|---|---|
+| `/api/v1/pinpoint/{pinpoint}` | The cells a pinpoint like `69T5AU.L2.C6` points at: values, translations, linked people, and their place on the page |
+| `/api/v1/pid/{pid}` | A document's tables and page notes |
+| `/api/v1/code/{code}` | A code's Codes ledger entry: description, location, parent and children, pencilings, scans, history |
+| `/api/v1/export` | Everything above plus photo collections, Gramps-Immich person links and the citation wizard's saved inputs, as one file |
+
 # Feature Requests
 
 Feature requests can be submitted by creating a new issue and tagging it as a new feature request.

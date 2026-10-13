@@ -110,17 +110,9 @@ async def find_people(request: Request, q: str = "", limit: int = 20) -> list[di
 @router.get("/api/people/lookup")
 async def lookup_people(request: Request, handles: str = "") -> list[dict]:
     """The linked people's profiles; a person deleted from Gramps comes back as missing"""
-    gramps = _state(request).gramps
     wanted = list(dict.fromkeys(h for h in handles.split(",") if tables.valid_handle(h)))[:200]
-    gate = asyncio.Semaphore(8)
-
-    async def one(handle: str) -> dict:
-        async with gate:
-            person = await gramps.person_profile(handle)
-        return tables.person_summary(person) if person else {"handle": handle, "missing": True}
-
     try:
-        return list(await asyncio.gather(*(one(h) for h in wanted)))
+        return await tables.person_summaries(_state(request).gramps, wanted)
     except GrampsError as exc:
         raise HTTPException(502, f"Gramps unavailable: {exc}") from exc
 

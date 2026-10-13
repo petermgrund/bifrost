@@ -80,6 +80,7 @@ async def _immich_error(_request: Request, exc: ImmichError):
 app.mount("/static", _NoCacheStatic(directory=WEB_DIR / "static"), name="static")
 
 from .routes.ancestry import router as ancestry_router  # noqa: E402
+from .routes.api import router as api_router  # noqa: E402
 from .routes.citations import router as citations_router  # noqa: E402
 from .routes.codes import router as codes_router  # noqa: E402
 from .runs import ACTIVE  # noqa: E402
@@ -93,6 +94,7 @@ from .routes.tables import router as tables_router  # noqa: E402
 from .routes.transcribe import router as transcribe_router  # noqa: E402
 
 app.include_router(ancestry_router)
+app.include_router(api_router)
 app.include_router(citations_router)
 app.include_router(codes_router)
 app.include_router(faces_router)

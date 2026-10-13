@@ -67,7 +67,7 @@ export function bundle(entries = ENTRIES.map(e => join(SRC, e))) {
 /** The guide excerpts the screen needs: section titles and first paragraphs, worked examples, Change log date. */
 export function guideData(guide = loadGuide()) {
   const refs = [];
-  for (let i = 1; i <= 13; i++) refs.push(`A${i}`);
+  for (let i = 1; i <= 15; i++) refs.push(`A${i}`);
   for (let i = 1; i <= 11; i++) refs.push(`C${i}`);
   for (const chapter of CHAPTERS) for (let i = 1; i <= 12; i++) refs.push(`${chapter} §${i}`);
   const sections = {};

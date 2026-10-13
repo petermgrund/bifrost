@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadGuide } from '../tools/guide.js';
-import { PLATFORMS, STATE_ABBREV, CHAPTER_CODE, MEDIA, isoDate, stateAbbrev, lastWord } from '../src/tables.js';
+import { PLATFORMS, STATE_ABBREV, CHAPTER_CODE, MEDIA, USUAL_CITED_FOR, isoDate, stateAbbrev, lastWord } from '../src/tables.js';
 import { RECORDS } from '../src/records/index.js';
 
 const guide = loadGuide();
@@ -47,4 +47,15 @@ test('helpers', () => {
   assert.equal(stateAbbrev('Minnesota'), 'Minn.');
   assert.equal(stateAbbrev('Oregon'), 'Oregon');
   assert.equal(lastWord('Birger Kirkeby'), 'Kirkeby');
+});
+
+test('usual cited-for values match the A7 Usual cited for table', () => {
+  const table = guide.tables('A7').find(t => t.header[0] === 'Record noun' && t.header[1] === 'Usual cited for');
+  assert.ok(table, 'A7 has no Usual cited for table');
+  const fromGuide = {};
+  for (const [nouns, fact] of table.rows) for (const noun of nouns.split(', ')) fromGuide[noun.replace(/ \(no noun\)$/, '')] = fact;
+  assert.deepEqual(USUAL_CITED_FOR, fromGuide);
+  const names = new Set(RECORDS.map(r => r.name));
+  const nouns = new Set(RECORDS.flatMap(r => [...(r.nouns || []), ...(r.pageVariants || []).flatMap(v => v.nouns || [])]));
+  for (const key of Object.keys(USUAL_CITED_FOR)) assert.ok(nouns.has(key) || names.has(key), `${key} is neither a record noun nor a record type`);
 });

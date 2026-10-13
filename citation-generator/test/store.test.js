@@ -141,7 +141,7 @@ test('a kept draft comes back with its inputs, without output edits, and with re
   assert.deepEqual([d.values.parish, d.values.vol, d.values.page, d.subject.name, d.subject.which, d.confidence], ['Vimmerby', 'C:8', '45', 'Anders Johan', 'b. 1868', 'Very High']);
   assert.equal('gone' in d.values, false);
   assert.deepEqual(d.overrides, {});
-  assert.equal(buildOutputs(dop, d).page, 'p. 45, no. ⟦Entry no.⟧, Anders Johan (b. 1868) birth and baptism entry');
+  assert.equal(buildOutputs(dop, d).page, 'p. 45, no. ⟦Entry no.⟧ (birth and baptism)');
   const vital = recordById('us-vital');
   assert.equal(restoreDraft(vital, { subject: { noun: 'marriage' }, variant: 'license' }).subject.noun, 'marriage license');
 });

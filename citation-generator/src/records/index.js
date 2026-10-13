@@ -3,8 +3,9 @@ import { NORWEGIAN } from './norwegian.js';
 import { SWEDISH } from './swedish.js';
 import { US } from './us.js';
 import { PUBLISHED } from './published.js';
+import { GENERAL } from './general.js';
 
-export const RECORDS = [...NORWEGIAN, ...SWEDISH, ...US, ...PUBLISHED];
+export const RECORDS = [...NORWEGIAN, ...SWEDISH, ...US, ...PUBLISHED, ...GENERAL];
 
 export function recordById(id) {
   return RECORDS.find(r => r.id === id) || null;

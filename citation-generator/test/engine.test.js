@@ -64,13 +64,13 @@ test('draftFromExample routes inputs to values, subject, confidence, and variant
 
 test('builds every Source, Citation, note, and Paperless field', () => {
   const o = buildOutputs(PARISH, filled());
-  assert.deepEqual(Object.keys(o).sort(), OUTPUT_GROUPS.flatMap(g => g.fields.map(([key]) => key)).sort());
+  assert.deepEqual(Object.keys(o).sort(), [...OUTPUT_GROUPS.flatMap(g => g.fields.map(([key]) => key)), 'attributes'].sort());
   assert.equal(o.title, 'Sweden, Norra Ny, AI:11');
   assert.equal(o.abbrev, 'NORRA NY AI:11');
   assert.equal(o.pubinfo, 'Digital images, Riksarkivet (https://sok.riksarkivet.se).');
   assert.equal(o.author, 'Norra Ny församling');
   assert.equal(o.callNumber, 'SE/VA/13398/A I/11');
-  assert.equal(o.page, 'p. 8 (image 19), Per Persson household');
+  assert.equal(o.page, 'p. 8 (image 19), Per Persson household (residence)');
   assert.equal(o.confidence, 'High');
   assert.equal(o.frn, 'Norra Ny församling, vol. AI:11, p. 8, household of Per Persson; digital image, Riksarkivet (https://sok.riksarkivet.se/x : accessed 20 April 2026); citing Värmlandsarkiv.');
   assert.equal(o.srn, 'Norra Ny AI:11, p. 8, Per Persson household.');
@@ -225,7 +225,7 @@ test('page variants switch the page template, nouns, and inputs', () => {
   d.variant = 'license';
   d.values.license = '12';
   Object.assign(d.subject, { name: 'Larsson-Söderström', noun: 'marriage license' });
-  assert.equal(buildOutputs(WITH_VARIANTS, d).page, 'license no. 12, Larsson-Söderström marriage license');
+  assert.equal(buildOutputs(WITH_VARIANTS, d).page, 'license no. 12, Larsson-Söderström marriage license (marriage)');
   assert.deepEqual(resolveType(WITH_VARIANTS, d).nouns, ['marriage license']);
   assert.deepEqual(inputFields(WITH_VARIANTS).map(([key]) => key), ['parish', 'vol', 'call', 'page', 'image', 'cert', 'license', 'citing']);
 });
@@ -273,11 +273,11 @@ test('page locator tokens are available to every template and use the trimmed va
   d.values.page = '  ';
   d.values.image = ' 19 ';
   const o = buildOutputs(type, d);
-  assert.equal(o.page, 'image 19, Per Persson household');
+  assert.equal(o.page, 'image 19, Per Persson household (residence)');
   assert.equal(o.frn, 'image 19; image 19.');
   assert.equal(o.srn, 'image 19.');
   d.values.image = '';
-  assert.equal(plain(buildOutputs(type, d).page), '[Page or image], Per Persson household');
+  assert.equal(plain(buildOutputs(type, d).page), '[Page or image], Per Persson household (residence)');
 });
 
 test('usesToken looks through every template, including page variants', () => {

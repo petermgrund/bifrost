@@ -9,7 +9,7 @@ Every source and citation in the Grund-Castellano tree is built from a formula, 
 1. **Find the record type.** Open the Part B chapter for the domain (Norwegian, Swedish, US, Published & personal). Not sure which? Use the Cross-walk near the end.
 2. **Scope the Source.** One Source per navigable unit (A1). Reuse an existing Source if one already covers this volume, county-year, cemetery, book, newspaper, or artifact, even if you read this item on another platform or on film.
 3. **Fill the Source fields** from the chapter's tables: Author (section 2), Repository (3), Title (4), Call number (5), Pubinfo (6), Abbrev (10).
-4. **Build the Citation.** Page string from the chapter's section 7, subject and parentheticals per A7, confidence from section 8, Citation date left blank (A2). Split into two citations if evidence quality differs (A3).
+4. **Build the Citation.** Page string from the chapter's section 7, ending with what the citation is cited for (A7); the subject and its parentheticals go in the citation's attributes (A7). Confidence from section 8, Citation date left blank (A2). Split into two citations if evidence quality differs (A3).
 5. **Write the notes.** First Reference Note and Short Reference Note (A5), modeled on the chapter's worked example (section 12).
 
 ### How each chapter is laid out
@@ -52,14 +52,16 @@ Every EE citation concept has exactly one Gramps field, in all four domains.
 | Short cite | Source **Abbrev** | Short, readable identifier for Gramps source-list views. | Each chapter §10 |
 | Publication statement | Source **Pubinfo** | Medium + platform (+ homepage URL), or `[City]: [Publisher], year.` for published works. | A10 |
 | Archival machine path | Source **Call number** | The archive's machine reference (NAD `AV/…` or `SE/VA/…`, NARA publication number, state series ID). | A4 |
-| Locator within the source | Citation **Page** | Granular locator + subject pointing to one entry. | A4, A7 |
+| Locator within the source | Citation **Page** | Where the entry is in the source, then what the citation is cited for. | A4, A7 |
+| Subject and its remarks | Citation **Attributes** | Subject, Record, Household, Which entry, Source says, Evidence; with Record type and Guide. | A7, A15 |
 | Reference-note prose | Citation **Notes** | First Reference Note, Short Reference Note, optional Abstract / Transcription / Translation. | A5 |
 | Date | Citation **Date** | Always blank. | A2 |
 | Evidence appraisal | Citation **Confidence** | The 5-level Gramps scale. | A6 |
+| Record with no rule yet | Citation **Tag** | `General form`. | A14 |
 
 ## Part A: Shared rules
 
-These 13 rules apply to every source in every domain. Chapters refer to them by ID.
+These 15 rules apply to every source in every domain. Chapters refer to them by ID.
 
 | ID | Rule | One-line summary |
 | --- | --- | --- |
@@ -69,13 +71,15 @@ These 13 rules apply to every source in every domain. Chapters refer to them by 
 | A4 | Locators | Human label in Title/Abbrev, machine path in Call number, granular locator in Page. |
 | A5 | Citation notes | Every citation gets an FRN and an SRN. |
 | A6 | Confidence | 5-level scale anchored to EE's three evidence axes. |
-| A7 | Page-string subject | `[locators], [name] [record-noun]` + ordered parentheticals. |
+| A7 | Page string and attributes | `[locators] ([cited for])`; the subject and its parentheticals go in attributes. |
 | A8 | Title | Locality-led, largest jurisdiction first. |
 | A9 | Repository | Archive, then private custodian, else blank. |
 | A10 | Pubinfo | `[medium], [platform] (homepage URL).` or an imprint. |
 | A11 | Bibliography | Transform fields to EE Source List form; do not print the Title. |
 | A12 | Privacy | Living informants' addresses are never published. |
 | A13 | Abbreviations | p., pp., vol., col., no., fol. |
+| A14 | General form | A record with no rule yet is cited from five questions and tagged `General form`. |
+| A15 | Rebuilding | A rule change reaches existing citations through a rebuild; hand edits stay. |
 
 ### A1 · Source scoping
 
@@ -124,11 +128,11 @@ Use one citation when all attached facts share the same evidence quality; use se
 
 **Two or more citations**, different quality:
 
-- A baptism entry that also gives the mother's age: child's birth/baptism (Very High) and mother's birth year (Normal at most), each with its own page-string subject and FRN.
+- A baptism entry that also gives the mother's age: child's birth/baptism (Very High) and mother's birth year (Normal at most), each with its own subject, cited-for and FRN.
 - A death certificate: death (Very High) and parentage (Normal or Low).
 - An obituary giving a death date and a birth date 80 years earlier.
 
-When split citations share a page-string subject, as the obituary's two do, each page string ends with what it is cited for (A7).
+Split citations share their locators, so what each is cited for (A7) is what tells them apart: `certificate no. 1929-MN-XXXXXX (death)` and `certificate no. 1929-MN-XXXXXX (parents' names)`.
 
 ### A4 · Locators
 
@@ -147,7 +151,7 @@ Example: the Title says `AI:11`, the Call number says `SE/VA/13398/A I/11`. Same
 **Two hard rules for the page string:**
 
 1. **No raw image IDs or URL parameters** (`kb20060313011115`, `ft20110110330371`, `C0038409_00019`, `Folk_817085-004`). They go only in the FRN URL. An image number is different: it is the number you enter in the platform's viewer, so it stays in the page string as `(image [I])` whenever it differs from the page number. Leave it out when it matches the page, or when there is no image viewer.
-2. **No place name in the subject slot.** Place lives on the Gramps event and in the FRN prose. The page string locates the entry in the volume; place locates the event in the world.
+2. **No place name in the Subject.** Place lives on the Gramps event and in the FRN prose. The page string locates the entry in the volume; place locates the event in the world.
 
 ### A5 · Citation notes
 
@@ -177,15 +181,30 @@ Use the 5-level Gramps scale, anchored to EE's three axes: original vs. derivati
 
 Per-record-type levels live in each chapter's §8.
 
-### A7 · Page-string subject
+### A7 · Page string and attributes
 
-The page string ends in a subject: `[locators], [name] [record-noun]`. Locator words are lower case, even at the start of the page string (`p. 57`, `image 62`, `certificate no. 1929-MN-XXXXXX`, `district 009 Blegstad`); names keep their capitals.
+The page string says where the entry is in the Source, then what the citation is cited for: `[locators] ([cited for])`. The locators come from the chapter's §7. Locator words are lower case, even at the start of the page string (`p. 57`, `image 62`, `certificate no. 1929-MN-XXXXXX`, `district 009 Blegstad`). A record type with no locator (a headstone application, a compiled service record, a family letter) has only `([cited for])`.
+
+**What it is cited for** is always given, lower case except for names: `p. 57 (image 62), no. 21 (birth and baptism)`, `certificate no. 1929-MN-XXXXXX (parents' names)`. It starts from the record noun's usual fact (*Usual cited for* below), and you change it when one item gives several citations (A3) or the citation is for something else. When it differs from that usual fact, the FRN also gives it as `(documenting …)` at the end of the item it describes, before the image, film, or holding clause, and the SRN ends with it: `…, Olaf Nygren household news mention (documenting date and attendees); digital image, …` (B.3 Example 14).
+
+**Attributes.** Who the entry is about, and what the record says about them, go on the Gramps citation as attributes, one per part; an empty part is left out. The FRN and SRN still name the subject as each chapter's templates do.
+
+| Attribute | Holds | Example |
+| --- | --- | --- |
+| Subject | The name, as §9 forms it; an interview's, video's or research note's topic | `Karen Indiana Evensdatter`, `Larsson-Söderström` |
+| Record | The record noun in its form (*Record nouns* below) | `household`, `birth and baptism index entry` |
+| Household | The head's household, for a member who is not the head | `Hansen household` |
+| Which entry | Category 1 parenthetical | `b. 1773`, `at Vinger gård` |
+| Source says | Category 2 parenthetical | `tjenestepige`, `naturalized 1894` |
+| Evidence | Category 3 parenthetical | `stated age 14`, `informant on Per Larsson's death certificate` |
+| Record type | The record type the citation was built with, and its form | `Census 1865 and later`, `Naturalization · Final papers (before 1906)` |
+| Guide | The date of this guide's newest Change log row when the citation was built (A15) | `2026-10-13` |
 
 - **Record-noun** says what was cited and in what form; see *Record nouns* below.
-- **Non-head household member:** `[Subject] in [Head-surname] household`.
-- **Couples:** hyphenated surnames (`Larsson-Söderström marriage entry`), not "and". Full given names go in the FRN, except a newspaper item's FRN, which repeats the page string's subject (B.3 §7).
+- **Non-head household member:** Subject is the member, Household the head's (`Karen Indiana Evensdatter`, `Hansen household`). Where a note names the subject, it reads `[Subject] in [Head-surname] household`.
+- **Couples:** hyphenated surnames (`Larsson-Söderström`), not "and". Full given names go in the FRN, except a newspaper item's FRN, which names the item by its subject and record noun (B.3 §7).
 
-**Parenthetical categories.** Each answers one question:
+**Parenthetical categories.** Each answers one question and has its own attribute:
 
 | Category | Question | Patterns |
 | --- | --- | --- |
@@ -197,16 +216,44 @@ The page string ends in a subject: `[locators], [name] [record-noun]`. Locator w
 - A **source-state** note records something the source states, never an inference.
 - An **evidence-quality flag** explains a lower confidence, or why the subject differs from the entry's own subject (a relative, informant, witness, next of kin, or beneficiary named in someone else's record).
 
-**Combining.** One set of parentheses, comma-separated, always in the order 1, 2, 3:
+Several of one category go in one attribute, comma-separated (`retired soldier, naturalized 1894`).
+
+**In the notes.** Where a note template names the subject with its parentheticals (a census or newspaper FRN and SRN; an SRN keeps only category 1), they go in one set of parentheses, comma-separated, always in the order 1, 2, 3:
 
 - `Per Persson (b. 1773, retired soldier, birth year inferred from age)`
 - `Per Larsson (b. 1848, naturalized 1894, birth year inferred from age)`
 - `John Grund (junior, son, stated age 14)`
 - `Anna Larsson (widow, informant on Per Larsson's death certificate)`
 
-**Placement.** The parentheses follow the name. They follow the record noun instead when they describe the record itself (`Per Larsson death certificate (amended)`, `Larsson-Söderström marriage entry (by license)`) or everyone the subject covers, such as a couple or a whole household (`Steve Maisuk household (birth years inferred from ages)`).
+The parentheses follow the name. They follow the record noun instead when they describe the record itself (`Per Larsson death certificate (amended)`, `Larsson-Söderström marriage entry (by license)`) or everyone the subject covers, such as a couple or a whole household (`Steve Maisuk household (birth years inferred from ages)`).
 
-**What it is cited for.** A page string may end with what the citation is cited for, in parentheses after everything else, lower case except for names: `11 July 1917, p. 3, col. 1, Olaf Nygren household news mention (date and attendees)`. Add it when one item gives several citations that nothing else in the page string tells apart (A3), or when the citation is for something its record noun does not say; leave it out otherwise. The SRN ends the same way, and the FRN gives it as `(documenting …)` at the end of the item it describes, before the image, film, or holding clause: `…, Olaf Nygren household news mention (documenting date and attendees); digital image, …` (B.3 Example 14).
+**Usual cited for** **Pending review**. A record noun's usual fact, which a new citation starts from. A copy form keeps its original's (`birth and baptism index entry`: birth and baptism). Nouns not listed, and record types without a noun or a row here, start blank.
+
+| Record noun | Usual cited for |
+| --- | --- |
+| birth and baptism entry | birth and baptism |
+| birth entry, birth certificate | birth |
+| baptism entry | baptism |
+| death entry, death certificate, obituary | death |
+| burial entry, headstone application | burial |
+| death and burial entry | death and burial |
+| marriage entry, marriage license, marriage announcement | marriage |
+| confirmation entry | confirmation |
+| communion entry | communion |
+| membership entry | membership |
+| household, household examination entry, census entry, directory entry | residence |
+| estate entry, estate inventory | estate |
+| matrikkel entry | land holding |
+| land allotment entry | land allotment |
+| signatory entry | signature |
+| croft transfer entry | croft transfer |
+| naturalization petition | naturalization |
+| declaration of intention | declaration of intention |
+| WWII draft card | draft registration |
+| pension file, compiled service record | military service |
+| funeral notice | funeral |
+| Find a Grave memorial (no noun) | burial |
+| Passenger manifest (no noun) | arrival |
 
 **Record nouns.** The record noun comes from the record type's list in its chapter's §9 *Record nouns* table; the first noun listed is the default. A record type missing from that table takes no record noun. The noun names the form of what you cite:
 
@@ -267,7 +314,7 @@ Find a Grave, Ancestry, FamilySearch, Newspapers.com and similar platforms are *
 | `Database` | Index-only databases |
 | `Microfilm` | Film read on a reader at a library or archive. The Pubinfo names the film's maker, with no URL: `Microfilm, Minnesota Historical Society.` |
 
-Only the platform homepage goes here; collection and image URLs go in the FRN. Examples: `Digital images, Digitalarkivet (https://www.digitalarkivet.no).` · `Database with images, Find a Grave (https://www.findagrave.com).`
+The medium is typed: the table holds the usual ones, and another is written as its home describes it. Only the platform homepage goes here; collection and image URLs go in the FRN. Examples: `Digital images, Digitalarkivet (https://www.digitalarkivet.no).` · `Database with images, Find a Grave (https://www.findagrave.com).`
 
 **Film read in person** has no URL or access date, so the FRN names the film where it would name a digital image, and cites nothing behind it: `…, Peter L. Grund; Minnesota Historical Society microfilm SAM 227, reel 4.` A copy you print or photograph from the reader is your working copy, not another layer: cite the film.
 
@@ -278,7 +325,6 @@ Only the platform homepage goes here; collection and image URLs go in the FRN. E
 | Print book | `[City]: [Publisher], year.` |
 | E-book / audiobook / CD-DVD | `[City]: [Publisher], year. [Format].` Never omit the format; editions differ (EE 13.60). |
 | Online book via a library platform | `[City]: [Publisher], year. Digital images, [Platform] (URL).` |
-| Funeral program | `[City]: [Funeral home], date.` |
 | Audio interview | `Recorded interview, [city], date.` |
 | Online video | `Online video, [Platform] (URL), year.` |
 | Personal research | `Unpublished research, [location], [year-range].` |
@@ -356,6 +402,50 @@ Used in FRN, SRN, and Abbrev wherever a locator is needed (EE 2.53):
 | `fol.` | folio |
 
 `p.` can be dropped for a single bare page number in a book or article, but is kept whenever two numbers share a field (page + column). Domain abbreviations (US geographic, state, record-type, archive; Scandinavian short forms) are in each chapter's §10.
+
+### A14 · General form **Pending review**
+
+A record with no record type yet (a US deed, a power of attorney, a court order) is cited now from five questions and upgraded once its chapter has a rule (A15). Its citations carry the Gramps tag `General form`, so they can be found again.
+
+| Question | Inputs | Lands in |
+| --- | --- | --- |
+| Who made it? | Creator: the office, court or person that made the record | Author; the FRN's lead |
+| What is it? | Collection: the record set or volume as its holder names it, with its years; the subject and record noun (A7) | Title, Abbrev; attributes; FRN, SRN |
+| When? | Date of the item | FRN; the Paperless title's year |
+| Where in it? | Page, image, entry no. | Page string (A7) |
+| Where is it held? | Place (locality-led, A8); platform, URL and access date; the platform's or archive's reference; the archive | Title; Pubinfo (A10); FRN |
+
+- **Title:** `[Place], [Collection], [years]` (A8). **Abbrev:** `[Collection], [years]`.
+- **Page string:** `p. [P] (image [I]), no. [N] ([cited for])`, leaving out what the record lacks (A7).
+- **FRN:** `[Creator], [Collection], [years], p. [P], [Subject] [record noun] ([date]); digital image, [platform] ([URL] : accessed [date]), [reference]; citing [archive].`
+- **SRN:** `[Abbrev], p. [P], [Subject] [record noun].`
+- One Source per record set or volume as you browse it (A1). Confidence by A6; the record type gives no default.
+
+Example: Peter L. Grund's power of attorney in Marshall County's Miscellaneous Record, vol. K, on FamilySearch.
+
+| Field | Value |
+| --- | --- |
+| Title | `Minnesota, Marshall County, Miscellaneous Record, vol. K, 1919–1927` |
+| Abbrev | `Miscellaneous Record, vol. K, 1919–1927` |
+| Author | `Marshall County Register of Deeds` |
+| Pubinfo | `Digital images, FamilySearch (https://www.familysearch.org).` |
+| **Citation** page | `image 32 ([Cited for])` |
+| Attributes | Subject `Peter L. Grund` · Record `power of attorney` · Record type `General form` |
+| Tag | `General form` |
+
+**FRN:** Marshall County Register of Deeds, Miscellaneous Record, vol. K, 1919–1927, image 32, Peter L. Grund power of attorney (\[date\]); digital image, FamilySearch (https://www.familysearch.org/ark:/61903/3:1:3QS7-L99T-2SDQ : accessed 13 October 2026), Image Group Number 005537573.
+
+**SRN:** Miscellaneous Record, vol. K, 1919–1927, image 32, Peter L. Grund power of attorney.
+
+### A15 · Rebuilding citations **Pending review**
+
+A rule change reaches the citations already in Gramps through Bifrost's rebuild, so a citation made under today's rules can be brought up to date later.
+
+- Every citation the wizard makes keeps its inputs, any output you edited by hand, and this guide's date (its Guide attribute, A7).
+- Rebuild lists the citations whose fields the current rules would change and shows old and new side by side. Nothing changes until you apply it: a Source's fields once for all its citations, then each citation's page string, notes and attributes.
+- A field you edited by hand keeps your edit and is listed, so you decide whether the new rule replaces it.
+- A citation made outside the wizard is read back first, and only an exact or close reading is rebuilt.
+- A General form citation (A14) is upgraded by choosing its record type once one exists; the tag comes off when it is rebuilt under that type.
 
 ## Part B.1: Norwegian sources
 
@@ -451,19 +541,19 @@ Digitalarkivet is the system of record; cite it even when FamilySearch has the s
 
 | Record type | Template | Example |
 | --- | --- | --- |
-| Parish | `p. [P] (image [I]), [entry], [subject]` | `p. 12 (image 24), no. 8, Karen Indiana Evensdatter baptism entry` |
-| Folketelling 1801 | `gård [N] ([name]), household [N], person [N], [Head] household` | `gård 234 (Vinger), household 1, person 1, Anders Hansen household` |
-| Folketelling 1865+ | `district [N] [name], p. [N], household [N], person [N], [Head] household` | `district 009 Blegstad, p. 1270, household 01, person 006, Karen Indiana Evensdatter in Hansen household` |
-| Tingbok | `folio [F], [date or session], [parties or subject]` |  |
-| Skifteprotokoll | `folio [F]–[F], [Deceased] estate entry` | `folio 145–148, Anders Hansen estate entry` |
-| Matrikkel | `gård no. [matrikkelnr.], [gård name], [løpenummer if specific], [owner or topic]` | `gård no. 234, Vinger gård, løpenummer 12, Anders Hansen matrikkel entry` |
-| Confirmation **Pending review** | `confirmations, p. [P] (image [I]), no. [N], [Subject] confirmation entry` | `confirmations, p. 88 (image 91), no. 14, Karen Indiana Evensdatter confirmation entry` |
-| Communion **Pending review** | `communicants, p. [P] (image [I]), [Subject] communion entry` | `communicants, p. 204 (image 210), Anders Hansen communion entry` |
-| Meeting minutes **Pending review** | `p. [P] (image [I]), [date], [subject] minute entry` |  |
+| Parish | `p. [P] (image [I]), [entry]` | `p. 12 (image 24), no. 8 (baptism)` |
+| Folketelling 1801 | `gård [N] ([name]), household [N], person [N]` | `gård 234 (Vinger), household 1, person 1 (residence)` |
+| Folketelling 1865+ | `district [N] [name], p. [N], household [N], person [N]` | `district 009 Blegstad, p. 1270, household 01, person 006 (residence)` |
+| Tingbok | `folio [F], [date or session]` |  |
+| Skifteprotokoll | `folio [F]–[F]` | `folio 145–148 (estate)` |
+| Matrikkel | `gård no. [matrikkelnr.], [gård name], [løpenummer if specific]` | `gård no. 234, Vinger gård, løpenummer 12 (land holding)` |
+| Confirmation **Pending review** | `confirmations, p. [P] (image [I]), no. [N]` | `confirmations, p. 88 (image 91), no. 14 (confirmation)` |
+| Communion **Pending review** | `communicants, p. [P] (image [I])` | `communicants, p. 204 (image 210) (communion)` |
+| Meeting minutes **Pending review** | `p. [P] (image [I]), [date]` |  |
 
 - *District* in 1865+ censuses is Digitalarkivet's *tellekrets*; household and person numbers are its assigned IDs.
 - Skifteprotokoller use **folio** numbering (both sides of a leaf together) and span the whole skifte.
-- **Unpaginated fallback:** when the page has no number, lead with the image number: `image [I], [entry], [subject]` (as in B.2 §7).
+- **Unpaginated fallback:** when the page has no number, lead with the image number: `image [I], [entry]` (as in B.2 §7).
 
 ### §8 Confidence
 
@@ -487,15 +577,15 @@ The klokkerbok rests on EE 1.30 (Duplicate Originals): a contemporaneous duplica
 
 | Record type | Record nouns |
 | --- | --- |
-| Ministerialbok | birth and baptism entry · baptism entry · death entry · burial entry · marriage entry |
-| Klokkerbok | birth and baptism entry · baptism entry · death entry · burial entry · marriage entry |
+| Parish register | birth and baptism entry · baptism entry · death entry · burial entry · marriage entry |
+| Parish register (copy) | birth and baptism entry · baptism entry · death entry · burial entry · marriage entry |
 | Confirmation or communion | confirmation entry · communion entry |
 | Parish meeting minutes | minute entry |
-| Folketelling 1801 | household |
-| Folketelling 1865 and later | household |
-| Tingbok | land dispute entry · court matter entry |
-| Skifteprotokoll | estate entry |
-| Matrikkel | matrikkel entry |
+| Census 1801 | household |
+| Census 1865 and later | household |
+| Court journal | land dispute entry · court matter entry |
+| Probate register | estate entry |
+| Land register | matrikkel entry |
 
 | Event | Subject format | Example |
 | --- | --- | --- |
@@ -551,7 +641,7 @@ House variation: the record-type word is lowercased (EE 2.29 keeps original capi
 | Matrikkel 1838 | `matrikkel 1838` | `Eidsvoll matrikkel 1838` |
 | Menighetsmøteprotokoll 1 **Pending review** | `menighetsmøteprotokoll 1` | `Eidsvoll menighetsmøteprotokoll 1 (1870–1895)` |
 
-**SRN:** the Abbrev, then enough locators to find the entry, then the page string's subject: `Eidsvoll klokkerbok I 2 (1866–1871), p. 57, no. 21, Thor Emil birth and baptism entry.` Locators may take short forms (A13, `løpenr.`). The subject keeps only a category-1 disambiguator (A7) such as `(b. 1773)`; source-state notes and evidence flags stay in the page string.
+**SRN:** the Abbrev, then enough locators to find the entry, then the subject (A7): `Eidsvoll klokkerbok I 2 (1866–1871), p. 57, no. 21, Thor Emil birth and baptism entry.` Locators may take short forms (A13, `løpenr.`). The subject keeps only a category-1 disambiguator (A7) such as `(b. 1773)`; source-state notes and evidence flags stay in the page string.
 
 ### §11 Bibliography
 
@@ -582,7 +672,7 @@ Thor Emil, born 1 September 1869 in Eidsvoll, baptized 16 January 1870. EE analo
 | Pubinfo | `Digital images, Digitalarkivet (https://www.digitalarkivet.no).` |
 | Repository | `Statsarkivet i Oslo` |
 | Call number | `AV/SAO-A-10888/G/Ga/L0002` |
-| **Citation** page | `p. 57 (image 62), no. 21, Thor Emil birth and baptism entry` |
+| **Citation** page | `p. 57 (image 62), no. 21 (birth and baptism)` |
 | Confidence | High (klokkerbok, primary, direct) |
 
 **FRN:** Eidsvoll prestekontor, Klokkerbok \[parish register (copy)\] no. I 2, 1866–1871, p. 57, no. 21, Thor Emil (born 1 September 1869; baptized 16 January 1870), son of Christian Henningsen and Anne Marthe Bergersdatter, baptized at Eidsvoll church; digital image, Digitalarkivet (https://urn.digitalarkivet.no/URN:NBN:no-a1450-kb20060313011115.jpg : accessed 17 April 2026); citing Statsarkivet i Oslo, AV/SAO-A-10888/G/Ga/L0002.
@@ -603,7 +693,8 @@ Karen Indiana Evensdatter, 14, tjenestepige in Jens Hansen's household at Blegst
 | Pubinfo | `Database with images, Digitalarkivet (https://www.digitalarkivet.no).` |
 | Repository | `Riksarkivet` |
 | Call number | `AV/RA-S-2231/E` |
-| **Citation** page | `district 009 Blegstad, p. 1270, household 01, person 006, Karen Indiana Evensdatter (tjenestepige, stated age 14) in Hansen household` |
+| **Citation** page | `district 009 Blegstad, p. 1270, household 01, person 006 (residence)` |
+| Attributes | Subject `Karen Indiana Evensdatter` · Record `household` · Household `Hansen household` · Source says `tjenestepige` · Evidence `stated age 14` |
 | Confidence | High (residence); Normal (stated age) |
 
 **FRN:** Folketelling \[census\] 1875, Akershus fylke, Eidsvoll prestegjeld, Eidsvoll sokn, district 009 Blegstad, p. 1270, household no. 01, person no. 006, Karen Indiana Evensdatter (tjenestepige, stated age 14, in Jens Hansen's household); digital image, Digitalarkivet (https://www.digitalarkivet.no/ft20110110330371 : accessed 26 April 2026); transcribed entry at https://www.digitalarkivet.no/pf01052052005225; citing Riksarkivet, Statistisk sentralbyrå, Sosioøkonomiske emner, Folketellinger, boliger og boforhold, E: Folketellinger, source ID 52052; archive reference AV/RA-S-2231/E.
@@ -624,7 +715,7 @@ Hypothetical: Anders Hansen, died 1822 at Vinger gård. EE analogues: 11.50 Ital
 | Pubinfo | `Digital images, Digitalarkivet (https://www.digitalarkivet.no).` |
 | Repository | `Statsarkivet i Oslo` |
 | Call number | `AV/SAO-A-10063/H/Hb/L0003` |
-| **Citation** page | `folio 145–148, Anders Hansen estate entry` |
+| **Citation** page | `folio 145–148 (estate)` |
 | Confidence | High (death); Normal (inferred heir relationships) |
 
 **FRN:** Eidsvoll sorenskriveri \[Eidsvoll district court\], Skifteprotokoll \[probate register\] II 3, 1815–1825, fol. 145–148, estate inventory of Anders Hansen, Vinger gård, died 1822; digital image, Digitalarkivet (https://www.digitalarkivet.no/... : accessed 9 May 2026); citing Statsarkivet i Oslo, AV/SAO-A-10063/H/Hb/L0003.
@@ -645,7 +736,7 @@ Hypothetical: Vinger gård listed in the 1838 matrikkel under Anders Hansen. EE:
 | Pubinfo | `Database with images, Digitalarkivet (https://www.digitalarkivet.no).` |
 | Repository | `Riksarkivet` |
 | Call number | **Open:** varies by volume; check Digitalarkivet's NAD entry |
-| **Citation** page | `gård no. 234, Vinger gård, løpenummer 12, Anders Hansen matrikkel entry` |
+| **Citation** page | `gård no. 234, Vinger gård, løpenummer 12 (land holding)` |
 | Confidence | High (cadastral assessment); Low (genealogical inference) |
 
 **FRN:** Matrikkel \[land register\] 1838, Akershus amt, Eidsvoll prestegjeld, gård no. 234, Vinger gård, løpenummer 12, listed owner Anders Hansen; digital image, Digitalarkivet (https://www.digitalarkivet.no/... : accessed 9 May 2026); citing Riksarkivet.
@@ -661,7 +752,7 @@ Hypothetical: Karen Indiana Evensdatter, confirmed 1869 at Eidsvoll church. Cite
 | Field | Value |
 | --- | --- |
 | Source | Same as Example 1 |
-| **Citation** page | `confirmations, p. 88 (image 91), no. 14, Karen Indiana Evensdatter confirmation entry` |
+| **Citation** page | `confirmations, p. 88 (image 91), no. 14 (confirmation)` |
 | Confidence | High (confirmation); Normal (stated age / implied birth year) |
 
 **FRN:** Eidsvoll prestekontor, Klokkerbok \[parish register (copy)\] no. I 2, 1866–1871, confirmations section, p. 88, no. 14, Karen Indiana Evensdatter (daughter of Even Hansen), confirmed at Eidsvoll church 1869; digital image, Digitalarkivet (https://www.digitalarkivet.no/... : accessed 15 June 2026); citing Statsarkivet i Oslo, AV/SAO-A-10888/G/Ga/L0002.
@@ -742,21 +833,21 @@ Some Norra Ny volumes are on both Riksarkivet and ArkivDigital. Each volume is s
 
 ### §7 Page-string templates
 
-Standard: `p. [P] (image [I]), [entry], [subject]`. Unpaginated fallback is `image [I], [entry], [subject]`. Each Source is one volume, so the volume is not repeated here (A4).
+Standard: `p. [P] (image [I]), [entry]`. Unpaginated fallback is `image [I], [entry]`. Each Source is one volume, so the volume is not repeated here (A4).
 
 | Record type | Template | Example |
 | --- | --- | --- |
-| Husförhörslängd household | `p. [P] (image [I]), [Head] household` | `p. 8 (image 19), Per Persson household` |
-| Birth and baptism | `p. [P] (image [I]), no. [N], [Name] birth and baptism entry` | `p. 191 (image 100), no. 34, Lars Persson birth and baptism entry` |
-| Banns and marriage | `p. [P] (image [I]), no. [N], [Surname]-[Surname] marriage entry` | `p. 57 (image 62), no. 21, Larsson-Söderström marriage entry` |
-| Death / burial | `p. [P] (image [I]), no. [N], [Name] death entry` | `…, Kjerstin Mattsdotter death entry` |
-| Estate inventory | `pp. [P]–[P], [Deceased] estate inventory` | `pp. 203–205, Per Persson estate inventory` |
-| SVAR census | `p. [P] (image [I]), row [R], family no. [F], [Head] household` | `p. 4, row 33, family no. 1, Lars Persson Ambjörn household` |
-| Confirmation / communion **Pending review** | `p. [P] (image [I]), [Name] confirmation entry` / `communion entry` | `p. 8 (image 19), Lars Persson confirmation entry` |
-| Meeting minutes **Pending review** | `p. [P] (image [I]), [date or item no.], [Name] parish meeting entry` | `…, meeting of 3 May 1850, Per Persson parish meeting entry` |
-| Land survey **Pending review** | `[protocol locator], [name] [record-noun]` | `delningsbeskrivning p. 40, Marit Andersdotter land allotment entry` |
+| Husförhörslängd household | `p. [P] (image [I])` | `p. 8 (image 19) (residence)` |
+| Birth and baptism | `p. [P] (image [I]), no. [N]` | `p. 191 (image 100), no. 34 (birth and baptism)` |
+| Banns and marriage | `p. [P] (image [I]), no. [N]` | `p. 57 (image 62), no. 21 (marriage)` |
+| Death / burial | `p. [P] (image [I]), no. [N]` | `… (death)` |
+| Estate inventory | `pp. [P]–[P]` | `pp. 203–205 (estate)` |
+| SVAR census | `p. [P] (image [I]), row [R], family no. [F]` | `p. 4, row 33, family no. 1 (residence)` |
+| Confirmation / communion **Pending review** | `p. [P] (image [I])` | `p. 8 (image 19) (confirmation)` |
+| Meeting minutes **Pending review** | `p. [P] (image [I]), [date or item no.]` | `…, meeting of 3 May 1850 ([cited for])` |
+| Land survey **Pending review** | `[protocol locator]` | `delningsbeskrivning p. 40 (land allotment)` |
 
-Land-survey record-nouns: `land allotment entry` (a named owner's lott), `signatory entry` (in the signature/owner list), `croft transfer entry` (a torpare's holding changing hands). The act is the Source, so its number is not repeated. More examples: `p. 26, §26, Olof Persson croft transfer entry` (act 17-NON-148) · `signatures p. 8, Olof Halvardsson signatory entry` (act 17-NON-51) · `skiftesläggning, Olof Halvarsson land allotment entry` (act R66).
+Land-survey record-nouns: `land allotment entry` (a named owner's lott), `signatory entry` (in the signature/owner list), `croft transfer entry` (a torpare's holding changing hands). The act is the Source, so its number is not repeated. More examples: `p. 26, §26 (croft transfer)` (act 17-NON-148) · `signatures p. 8 (signature)` (act 17-NON-51) · `skiftesläggning (land allotment)` (act R66).
 
 ### §8 Confidence
 
@@ -780,15 +871,15 @@ Land-survey record-nouns: `land allotment entry` (a named owner's lott), `signat
 
 | Record type | Record nouns |
 | --- | --- |
-| Husförhörslängd | household · household examination entry |
-| Födelse- och dopbok | birth and baptism entry · birth entry · baptism entry |
-| Lysnings- och vigselbok | marriage entry |
-| Dödbok | death entry · burial entry |
+| Household examination | household · household examination entry |
+| Birth and baptism book | birth and baptism entry · birth entry · baptism entry |
+| Banns and marriage book | marriage entry |
+| Death book | death entry · burial entry |
 | Confirmation or communion | confirmation entry · communion entry |
-| Sockenstämmoprotokoll | parish meeting entry |
-| Bouppteckning | estate inventory |
-| Folkräkning (SVAR) | household · census entry |
-| Lantmäteriet survey act | land allotment entry · signatory entry · croft transfer entry |
+| Parish meeting minutes | parish meeting entry |
+| Estate inventory | estate inventory |
+| Census (SVAR) | household · census entry |
+| Land survey act | land allotment entry · signatory entry · croft transfer entry |
 
 | Event | Subject format | Example |
 | --- | --- | --- |
@@ -866,7 +957,7 @@ Preferred workflow: a small script walks the Gramps sqlite Source table and emit
 | Pubinfo | `Digital images, Riksarkivet (https://sok.riksarkivet.se).` |
 | Repository | `Värmlandsarkiv` |
 | Call number | `SE/VA/13398/A I/11` |
-| **Citation** page | `p. 8 (image 19), Per Persson household` |
+| **Citation** page | `p. 8 (image 19) (residence)` |
 | Confidence | High |
 
 **FRN:** Norra Ny församling, Husförhörslängder \[household examinations\], vol. AI:11 (1812–1820), p. 8, household of Per Persson, Ambjörby Torpare; digital image, Riksarkivet (https://sok.riksarkivet.se/bildvisning/C0038409\_00019 : accessed 20 April 2026); citing Värmlandsarkiv, SE/VA/13398/A I/11.
@@ -883,7 +974,7 @@ Preferred workflow: a small script walks the Gramps sqlite Source table and emit
 | Pubinfo | `Digital images, ArkivDigital (https://www.arkivdigital.se).` |
 | Repository | `Värmlandsarkiv` |
 | Call number | `SE/VA/11047/F II/26` |
-| **Citation** page | `pp. 203–205, Per Persson estate inventory` |
+| **Citation** page | `pp. 203–205 (estate)` |
 | Confidence | High |
 
 **FRN:** Älvdals häradsrätt \[Älvdal district court\], Bouppteckningar \[estate inventories\], vol. FII:26 (1832–1833), pp. 203–205, estate inventory of Per Persson, Ambjörbymon, Norra Ny parish, died 5 May 1832; digital image, ArkivDigital (https://app.arkivdigital.se/volume/v48177?image=104 : accessed 20 April 2026); citing Värmlandsarkiv, SE/VA/11047/F II/26.
@@ -900,7 +991,7 @@ Preferred workflow: a small script walks the Gramps sqlite Source table and emit
 | Pubinfo | `Database with images, Riksarkivet (https://sok.riksarkivet.se).` |
 | Repository | Blank for the bibliography (`Riksarkivet` allowed in Gramps, see §3) |
 | Call number | `Folk_817085` |
-| **Citation** page | `p. 4, row 33, family no. 1, Lars Persson Ambjörn household` |
+| **Citation** page | `p. 4, row 33, family no. 1 (residence)` |
 | Confidence | High |
 
 **FRN:** Sveriges folkräkning 1880 \[Swedish census 1880\], Norra Ny församling, Värmlands län, p. 4, row 33, family no. 1, household of Lars Persson Ambjörn, Ambjörby; digital image, Riksarkivet (https://sok.riksarkivet.se/bildvisning/Folk\_817085-004 : accessed 21 April 2026).
@@ -914,7 +1005,7 @@ The gloss may be dropped where the surrounding prose has already established the
 | Field | Value |
 | --- | --- |
 | Source | Same as Example 1 (the husförhörslängd) |
-| **Citation** page | `p. 8 (image 19), Lars Persson confirmation entry` |
+| **Citation** page | `p. 8 (image 19) (confirmation)` |
 | Confidence | High |
 
 **FRN:** Norra Ny församling, Husförhörslängder \[household examinations\], vol. AI:11 (1812–1820), p. 8, confirmation entry of Lars Persson; digital image, Riksarkivet (https://sok.riksarkivet.se/... : accessed 20 April 2026); citing Värmlandsarkiv, SE/VA/13398/A I/11.
@@ -933,7 +1024,8 @@ The gloss may be dropped where the surrounding prose has already established the
 | Pubinfo | `Digital images, Lantmäteriet (https://historiskakartor.lantmateriet.se).` |
 | Repository | Blank for the bibliography (`Lantmäteriet` allowed in Gramps) |
 | Call number | **Open:** full Lantmäteriet act reference; confirm against the catalogue |
-| **Citation** page | `delningsbeskrivning p. 40, Marit Andersdotter land allotment entry (Lott A, 64 öre 6 penningar)` |
+| **Citation** page | `delningsbeskrivning p. 40 (land allotment)` |
+| Attributes | Subject `Marit Andersdotter` · Record `land allotment entry` · Source says `Lott A, 64 öre 6 penningar` |
 | Confidence | High |
 
 **FRN:** Lantmäterimyndigheten i Värmlands län, laga skifte \[statutory land enclosure\], Ambjörby, Norra Ny socken, act 17-NON-148, surveyed 1856–1862 by O. Ignelius, confirmed by Älvdals övre tingslags egodelningsrätt 3 October 1863; delningsbeskrivning p. 40, land allotment (Lott A) of the minor Marit Andersdotter, 64 öre 6 penningar skatt; digital image, Lantmäteriet (https://historiskakartor.lantmateriet.se : accessed 16 June 2026).
@@ -1041,30 +1133,30 @@ State vital collections: Call number is the state's series ID or microfilm numbe
 
 | Record type | Page string |
 | --- | --- |
-| Federal census | `roll [N], ED [N], sheet [N]A/B, dwelling [N], family [N], [Head] household` |
-| State census | `[ward or township], p. [N], line [N], [Head] household` |
-| Death / birth certificate | `certificate no. [N], [Name] death certificate` / `birth certificate` |
-| Marriage license | `license no. [N], [Surname]-[Surname] marriage license` |
-| Naturalization petition | `petition no. [N], [Name] naturalization petition` |
-| Declaration of intention | `declaration no. [N], [Name] declaration of intention` |
-| Final papers volume (before 1906) | `reel [N], final papers vol. [V], p. [P] (image [I]), [Name] naturalization petition` |
-| Headstone application | `[Name] (d. [year]) headstone application` |
-| WWII draft card | `serial no. [N], [Name] WWII draft card` |
-| Civil War pension | `application no. [N], certificate no. [N], [Name] pension file` |
-| Compiled service record | `[Unit], [Name] compiled service record` |
-| Newspaper wedding / funeral / obituary | `[date], p. [N], col. [N], [Name] obituary` (or `marriage announcement`, `funeral notice`) |
-| Newspaper personals | `[date], p. [N], col. [N], [Name] news mention` |
-| Mixed-subject column | `[date], p. [N], col. [N], [Column name], [Name] news mention` |
-| Find a Grave | `memorial no. [N], [Name]` |
-| City directory | `p. [N], [Name] directory entry` |
-| Passenger manifest | `list [N], line [N], [Name]` |
-| Church record **Pending review** | `[register], p. [P] (image [I]), [Name] [record-noun]` |
+| Federal census | `roll [N], ED [N], sheet [N]A/B, dwelling [N], family [N]` |
+| State census | `[ward or township], p. [N], line [N]` |
+| Death / birth certificate | `certificate no. [N]` |
+| Marriage license | `license no. [N]` |
+| Naturalization petition | `petition no. [N]` |
+| Declaration of intention | `declaration no. [N]` |
+| Final papers volume (before 1906) | `reel [N], final papers vol. [V], p. [P] (image [I])` |
+| Headstone application | none: only what it is cited for (A7) |
+| WWII draft card | `serial no. [N]` |
+| Civil War pension | `application no. [N], certificate no. [N]` |
+| Compiled service record | none: only what it is cited for (A7) |
+| Newspaper wedding / funeral / obituary | `[date], p. [N], col. [N]` |
+| Newspaper personals | `[date], p. [N], col. [N]` |
+| Mixed-subject column | `[date], p. [N], col. [N], [Column name]` |
+| Find a Grave | `memorial no. [N]` |
+| City directory | `p. [N]` |
+| Passenger manifest | `list [N], line [N]` |
+| Church record **Pending review** | `[register], p. [P] (image [I])` |
 
-Church record-nouns are in §9 (`death and burial entry`, `baptism entry`, …). Examples: `death and burial register, p. 283 (image 496, right), Emma Söderström death and burial entry` · `baptism register, p. 12 (image 30), Anna Larsson baptism entry`.
+Church record-nouns are in §9 (`death and burial entry`, `baptism entry`, …). Examples: `death and burial register, p. 283 (image 496, right) (death and burial)` · `baptism register, p. 12 (image 30) (baptism)`.
 
-**Final papers before 1906.** County courts bound each applicant's final papers (the petition and the court's record of admission; the Minnesota Historical Society files them as Final Papers [second papers], and from 1906 as Petition and Record) in lettered volumes, usually without petition numbers. The Source is still the court's whole collection (§1), so the page string names the volume (A4), and the noun is `naturalization petition`. When you know the archive's microfilm, its call number is the Source's Call number and its reel leads the page string (§5), as a census roll does; leave the reel out when you have only the images. With no page number, the image number takes the page's place: `final papers vol. [V], image [I], [Name] naturalization petition`.
+**Final papers before 1906.** County courts bound each applicant's final papers (the petition and the court's record of admission; the Minnesota Historical Society files them as Final Papers [second papers], and from 1906 as Petition and Record) in lettered volumes, usually without petition numbers. The Source is still the court's whole collection (§1), so the page string names the volume (A4), and the record noun is `naturalization petition`. When you know the archive's microfilm, its call number is the Source's Call number and its reel leads the page string (§5), as a census roll does; leave the reel out when you have only the images. With no page number, the image number takes the page's place: `final papers vol. [V], image [I]`.
 
-**Newspaper reference notes.** An item can report many things, so its FRN names it by the page string's subject and record noun, after the column. The SRN is the newspaper's title and the whole page string, column included: `Duluth Herald, 14 July 1929, p. 7, col. 3, Per Larsson Grund obituary.` What an item is cited for ends both, as for any record (A7, Example 14).
+**Newspaper reference notes.** An item can report many things, so its FRN names it by its subject and record noun (A7), after the column. The SRN is the newspaper's title, the page string's locators, column included, and the subject: `Duluth Herald, 14 July 1929, p. 7, col. 3, Per Larsson Grund obituary.` What an item is cited for ends both when it differs from the record noun's usual fact (A7, Example 14).
 
 **Newspapers on film.** An item read on a library's microfilm keeps its page string, with no reel, because the issue date finds the reel (the Minnesota Historical Society lists its newspaper film by date range). Only the FRN's ending changes (Example 13).
 
@@ -1205,7 +1297,7 @@ Steve Maisuk household, 1920, Duluth. Ancestry image of NARA film.
 | Pubinfo | `Digital images, Ancestry (https://www.ancestry.com).` |
 | Repository | `National Archives` |
 | Call number | `T625` |
-| **Citation** page | `roll 859, ED 139, sheet 8A, dwelling [N], family [N], Steve Maisuk household` |
+| **Citation** page | `roll 859, ED 139, sheet 8A, dwelling [N], family [N] (residence)` |
 | Confidence | High (residence); Normal (individual facts) |
 
 **FRN:** 1920 U.S. census, St. Louis County, Minnesota, population schedule, Duluth, enumeration district 139, sheet 8A, dwelling \[N\], family \[N\], Steve Maisuk household; digital image, Ancestry (https://www.ancestry.com/... : accessed 6 May 2026); citing National Archives microfilm publication T625, roll 859.
@@ -1224,7 +1316,7 @@ Per Larsson Grund, died Williams, Lake of the Woods County, 12 July 1929. Family
 | Pubinfo | `Database with images, FamilySearch (https://www.familysearch.org).` |
 | Repository | `Minnesota Historical Society` |
 | Call number | Blank |
-| **Citation** page | `certificate no. 1929-MN-XXXXXX, Per Larsson Grund death certificate` |
+| **Citation** page | `certificate no. 1929-MN-XXXXXX (death)` |
 | Confidence | Very High (death); Normal (parents' names, separate citation per A3) |
 
 **FRN:** Minnesota, death certificate no. 1929-MN-XXXXXX (1929), Per Larsson Grund; Minnesota Department of Health, Vital Records; digital image, FamilySearch (https://www.familysearch.org/... : accessed 6 May 2026); citing Minnesota Historical Society.
@@ -1242,7 +1334,7 @@ Per Larsson, St. Louis County District Court, 1894. Ancestry.
 | Author | `St. Louis County District Court` |
 | Pubinfo | `Digital images, Ancestry (https://www.ancestry.com).` |
 | Repository | `Minnesota Historical Society` |
-| **Citation** page | `petition no. [N], Per Larsson naturalization petition` |
+| **Citation** page | `petition no. [N] (naturalization)` |
 | Confidence | High (citizenship); Normal (biographical facts) |
 
 **FRN:** St. Louis County District Court (Duluth, Minnesota), Naturalization Records, petition no. \[N\] (1894), Per Larsson; digital image, Ancestry (https://www.ancestry.com/... : accessed 6 May 2026); citing Minnesota Historical Society.
@@ -1257,7 +1349,7 @@ Per Larsson, St. Louis County District Court, 1894. Ancestry.
 | Abbrev | `Forest Hill, Duluth, FAG` |
 | Author / Repository / Call number | Blank |
 | Pubinfo | `Database with images, Find a Grave (https://www.findagrave.com).` |
-| **Citation** page | `memorial no. [N], Per Larsson Grund` |
+| **Citation** page | `memorial no. [N] (burial)` |
 | Confidence | High with a clear marker photo; Low without |
 
 **FRN:** Find a Grave, memorial no. \[N\], Per Larsson Grund (1848–1929), Forest Hill Cemetery, Duluth, St. Louis County, Minnesota; database with images, Find a Grave (https://www.findagrave.com/memorial/\[N\] : accessed 6 May 2026); marker photograph by \[contributor name\], \[date\].
@@ -1276,7 +1368,7 @@ Axel O. Grund, 1942 "Old Man's Draft". FamilySearch.
 | Pubinfo | `Digital images, FamilySearch (https://www.familysearch.org).` |
 | Repository | `National Archives` |
 | Call number | `RG 147` |
-| **Citation** page | `serial no. [N], Axel O. Grund WWII draft card` |
+| **Citation** page | `serial no. [N] (draft registration)` |
 | Confidence | High (self-reported facts); Very High (registration event) |
 
 **FRN:** Selective Service System, World War II Draft Registration Cards, Minnesota, serial no. \[N\], Axel O. Grund (1942); digital image, FamilySearch (https://www.familysearch.org/... : accessed 6 May 2026); citing Record Group 147, National Archives.
@@ -1297,7 +1389,7 @@ Axel O. Grund, died 31 October 1948. Ancestry.
 | Pubinfo | `Digital images, Ancestry (https://www.ancestry.com).` |
 | Repository | `National Archives` |
 | Call number | `RG 92` |
-| **Citation** page | `Axel O. Grund (d. 1948) headstone application` |
+| **Citation** page | `(burial)` |
 | Confidence | Normal (death date); High (military service) |
 
 **FRN:** Office of the Quartermaster General, "Applications for Headstones for U.S. Military Veterans, 1925–1941," application for Axel O. Grund, died 31 October 1948; digital image, Ancestry (https://www.ancestry.com/search/collections/2375/records/45037 : accessed 6 May 2026); citing NAID 596118, Record Group 92, National Archives at Washington, DC.
@@ -1313,7 +1405,7 @@ Axel O. Grund, died 31 October 1948. Ancestry.
 | Author | `R. L. Polk & Co.` |
 | Pubinfo | `Duluth: R. L. Polk & Co., 1900. Digital images, Ancestry (https://www.ancestry.com).` |
 | Repository | Blank (a publication) |
-| **Citation** page | `p. 412, Per Larsson Grund directory entry` |
+| **Citation** page | `p. 412 (residence)` |
 | Confidence | Normal |
 
 **FRN:** R. L. Polk & Co., Polk's Duluth City Directory, 1900 (Duluth: R. L. Polk & Co., 1900), p. 412, Per Larsson Grund; digital image, Ancestry (https://www.ancestry.com/... : accessed 6 May 2026).
@@ -1330,7 +1422,7 @@ House variation: EE allows one composite citation for a multi-year run; this gui
 | Abbrev | `Duluth Herald` |
 | Pubinfo | `Digital images, Newspapers.com (https://www.newspapers.com).` |
 | Author / Repository / Call number | Blank |
-| **Citation** page | `14 July 1929, p. 7, col. 3, Per Larsson Grund obituary` |
+| **Citation** page | `14 July 1929, p. 7, col. 3 (death)` |
 | Confidence | Normal (even when it matches the death certificate) |
 
 **FRN:** "Per L. Grund, Duluth Pioneer, Dies at Williams Farm," Duluth Herald (Duluth, Minnesota), 14 July 1929, p. 7, col. 3, Per Larsson Grund obituary; digital image, Newspapers.com (https://www.newspapers.com/... : accessed 6 May 2026).
@@ -1346,7 +1438,7 @@ Louis Grund and Anna Amelia Hoiberg, married at Foldahl by Rev. E. O. Chelzren o
 | Title | `Warren Sheaf, Warren, Minnesota` |
 | Abbrev | `Warren Sheaf` |
 | Pubinfo | `Digital images, Newspapers.com (https://www.newspapers.com).` |
-| **Citation** page | `3 December 1908, p. 1, Grund-Hoiberg marriage announcement` |
+| **Citation** page | `3 December 1908, p. 1 (marriage)` |
 | Confidence | High (marriage); Normal (attendants, family claims) |
 
 **FRN:** "\[Headline if present\]," Warren Sheaf (Warren, Minnesota), 3 December 1908, p. 1, Grund-Hoiberg marriage announcement; digital image, Newspapers.com (https://www.newspapers.com/image/\[N\] : accessed 6 May 2026).
@@ -1361,16 +1453,16 @@ Warren Sheaf "Alma" column, 17 May 1916, p. 7: John Olson visiting John Nilson, 
 
 | Citation | Page | Confidence |
 | --- | --- | --- |
-| 1 | `17 May 1916, p. 7, Alma column, Peter Grund news mention` | Normal |
-| 2 | `17 May 1916, p. 7, Alma column, John Olson news mention` | Normal |
+| 1 | `17 May 1916, p. 7, Alma column (lost horse)` | Normal |
+| 2 | `17 May 1916, p. 7, Alma column (visit to John Nilson)` | Normal |
 
-**FRN 1:** "Alma" \[column\], Warren Sheaf (Warren, Minnesota), 17 May 1916, p. 7, Peter Grund news mention; digital image, Newspapers.com (https://www.newspapers.com/image/64259642 : accessed 6 May 2026).
+**FRN 1:** "Alma" \[column\], Warren Sheaf (Warren, Minnesota), 17 May 1916, p. 7, Peter Grund news mention (documenting lost horse); digital image, Newspapers.com (https://www.newspapers.com/image/64259642 : accessed 6 May 2026).
 
-**SRN 1:** Warren Sheaf, 17 May 1916, p. 7, Alma column, Peter Grund news mention.
+**SRN 1:** Warren Sheaf, 17 May 1916, p. 7, Alma column, Peter Grund news mention (lost horse).
 
-**FRN 2:** "Alma" \[column\], Warren Sheaf (Warren, Minnesota), 17 May 1916, p. 7, John Olson news mention; digital image, Newspapers.com (https://www.newspapers.com/image/64259642 : accessed 6 May 2026).
+**FRN 2:** "Alma" \[column\], Warren Sheaf (Warren, Minnesota), 17 May 1916, p. 7, John Olson news mention (documenting visit to John Nilson); digital image, Newspapers.com (https://www.newspapers.com/image/64259642 : accessed 6 May 2026).
 
-**SRN 2:** Warren Sheaf, 17 May 1916, p. 7, Alma column, John Olson news mention.
+**SRN 2:** Warren Sheaf, 17 May 1916, p. 7, Alma column, John Olson news mention (visit to John Nilson).
 
 #### Example 11: Church record **Pending review**
 
@@ -1384,7 +1476,7 @@ Emma Söderström, died 7 May 1914, buried 9 May 1914, First Lutheran Church, Wa
 | Pubinfo | `Digital images, Ancestry (https://www.ancestry.com).` |
 | Repository | `Swenson Swedish Immigration Research Center` |
 | Call number | **Open:** Swenson collection/volume ref if known |
-| **Citation** page | `death and burial register, p. 283 (image 496, right), Emma Söderström death and burial entry` |
+| **Citation** page | `death and burial register, p. 283 (image 496, right) (death and burial)` |
 | Confidence | Very High (one citation for both death and burial) |
 
 **FRN:** First Lutheran Church (Warren, Marshall County, Minnesota), death and burial register, p. 283 (image 496, right), death and burial of Emma Söderström, died 7 May 1914, buried 9 May 1914; digital image, Ancestry (https://www.ancestry.com/search/collections/61584/records/63230716 : accessed 16 June 2026), "U.S., Evangelical Lutheran Church in America, Swedish American Church Records, 1800–1952"; citing Swenson Swedish Immigration Research Center, Augustana College, Rock Island, Illinois.
@@ -1403,7 +1495,7 @@ Peter L. Grund, admitted to citizenship by the Marshall County District Court; h
 | Pubinfo | `Digital images, FamilySearch (https://www.familysearch.org).` |
 | Repository | `Minnesota Historical Society` |
 | Call number | `SAM 227` |
-| **Citation** page | `reel 4, final papers vol. C, p. 296 (image [I]), Peter L. Grund naturalization petition` |
+| **Citation** page | `reel 4, final papers vol. C, p. 296 (image [I]) (naturalization)` |
 | Confidence | High (citizenship); Normal (biographical facts) |
 
 **FRN:** Marshall County District Court (Warren, Minnesota), Naturalization Records, final papers vol. C, p. 296 (12 March 1897), Peter L. Grund; digital image, FamilySearch (https://www.familysearch.org/ark:/61903/3:1:... : accessed \[date\]), Image Group Number 101714756, image \[I\]; citing Minnesota Historical Society microfilm SAM 227, reel 4.
@@ -1425,8 +1517,8 @@ The Warren Sheaf is on Newspapers.com and on the Minnesota Historical Society's 
 
 | Citation | Page | Confidence |
 | --- | --- | --- |
-| 1 | `3 December 1908, p. 1, Grund-Hoiberg marriage announcement` | High |
-| 2 | `[date], p. [N], col. [N], [Name] obituary` | Normal |
+| 1 | `3 December 1908, p. 1 (marriage)` | High |
+| 2 | `[date], p. [N], col. [N] (death)` | Normal |
 
 **FRN 1:** "\[Headline if present\]," Warren Sheaf (Warren, Minnesota), 3 December 1908, p. 1, Grund-Hoiberg marriage announcement; digital image, Newspapers.com (https://www.newspapers.com/image/\[N\] : accessed 6 May 2026).
 
@@ -1448,7 +1540,7 @@ Olaf and Gertrude Nygren's golden wedding, reported in the Warren Sheaf. This ci
 | Abbrev | `Warren Sheaf` |
 | Pubinfo | `Digital images, Newspapers.com (https://www.newspapers.com).` |
 | Author / Repository / Call number | Blank |
-| **Citation** page | `11 July 1917, p. 3, col. 1, Olaf Nygren household news mention (date and attendees)` |
+| **Citation** page | `11 July 1917, p. 3, col. 1 (date and attendees)` |
 | Confidence | Normal |
 
 **FRN:** "This Honored Couple Celebrate Golden Wedding," Warren Sheaf (Warren, Minnesota), 11 July 1917, p. 3, col. 1, Olaf Nygren household news mention (documenting date and attendees); digital image, Newspapers.com (https://www.newspapers.com/article/warren-sheaf-mr-mrs-olaf-nygren-50th/12517574/ : accessed 4 October 2026).
@@ -1474,9 +1566,7 @@ Published works scope by bibliographic unit, artifacts by physical thing, interv
 | Membership directories, annual publications | One annual issue when the year matters; the run when used as a research tool |
 | Yearbooks, enrollment registers | One annual volume |
 | City and telephone directories | See B.3 (one per annual volume) |
-| Family Bible | One Bible |
 | Family records (non-Bible) | One record set |
-| Funeral program | One program (per-artifact default, A1) |
 | Photograph | One photo when it is the subject of analysis; otherwise attach to the relevant citation |
 | Letters | One letter when cited substantively; one collection when the collection is cited |
 | Audio interview | One interview (each is a discrete event) |
@@ -1491,12 +1581,8 @@ Published works scope by bibliographic unit, artifacts by physical thing, interv
 | --- | --- |
 | Book, one author | Author's name (`Birger Kirkeby`) |
 | Book, several authors | First author; others in Pubinfo or descriptor |
-| Edited collection | `[Name], editor` (EE 13.65) |
-| Periodical | Blank |
 | Membership directory / organizational publication | Issuing body (`Den norske sakførerforening`) |
-| Family Bible | Inferred compiler in brackets (`[Per Larsson Grund]`), or blank. The record-collection name goes in the Title. |
 | Family record (non-Bible) | Blank, or compiler in brackets |
-| Funeral program | Funeral home (`Helgeson Funeral Home`) |
 | Photograph | Photographer or studio if known |
 | Letter | Writer |
 | Audio interview | **The interviewee** (EE 4.31); the interviewer is named in the FRN |
@@ -1525,13 +1611,9 @@ Most titles here are author-led or artifact-led, not locality-led, because these
 | Category | Format | Example |
 | --- | --- | --- |
 | Book | `[Title]` | `Eidsvoll Bygds Historie: Gardene på vestside av Vorma` |
-| Edited collection | `[Title]` | `Tennessee Women: Their Lives and Times` |
-| Periodical | `[Title], [city, state]` | `American Genealogist, New Haven, Connecticut` |
 | Membership directory | `[Title with year]` | `Medlemmer av Den norske sakførerforening 1. juli 1950` |
 | School roster | `[Title with years]` | `Elever ved Kristiania katedralskole som begynte på skolen i årene 1891–1901, hefte 8` |
-| Family Bible | `[Surname] Family Bible Records, [years]` | `Grund Family Bible Records, 1848–1932` |
 | Family record | `[Family/compiler] [record type]` | `Grund Family Record` · `Mollo-Castellano Family History Notes` |
-| Funeral program | `Funeral program, [Subject]` | `Funeral program, Thomas Emil Siggerud` |
 | Photograph | `[Subject] [photo type], [year or range]` | `Per Larsson Grund cabinet card, ca. 1890s` |
 | Letter | `[Sender] to [Recipient], [date], letter` | `Per Larsson Grund to John Edwin Grund, 14 March 1925, letter` |
 | Audio interview | `[Interviewee] interview by [Interviewer], [date]` | `Tom Grund interview by Peter Grund, 12 March 2024` |
@@ -1558,10 +1640,7 @@ Never drop an e-book's format: e-book and print content often differ (EE 13.60).
 | Print book | `[City]: [Publisher], year.` |
 | E-book / audiobook / CD-DVD | `[City]: [Publisher], year. [Format].` |
 | Online book via a library platform | `[City]: [Publisher], year. Digital images, [Platform] (URL).` |
-| Periodical | `[City], [State if needed], [Publisher].` (publisher often the title; usually omittable) |
 | Membership directory | `[City]: [Issuing organization], year.` |
-| Family Bible | Blank |
-| Funeral program | `[City]: [Funeral home], date.` |
 | Photograph from a studio | `[Studio], [city], [year or circa].` if known |
 | Letter | Blank |
 | Audio interview | `Recorded interview, [city], date.` |
@@ -1572,17 +1651,15 @@ Never drop an e-book's format: e-book and print content often differ (EE 13.60).
 
 | Category | Page string |
 | --- | --- |
-| Book | `p. [N]` or `pp. [N]–[N]`, plus subject if relevant |
+| Book | `p. [N]` or `pp. [N]–[N]` |
 | Book chapter | `[Chapter title], pp. [N]–[N]` |
 | Multi-volume work | `vol. [N], pp. [N]–[N]` |
-| Periodical article | `vol. [N], no. [N] ([year]), pp. [N]–[N]` |
-| Directory or register | `p. [P] (image [I]), entry no. [N], [Name] directory entry` (or `register entry`) |
+| Directory or register | `p. [P] (image [I]), entry no. [N]` |
 | Encyclopedia | `[entry headword]` |
-| Family Bible | `[record-type] page, [event]` (`family page, Per Larsson Grund birth entry`) |
-| Funeral program | `[subject]` (short enough to need no page) |
-| Photograph | `[image element], [subject]`, then `; [second element]` if needed (`cabinet card front, Per Larsson Grund portrait; inscription on mount, "Grandma's Grandpa"`) |
-| Audio interview / video | `minute [N]:[NN], [topic]` (or `transcript p. [N], [topic]`) |
+| Photograph | `[image element]`, then `; [second element]` if needed (`cabinet card front; inscription on mount, "Grandma's Grandpa" ([cited for])`) |
+| Audio interview / video | `minute [N]:[NN]` (or `transcript p. [N]`); the topic is the Subject (A7) |
 | Personal research | `[topic or section], [page if compiled]` |
+| Letter | none: only what it is cited for (A7) |
 
 ### §8 Confidence
 
@@ -1595,10 +1672,9 @@ Never drop an e-book's format: e-book and print content often differ (EE 13.60).
 | Very Low | Compiled trees; online encyclopedias for genealogy facts; tertiary biographical entries on non-prominent people |
 
 - **Another researcher's work** is Normal if they cite primary sources, Low if not. Their conclusion is not evidence; their sources are.
-- **Family Bibles:** check the printing date (an 1850 Bible cannot record pre-1850 births at the time) and hand/ink consistency. Photograph cover, title page, and all family pages first (EE 4.13).
 - **Photographs:** High for what they show and their inscriptions; Low to Very Low for identification beyond the inscription.
 - **Interviews:** High for the informant's own experience; Normal at best for events before their birth (EE 4.31).
-- **Mixed-evidence artifacts** (Bibles, funeral programs) almost always need separate citations (A3).
+- **Mixed-evidence artifacts** (family records, letters) almost always need separate citations (A3).
 
 ### §9 Subject vocabulary
 
@@ -1606,18 +1682,14 @@ Never drop an e-book's format: e-book and print content often differ (EE 13.60).
 
 | Record type | Record nouns |
 | --- | --- |
-| Book or bygdebok | entry · (none) |
+| Book | entry · (none) |
 | Directory or register | directory entry · register entry |
-| Family Bible | birth entry · marriage entry · death entry |
 | Family record | birth entry · marriage entry · death entry · (none) |
-| Funeral program | funeral program · obituary |
 | Photograph | portrait · (none) |
 
 | Source | Subject format | Example |
 | --- | --- | --- |
-| Bible page | `[record-type] page, [Subject] [event]` | `family page, Per Larsson Grund birth entry` |
 | Directory or register | `[Name] directory entry` / `register entry` | `Frithjof Siggerud directory entry` |
-| Funeral program | `[Subject] [section]` | `Per Larsson Grund obituary` |
 | Audio interview | `[topic], [Subject]` | `Grund family migration story, Per Larsson and Emma Söderström` |
 | Letter | `[topic], [Subject]` | `report of Marit Jonsdotter's death, Marit Jonsdotter` |
 | Photograph | `[image element], [Subject] portrait` | `cabinet card front, Per Larsson Grund portrait` |
@@ -1637,10 +1709,8 @@ Shortest unambiguous work title or artifact identity + year or volume, whole wor
 | Category | Abbrev |
 | --- | --- |
 | Book | `Eidsvoll bygdebok 2:2` · `Tennessee Women 2009` |
-| Periodical | `American Genealogist` |
 | Register | `Sakførerforening medlemmer 1950` · `Kristiania katedralskole 1891–1901` |
-| Family Bible | `Grund Family Bible` |
-| Artifact | `Siggerud funeral program 1953` · `Grund cabinet card 1890s` |
+| Artifact | `Grund cabinet card 1890s` |
 | Interview | `Tom Grund interview 2024-03-12` |
 | Personal research | `Alfreddson research` |
 | Online video | `Norra Ny walking tour` (the SRN may lead with the channel) |
@@ -1652,12 +1722,7 @@ Arranged by author (EE 2.46), collection (EE 2.47), or custodian (EE 4.24 to 4.2
 | Type | Source List Entry |
 | --- | --- |
 | Book | Kirkeby, Birger. Eidsvoll Bygds Historie: Gardene på vestside av Vorma. Vol. 2, pt. 2. Oslo: Eidsvoll Bygdebokkomite, 1959. |
-| Edited collection (EE 13.65) | Freeman, Sarah L. Wilkerson, and Beverly Greene Bond, editors. Tennessee Women: Their Lives and Times. Athens: University of Georgia Press, 2009. |
-| Periodical run | American Genealogist. New Haven, Connecticut. |
-| Periodical article | Mills, Elizabeth Shown. "FAN + GPS + DNA: The Problem-Solver's Great Trifecta." American Genealogist (https://www.americangenealogist.com/fan-gps-dna : 2023). |
 | Membership directory | Den norske sakførerforening. Medlemmer av Den norske sakførerforening 1. juli 1950 \[Members of the Norwegian Bar Association as of 1 July 1950\]. Oslo: Den norske sakførerforening, 1951. |
-| Family Bible (EE 4.13, 4.24) | \[Per Larsson Grund\], compiler. Grund Family Bible Records, 1848–1932. In The Holy Bible Containing the Old and New Testaments. Stockholm: \[Bible publisher\], \[year\]. Privately held by Peter Grund, Duluth, Minnesota. |
-| Funeral program | Helgeson Funeral Home. Funeral program, Thomas Emil Siggerud. Williams, Minnesota, 16 February 1953. Privately held by Peter Grund. |
 | Interview, single (EE 4.31) | Grund, Tom (Duluth, Minnesota). Interview by Peter Grund. 12 March 2024. Audio recording. Privately held by Peter Grund, Duluth, Minnesota. |
 | Interviews, same informant | Grund, Tom (Duluth, Minnesota). Interviews by Peter Grund. 2024–2025. Audio recordings. Privately held by Peter Grund, Duluth, Minnesota. |
 | Personal research | Alfreddson, Siw. Personal research on the Grund family of Ambjörby. Unpublished. Ambjörby, Sweden, 2025–2026. |
@@ -1666,8 +1731,6 @@ Arranged by author (EE 2.46), collection (EE 2.47), or custodian (EE 4.24 to 4.2
 … (authored works, A to Z by surname) …
 
 Manuscripts and family artifacts:
-  [Per Larsson Grund], compiler. Grund Family Bible Records, 1848–1932. …
-  Helgeson Funeral Home. Funeral program, Thomas Emil Siggerud. …
   Per Larsson Grund cabinet card, ca. 1890s. Miller Studio, St. Cloud, Minnesota. Privately held by Peter Grund.
 
 Interviews:
@@ -1682,44 +1745,6 @@ Personal research:
 
 Ordered by EE chapter (4 artifacts, then 13 published works).
 
-#### Family Bible (EE 4.13)
-
-Two layers: the published Bible (Template 1) and the family entries in it (custodian per EE 4.24).
-
-| Field | Value |
-| --- | --- |
-| Title | `Grund Family Bible Records, 1848–1932` |
-| Abbrev | `Grund Family Bible` |
-| Author | `[Per Larsson Grund]` |
-| Pubinfo | Blank |
-| Repository | `Peter Grund, private collection` |
-| **Citation** page | `family page 2, Per Larsson Grund birth entry` |
-| Confidence | High (entries contemporaneous with later events); Normal (events before purchase) |
-
-**FRN:** \[Per Larsson Grund\], compiler, Grund Family Bible Records, 1848–1932, in The Holy Bible Containing the Old and New Testaments (Stockholm: \[Bible publisher\], \[year\]), family page 2, entry for Per Larsson Grund born 14 January 1848 at Ambjörby, Norra Ny parish; privately held by Peter Grund, Duluth, Minnesota. Entries appear in two distinct hands: an early hand for events 1848–1880, a later hand for events 1881–1932. The earliest entries appear to have been copied into this Bible from an earlier family record after the Bible's purchase.
-
-**SRN:** Grund Family Bible, family page 2, Per Larsson Grund birth entry.
-
-EE 4.13 folds the bracketed name into the title (`[John C.] Phillips Family Bible Records`); this guide splits it into Author + Title and renders `[Author], compiler, Title` in the FRN. The two hands drive the split: 1848 to 1880 is Normal, 1881 to 1932 may be High.
-
-#### Funeral program (EE 4.24, Template 7)
-
-| Field | Value |
-| --- | --- |
-| Title | `Funeral program, Thomas Emil Siggerud` |
-| Abbrev | `Siggerud funeral program 1953` |
-| Author | `Helgeson Funeral Home` |
-| Pubinfo | `Williams, Minnesota: Helgeson Funeral Home, 16 February 1953.` |
-| Repository | `Peter Grund, private collection` |
-| **Citation** page | `Thomas Emil Siggerud funeral program` |
-| Confidence | High (funeral event); Normal (biography, separate citation) |
-
-**FRN:** Helgeson Funeral Home, "In Memory of Thomas Emil Siggerud," funeral program for services held 16 February 1953 at Lutheran Church, Williams, Minnesota; Rev. Edstrom officiating; burial at Pine Hill Cemetery, Williams, Minnesota; privately held by Peter Grund, Duluth, Minnesota.
-
-**SRN:** Siggerud funeral program 1953.
-
-Family would have corrected funeral details before printing. The birth date (1 September 1869 in Norway) is informant-supplied and appears beside a marriage year that conflicts with parish records.
-
 #### Photograph (EE 4.19, 4.24)
 
 Cabinet card of Per Larsson Grund, Miller studio, St. Cloud; mount inscribed "Grandma's Grandpa"; found as an Ancestry Member-Tree upload, originally family-held.
@@ -1731,7 +1756,7 @@ Cabinet card of Per Larsson Grund, Miller studio, St. Cloud; mount inscribed "Gr
 | Author | Blank |
 | Pubinfo | `Miller Studio, St. Cloud, Minnesota, ca. 1890s.` (+ `Digital images, Ancestry (https://www.ancestry.com).` if cited from the Member Tree) |
 | Repository | `Peter Grund, private collection` (blank if cited only from Ancestry) |
-| **Citation** page | `cabinet card front, Per Larsson Grund portrait; inscription on mount, "Grandma's Grandpa"` |
+| **Citation** page | `cabinet card front; inscription on mount, "Grandma's Grandpa" ([Cited for])` |
 | Confidence | High (image and inscription); Normal at best (identity) |
 
 **FRN:** Per Larsson Grund cabinet card portrait, ca. 1890s, taken at Miller Studio, St. Cloud, Minnesota; inscription on top of mount in cursive: "Grandma's Grandpa"; printed studio mark on bottom of mount: "Miller" (with M-M monogram), "ST. CLOUD, MINN."; privately held by Peter Grund, Duluth, Minnesota. Subject identification is family attribution by inscription rather than caption with full name.
@@ -1751,7 +1776,7 @@ EE requires six pieces: informant and interviewer, contact (working files only),
 | Author | `Tom Grund` |
 | Pubinfo | `Recorded interview, Duluth, Minnesota, 12 March 2024.` |
 | Repository | `Peter Grund, private collection` |
-| **Citation** page | `minute 23:15, Edmund Gene Grund's military service in WWII` |
+| **Citation** page | `minute 23:15 ([Cited for])` |
 | Confidence | Normal (adult experience); Low (childhood or earlier) |
 
 **FRN:** Tom Grund (Duluth, Minnesota), recorded interview by Peter Grund, 12 March 2024; audio recording and transcript privately held by Peter Grund, \[ADDRESS FOR PRIVATE USE,\] Duluth, Minnesota; minute 23:15, on Edmund Gene Grund's WWII service. Tom is a son of Edmund Gene Grund and reports here on events he learned of from his parents (he was born after the war).
@@ -1769,7 +1794,7 @@ Tom (born 1955) did not witness the war, so this is secondhand. Cite Edmund's se
 | Author | `Siw Alfreddson` |
 | Pubinfo | `Unpublished research, Ambjörby, Sweden, 2024–2026.` |
 | Repository | `Siw Alfreddson, personal collection` |
-| **Citation** page | `Ambmyra typed page, received 30 April 2026` |
+| **Citation** page | `Ambmyra typed page, received 30 April 2026 ([Cited for])` |
 | Confidence | Normal (cited facts); Low (uncited claims) |
 
 **FRN:** Siw Alfreddson, personal research on the Grund family of Ambjörby, Sweden, accumulated 2024–2026, typed page on Ambmyra torpare holdings, received by Peter Grund via email 30 April 2026; privately held by Siw Alfreddson, Ambjörby, Sweden, with copies privately held by Peter Grund, Duluth, Minnesota. Siw's notes cite Norra Ny kyrkoarkiv volumes for each fact she records; for facts she draws from those primary records, the underlying primary record should also be cited directly when used in narrative.
@@ -1787,7 +1812,7 @@ Prefer the primary record when one exists. Cite Siw directly for (a) things she 
 | Author | `Birger Kirkeby` |
 | Pubinfo | `Vol. 2, pt. 2. Oslo: Eidsvoll Bygdebokkomite, 1959.` |
 | Repository | Blank |
-| **Citation** page | `pp. 432–440, Vinger gård entry` |
+| **Citation** page | `pp. 432–440 ([Cited for])` |
 | Confidence | Normal (cites primary records); Low (uncited claims) |
 
 **FRN:** Birger Kirkeby, Eidsvoll Bygds Historie: Gardene på vestside av Vorma \[Eidsvoll Parish History: The Farms on the West Side of the Vorma River\], vol. 2, pt. 2 (Oslo: Eidsvoll Bygdebokkomite, 1959), pp. 432–440, "Vinger gård."
@@ -1804,7 +1829,7 @@ When a fact is also in a primary record, cite that instead.
 | Abbrev | `Sakførerforening medlemmer 1950` |
 | Author | `Den norske sakførerforening` |
 | Pubinfo | `Oslo: Den norske sakførerforening, 1951. Digital images, Nasjonalbiblioteket (https://www.nb.no).` |
-| **Citation** page | `p. 440 (image 443), Frithjof Siggerud directory entry` |
+| **Citation** page | `p. 440 (image 443) (residence)` |
 | Confidence | Normal |
 
 **FRN:** Den norske sakførerforening, Medlemmer av Den norske sakførerforening 1. juli 1950 \[Members of the Norwegian Bar Association as of 1 July 1950\] (Oslo: Den norske sakførerforening, 1951), p. 440, entry for Frithjof Siggerud; digital image, Nasjonalbiblioteket (https://www.nb.no/items/b3f9413b2125c7f26063abb8896d95bf?page=443 : accessed 26 April 2026).
@@ -1821,7 +1846,7 @@ Inclusion is direct evidence of membership; printed biographical detail is membe
 | Abbrev | `Kristiania katedralskole 1891–1901` |
 | Author | `Anders Langangen` |
 | Pubinfo | `[Place]: [Publisher], [year]. Digital images, Nasjonalbiblioteket (https://www.nb.no).` |
-| **Citation** page | `p. 112 (image 111), entry no. 498, Erling Frithjof Siggerud register entry` |
+| **Citation** page | `p. 112 (image 111), entry no. 498 ([Cited for])` |
 | Confidence | Normal (enrollment); Low (detail Langangen adds) |
 
 **FRN:** Anders Langangen, Elever ved Kristiania katedralskole som begynte på skolen i årene 1891–1901, hefte 8 \[Pupils at Kristiania Cathedral School Who Began in the Years 1891–1901, Booklet 8\] (\[Place\]: \[Publisher\], \[year\]), p. 112, entry no. 498, Erling Frithjof Siggerud; digital image, Nasjonalbiblioteket (https://www.nb.no : accessed 26 April 2026).
@@ -1838,7 +1863,7 @@ Hypothetical YouTube walking tour of Norra Ny, used to corroborate the geography
 | Abbrev | `Norra Ny walking tour` |
 | Author | `Värmland Local History Channel` |
 | Pubinfo | `Online video, YouTube (https://www.youtube.com), 2025.` |
-| **Citation** page | `minute 12:30–14:15, Ambjörby torpare landscape` |
+| **Citation** page | `minute 12:30–14:15 ([Cited for])` |
 | Confidence | Low (footage); Very Low (uncaptioned identifications) |
 
 **FRN:** Värmland Local History Channel, "Norra Ny parish history walking tour," YouTube video (https://www.youtube.com/watch?v=\[ID\] : accessed 9 May 2026), minute 12:30–14:15, on the Ambjörby torpare landscape.
@@ -1873,7 +1898,7 @@ Paperless metadata makes a scan easy to find and browse; the EE citation itself 
 
 **Format:** `[Subject] [record-noun] [year]`
 
-The record noun is the page string's (A7), including its copy form (`Kjerstin Mattsdotter birth and baptism index entry 1820`). Record types with a format of their own are under *Variant forms* below.
+The record noun is the citation's (A7), including its copy form (`Kjerstin Mattsdotter birth and baptism index entry 1820`). Record types with a format of their own are under *Variant forms* below.
 
 | Event | Subject | Example |
 | --- | --- | --- |
@@ -1890,7 +1915,6 @@ The record noun is the page string's (A7), including its copy form (`Kjerstin Ma
 - `Per Persson estate inventory 1832`
 - `Lars Persson Ambjörn household 1880` (folkräkning) · `Lars Persson Ambjörn household 1876–1880` (husförhörslängd)
 - `Per Larsson naturalization petition 1894`
-- `Thomas Emil Siggerud funeral program 1953`
 
 Same name twice on a page: `Per Persson (b. 1773) household 1812–1820`.
 
@@ -1905,7 +1929,6 @@ Same name twice on a page: `Per Persson (b. 1773) household 1812–1820`.
 | Newspaper item naming several members of one household | `[Head] household news mention [year]` | `P. L. Grund household news mention 1905` · `Grund household news mention 1884` |
 | Passenger manifest | `[Name] passenger manifest entry [year]` |  |
 | Find a Grave | `[Name] Find a Grave memorial [year]` | `Per Larsson Grund Find a Grave memorial 1929` |
-| Funeral program | `[Deceased] funeral program [year]` | `Thomas Emil Siggerud funeral program 1953` |
 | Photograph | `[Subject] photograph [decade or year]` | `Per Larsson Grund photograph 1890s` |
 | Audio interview | `[Interviewee] interview [YYYY-MM-DD]` | `Tom Grund interview 2024-03-12` |
 | Family letter | `[Sender] to [Recipient] letter [YYYY-MM-DD]` | `Per Larsson Grund to John Edwin Grund letter 1925-03-14` · `Hilda Grund to Anna Larsson letter 1929-08-22` |
@@ -2062,7 +2085,7 @@ Paperless fields are filing identifiers, not EE citations. Each scanned item is 
 
 ## Review queue
 
-22 of 34 items need a decision: 13 drafted rules awaiting approval, 7 open values, and 2 of the 14 inconsistencies found while reorganizing (12 resolved). Set the status as you work through them, and record the decision in the last column and in the Change log.
+25 of 37 items need a decision: 16 drafted rules awaiting approval, 7 open values, and 2 of the 14 inconsistencies found while reorganizing (12 resolved). Set the status as you work through them, and record the decision in the last column and in the Change log.
 
 ### Drafted rules awaiting approval
 
@@ -2081,6 +2104,9 @@ Paperless fields are filing identifiers, not EE citations. Each scanned item is 
 | R11 | US church records overall: author, title, repository conventions. | B.3 | Needs decision |  |
 | R12 | US church records: one Source per congregation or per register volume? And the holding archive's call-number form. | B.3 §1, §5 | Needs decision |  |
 | R13 | US church records: include membership/communicant records, or only baptism, confirmation, marriage, death-burial? | B.3 §7 | Needs decision |  |
+| R14 | Usual cited for, by record noun: the starting values a new citation takes. | A7 | Needs decision |  |
+| R15 | General form: its five questions, templates, and the `General form` tag. | A14 | Needs decision |  |
+| R16 | Rebuilding: what a rebuild shows, applies, and keeps. | A15 | Needs decision |  |
 
 ### Open values
 
@@ -2090,7 +2116,7 @@ Paperless fields are filing identifiers, not EE citations. Each scanned item is 
 | O2 | Real headline for the Warren Sheaf wedding announcement. | B.3 Ex. 9 | Needs decision |  |
 | O3 | Real volume and years for a Dödbok Source. | B.2 §4 | Needs decision |  |
 | O4 | Matrikkel 1838 call number (NAD path). | B.1 Ex. 4 | Needs decision |  |
-| O5 | Placeholders: Bible publisher and year; Kristiania register imprint; YouTube video ID; Mike Castellano interview date. | B.4 | Needs decision |  |
+| O5 | Placeholders: Kristiania register imprint; YouTube video ID; Mike Castellano interview date. | B.4 | Needs decision |  |
 | O6 | EE template number for books: the original said "Template 7 (Books)", but Template 7 is Private Holdings and books use Template 1. | B.4 | Needs decision |  |
 | O7 | Is `Ambjörn` the surname actually recorded in the 1880 folkräkning? | C worked examples | Needs decision |  |
 
@@ -2123,6 +2149,9 @@ Newest first. Add a row for every rule change: date, rule ID or section, what ch
 
 | Date | Rule / section | Change | Why |
 | --- | --- | --- | --- |
+| 2026-10-13 | A10 | The Pubinfo medium is free text; the Medium table lists the usual ones. | User decision: a record's medium isn't always one of the four |
+| 2026-10-13 | A10; B.1, B.2, B.4 §9; B.4 §1–§12; C1 | Record types are named in English: Parish register, Parish register (copy), Census 1801, Census 1865 and later, Court journal, Probate register, Land register; Household examination, Birth and baptism book, Banns and marriage book, Death book, Parish meeting minutes, Estate inventory, Census (SVAR), Land survey act; Book. The Family Bible, funeral program, edited collection and periodical article record types are removed with their rows and worked examples; such items are cited with the General form (A14). | User decision: a shorter, English list of record types |
+| 2026-10-13 | Start here; Gramps field map; A3; A4; A7; A14; A15; B.1–B.4 §7; worked examples | The page string is where the entry is in the Source, then what the citation is cited for, always: `certificate no. 1929-MN-XXXXXX (death)`. The subject, record noun and parentheticals move to citation attributes (Subject, Record, Household, Which entry, Source says, Evidence, with Record type and Guide); the notes still name them. What a citation is cited for starts from the record noun's usual fact (new A7 table) and reaches the FRN and SRN only when it differs. Headstone applications, compiled service records and letters have no locator, so their page string is only `([cited for])`. New A14 (General form, tagged `General form`) and A15 (rebuilding citations after a rule change). | User decision: a Gramps list needs where and what for; the rest is kept structured in attributes |
 | 2026-10-06 | A5; A7; B.3 §7, Ex. 14 | What a citation is cited for now reaches every record type: it ends the page string and the SRN in parentheses, and the FRN gives it as `(documenting …)` at the end of the item, before the image, film, or holding clause. `Citing` is reserved for the source behind an image or film. | User decision: one verb for what a citation documents, so it cannot be read as the source behind the image |
 | 2026-10-06 | Start here; Gramps field map; A5; A7; B.3 §7, Ex. 9, 13, 14; C8 | Cited for is no longer a note of its own. When given, it ends the page string in parentheses (no longer only for split citations), and a newspaper item's FRN gives it as `(citing …)` and its SRN as `(…)`. Add it when one item gives several citations or the record noun does not say what it is cited for. Examples 9 and 13 drop it; Example 14 shows it. C8 lists the Newspapers.com clipping URL. | User decision: carry what a citation is cited for in its page string and notes, not in a separate section |
 | 2026-10-06 | A3; A5; A7; B.3 §7 | When one item gives several citations (A3) that the page string cannot otherwise tell apart, each page string ends with what it is cited for, in parentheses (`… Per Larsson Grund obituary (death date)`), and a newspaper SRN follows its page string. Cited for keeps the capitals of names. | Telling apart three citations of one Warren Sheaf item in Gramps |

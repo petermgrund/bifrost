@@ -1,14 +1,15 @@
-import { BifrostElement, html, nothing, api, post, statusLine } from './core.js';
+import { BifrostElement, html, nothing, api, post, statusLine, searchField } from './core.js';
 import {
   RECORDS, recordById, newDraft, draftFromExample, buildOutputs, exampleLabel, setVariant, nextCitationDraft,
   runChecks, plain, hasGap, yearOf, loadState, saveState, recordGroups, sourceRows, referenceRows, citationRows,
   noteRows, outputRows, exampleNote, copyAllText, repositoryName, paperlessMatch, restoreDraft, readCitation, readByFrn, readLoosely,
-  REFERENCE_VALUES, LEVELS, CHAPTERS, CHAPTER_CODE, GUIDE,
+  REFERENCE_VALUES, LEVELS, CHAPTERS, GUIDE, ruleRef, gapLabels, labeler,
 } from '/static/citations/citations.js';
 
 const API = '/citations/api';
-const STEPS = ['Document', 'Record type', 'Source', 'Citation', 'Note', 'Create'];
-const [DOC, TYPE, SOURCE, CITATION, NOTE, CREATE] = STEPS.keys();
+const STEPS = ['Document', 'Source', 'Citation', 'Note', 'Create'];
+const [DOC, SOURCE, CITATION, NOTE, CREATE] = STEPS.keys();
+const RECENT = 5;
 const WIZARD_KEY = 'bifrost-citations';
 const SOURCE_KEYS = ['title', 'author', 'abbrev', 'pubinfo', 'callNumber'];
 const FIELD_NAMES = { title: 'Title', author: 'Author', abbrev: 'Abbrev', pubinfo: 'Pubinfo', callNumber: 'Call number',
@@ -56,7 +57,7 @@ class CitationsWizard extends BifrostElement {
     ctx: { state: true }, loadError: { state: true }, step: { state: true }, doc: { state: true },
     docQ: { state: true }, docHits: { state: true }, srcQ: { state: true }, busy: { state: true },
     msg: { state: true }, result: { state: true }, editing: { state: true }, pop: { state: true },
-    clearArmed: { state: true }, focus: { state: true },
+    clearArmed: { state: true }, focus: { state: true }, typeQ: { state: true }, typeHi: { state: true },
   };
 
   constructor() {
@@ -77,6 +78,8 @@ class CitationsWizard extends BifrostElement {
     this.docQ = '';
     this.docHits = [];
     this.srcQ = '';
+    this.typeQ = null;
+    this.typeHi = -1;
     this.busy = false;
     this.msg = null;
     this.editing = '';
@@ -269,8 +272,14 @@ class CitationsWizard extends BifrostElement {
     v.eventYear = yearOf(this.doc.created) || v.eventYear;
   }
 
+  remember(id) {
+    this.gen.recent = [id, ...(this.gen.recent || []).filter((x) => x !== id)].slice(0, RECENT);
+  }
+
   selectType(id) {
-    if (!recordById(id) || id === this.gen.current) return;
+    if (!recordById(id)) return;
+    this.remember(id);
+    if (id === this.gen.current) { this.changed(); return; }
     this.gen.current = id;
     this.editing = '';
     this.gsrc = { mode: 'auto' };
@@ -443,10 +452,17 @@ class CitationsWizard extends BifrostElement {
         title: plain(o.title), author: plain(o.author), abbrev: plain(o.abbrev), pubinfo: plain(o.pubinfo),
         call_number: plain(o.callNumber), repository: repo,
       },
-      citation: { page: plain(o.page), confidence: o.confidence, frn: plain(o.frn), srn: plain(o.srn) },
+      citation: {
+        page: plain(o.page), confidence: o.confidence, frn: plain(o.frn), srn: plain(o.srn),
+        attributes: [...o.attributes, ['Guide', GUIDE.changed]], tag: type.tag || null,
+      },
       scan: this.fileScan ? this.scanValues(o) : null,
       inputs: { type: type.id, values: Object.fromEntries(keys.map((key) => [key, String(draft.values[key] ?? '').trim()])) },
-      draft: { type: type.id, draft: { values: draft.values, subject: draft.subject, confidence: draft.confidence, variant: draft.variant } },
+      draft: {
+        type: type.id,
+        draft: { values: draft.values, subject: draft.subject, confidence: draft.confidence, variant: draft.variant,
+          overrides: draft.overrides, guide: GUIDE.changed },
+      },
     };
     this.busy = true;
     this.say('busy', 'Creating');
@@ -458,6 +474,7 @@ class CitationsWizard extends BifrostElement {
       return;
     }
     this.busy = false;
+    this.remember(type.id);
     this.gsrc = { mode: 'existing', handle: this.result.source.handle };
     this.repo = { mode: 'auto' };
     if (this.result.scan_error) this.say('error', `Paperless: ${this.result.scan_error}`);
@@ -648,7 +665,7 @@ class CitationsWizard extends BifrostElement {
     if (this.loadError) return html`<p class="error-text">${this.loadError}</p>`;
     if (!this.ctx) return html`<p>${statusLine('busy', 'Loading')}</p>`;
     const outputs = buildOutputs(this.type, this.draft);
-    const body = [this.stepDoc, this.stepType, this.stepSource, this.stepCitation, this.stepNote, this.stepCreate][this.step].call(this, outputs);
+    const body = [this.stepDoc, this.stepSource, this.stepCitation, this.stepNote, this.stepCreate][this.step].call(this, outputs);
     return html`
       <nav class="cw-steps" aria-label="Steps">${STEPS.map((name, i) => html`
         <button class="cw-step ${i === this.step ? 'active' : ''} ${i < this.step ? 'done' : ''}"
@@ -711,52 +728,63 @@ class CitationsWizard extends BifrostElement {
     </article>`;
   }
 
-  stepType() {
-    const t = this.type, groups = recordGroups(RECORDS, this.gen.filter);
-    return html`<div class="cw-cols">
-      <div class="cw-form">
-        <div class="field prefix border small cw-filter">
-          <i class="front">search</i>
-          <input type="text" .value=${this.gen.filter} placeholder="Filter record types" autocomplete="off"
-            @input=${(e) => { this.gen.filter = e.target.value; this.changed(); }}>
-        </div>
-        ${groups.map((g) => html`<h6 class="cw-chapter">${g.label}</h6>
-          <div class="cw-types">${g.records.map((r) => html`<button class="chip ${r.id === t.id ? 'fill' : ''}"
-            title=${r.hint || r.group} @click=${() => this.selectType(r.id)}>${r.name}</button>`)}</div>`)}
-        ${groups.length ? nothing : html`<p class="secondary-text">No record type matches</p>`}
+  typeField() {
+    const t = this.type, q = this.typeQ;
+    const recent = (this.gen.recent || []).map(recordById).filter(Boolean);
+    const all = recordGroups(RECORDS, q || '').flatMap((g) => g.records.map((r) => ({ id: r.id, label: r.name, sub: g.label })));
+    const items = q ? all : [...recent.map((r) => ({ id: r.id, label: r.name, sub: CHAPTERS[r.chapter] })),
+      ...all.filter((i) => !recent.some((r) => r.id === i.id))];
+    const pick = (it) => { this.typeQ = null; this.typeHi = -1; this.selectType(it.id); };
+    const open = (e) => { if (e.target.closest('.search-field') && this.typeQ === null) this.typeQ = ''; };
+    return html`<div class="cw-type-row" @focusin=${open} @focusout=${() => { this.typeQ = null; this.typeHi = -1; }}>
+        ${searchField({
+    placeholder: t.name, value: q ?? t.name, items, active: this.typeHi, width: 'large', icon: 'category',
+    onInput: (e) => { this.typeQ = e.target.value; this.typeHi = -1; },
+    onPick: pick,
+    onEnter: () => { const it = items[this.typeHi] ?? (q ? items[0] : null); if (it) { pick(it); document.activeElement?.blur(); } },
+    onMove: (d) => { if (items.length) this.typeHi = (this.typeHi + d + items.length) % items.length; },
+    empty: 'No record type matches',
+  })}
+        ${t.examples.length ? html`<div class="field suffix border small cw-example">
+          <select @change=${(e) => { if (e.target.value !== '') this.loadExample(Number(e.target.value)); e.target.value = ''; }}>
+            <option value="">Load guide example</option>
+            ${t.examples.map((c, i) => html`<option value=${i}>${exampleLabel(c)}</option>`)}
+          </select><i>arrow_drop_down</i></div>` : nothing}
+        <button class="border small" @click=${() => this.clear()}>${this.clearArmed ? 'Click again to clear' : 'Clear'}</button>
       </div>
-      <div class="cw-side">
-        <article class="border cw-type">
-          <h6>${t.name}</h6>
-          <div class="secondary-text">${CHAPTERS[t.chapter]} · ${t.group}</div>
-          <nav class="cw-type-acts">
-            ${t.examples.length ? html`<div class="field suffix border small cw-example">
-              <select @change=${(e) => { if (e.target.value !== '') this.loadExample(Number(e.target.value)); e.target.value = ''; }}>
-                <option value="">Load guide example</option>
-                ${t.examples.map((c, i) => html`<option value=${i}>${exampleLabel(c)}</option>`)}
-              </select><i>arrow_drop_down</i></div>` : nothing}
-            <button class="border small" @click=${() => this.clear()}>${this.clearArmed ? 'Click again to clear' : 'Clear'}</button>
-          </nav>
-        </article>
-      </div>
-    </div>`;
+`;
+  }
+
+  /**
+   * With an existing Source, only the inputs the notes still lack: each one stays once shown, so it doesn't vanish while
+   * it is typed, until the Source or record type changes.
+   */
+  neededRows(rows, outputs, source) {
+    const key = `${this.type.id}|${source?.handle || ''}`;
+    if (this._needed?.key !== key) this._needed = { key, paths: new Set() };
+    const L = labeler(this.type);
+    const missing = new Set(gapLabels([outputs.page, outputs.frn, outputs.srn].join(' ')));
+    for (const r of rows) if (missing.has(L(r.path.split('.').pop()))) this._needed.paths.add(r.path);
+    return rows.filter((r) => this._needed.paths.has(r.path));
   }
 
   stepSource(outputs) {
-    const t = this.type, d = this.draft, code = CHAPTER_CODE[t.chapter];
-    const own = sourceRows(t, d), reference = referenceRows(t, d);
+    const t = this.type, d = this.draft;
     const isNew = this.sourceMode(outputs) === 'new';
+    const shown = (rows) => (isNew ? rows : this.neededRows(rows, outputs, this.chosenSource(outputs)));
+    const own = shown(sourceRows(t, d)), reference = shown(referenceRows(t, d));
     return html`
+      ${this.typeField()}
       <nav class="group connected cw-mode">
         <button class=${isNew ? 'active' : ''} @click=${() => this.setSourceMode('new')}><i>add</i><span>New source</span></button>
         <button class=${isNew ? '' : 'active'} @click=${() => this.setSourceMode('existing')}><i>menu_book</i><span>Existing source</span></button>
       </nav>
       <div class="cw-cols">
         ${this.formColumn(html`
-          <h6 class="cw-h">Source ${this.ref(`${code} §4`)}</h6>
-          ${own.map((r) => this.input(r))}
-          <h6 class="cw-h">Platform and archive ${this.ref('A10')} ${this.ref('A9')}</h6>
-          ${reference.map((r) => this.input(r))}`)}
+          ${own.length ? html`<h6 class="cw-h">Source ${this.ref(ruleRef(t, '§4'))}</h6>
+            ${own.map((r) => this.input(r))}` : nothing}
+          ${reference.length ? html`<h6 class="cw-h">Platform and archive ${this.ref('A10')} ${this.ref('A9')}</h6>
+            ${reference.map((r) => this.input(r))}` : nothing}`)}
         <div class="cw-side">
           ${isNew ? nothing : this.sourcePicker(outputs)}
           ${this.preview(outputs, isNew ? ['Source'] : [], [...own, ...reference], isNew ? { Source: { tail: this.repositoryRow() } } : {})}
@@ -815,10 +843,10 @@ class CitationsWizard extends BifrostElement {
   }
 
   stepCitation(outputs) {
-    const t = this.type, d = this.draft, code = CHAPTER_CODE[t.chapter];
+    const t = this.type, d = this.draft;
     const rows = citationRows(t, d);
     return html`<div class="cw-cols">
-      ${this.formColumn(html`<h6 class="cw-h">Citation ${this.ref(`${code} §7`)} ${this.ref('A7')}</h6>
+      ${this.formColumn(html`<h6 class="cw-h">Citation ${this.ref(ruleRef(t, '§7'))} ${this.ref('A7')}</h6>
         ${rows.map((r) => this.input(r))}`)}
       <div class="cw-side">${this.preview(outputs, ['Citation'], rows)}</div>
     </div>`;

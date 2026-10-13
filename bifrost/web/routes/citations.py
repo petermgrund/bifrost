@@ -30,6 +30,11 @@ async def citations_page(request: Request):
     return templates.TemplateResponse(request, "citations.html", {})
 
 
+@router.get("/rebuild", response_class=HTMLResponse)
+async def rebuild_page(request: Request):
+    return templates.TemplateResponse(request, "rebuild.html", {})
+
+
 @router.get("/api/context")
 async def get_context(request: Request) -> dict:
     st = request.app.state
@@ -80,6 +85,8 @@ class CitationBody(BaseModel):
     confidence: str
     frn: str
     srn: str
+    attributes: list[list[str]] = []
+    tag: str | None = None
 
 
 class ScanBody(BaseModel):
@@ -123,3 +130,36 @@ async def create(request: Request, body: CreateBody) -> dict:
     if body.draft:
         citations.keep_draft(st.conn, result["citation"]["handle"], body.draft.type, body.draft.draft)
     return result
+
+
+@router.get("/api/rebuild")
+async def rebuild_list(request: Request) -> dict:
+    """The wizard's citations as Gramps holds them now, with the draft each was built from"""
+    st = request.app.state
+    try:
+        items = await citations.wizard_citations(st.gramps, st.conn)
+    except GrampsError as exc:
+        raise _failed(exc) from exc
+    return {"items": items, "gramps_url": st.cfg.sync_paperless.gramps_public_url}
+
+
+class RebuildItem(BaseModel):
+    handle: str
+    page: str | None = None
+    attributes: list[list[str]] | None = None
+    tagged: bool | None = None
+    note: str = ""
+    frn: str | None = None
+    srn: str | None = None
+    draft: DraftBody | None = None
+
+
+class RebuildBody(BaseModel):
+    items: list[RebuildItem]
+    tag: str = "General form"
+
+
+@router.post("/api/rebuild")
+async def rebuild_apply(request: Request, body: RebuildBody) -> dict:
+    st = request.app.state
+    return await citations.rebuild(st.gramps, st.conn, [i.model_dump() for i in body.items], body.tag)

@@ -125,6 +125,14 @@ test('a newspaper draft\'s saved "What the item says" text loads as Cited for', 
     'entry details stay where the record type still has them');
 });
 
+test('a typed record noun survives where the record type takes any noun', () => {
+  const general = recordById('general');
+  const kept = restoreDraft(general, { values: { image: '32' }, subject: { name: 'Peter L. Grund', noun: 'power of attorney' } });
+  assert.equal(kept.subject.noun, 'power of attorney');
+  const saved = { current: 'general', drafts: { general: { subject: { noun: 'deed' } } } };
+  assert.equal(loadState(memory({ [STORE_KEY]: JSON.stringify(saved) }), recordById).drafts.general.subject.noun, 'deed');
+});
+
 test('storage that throws is survivable', () => {
   const broken = { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); } };
   assert.equal(loadState(broken, recordById), null);

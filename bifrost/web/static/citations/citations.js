@@ -305,7 +305,141 @@ const NORWEGIAN = [
 
 return { NORWEGIAN };
 })();
+__modules["tables.js"] = (() => {
+// Lookup tables shared by every record type. PLATFORMS and STATE_ABBREV are pinned to the
+// guide's own tables (A10, B.3 §10) by test/tables.test.js.
+
+const CHAPTERS = { no: 'Norwegian', se: 'Swedish', us: 'US', pp: 'Published & personal', ge: 'General' };
+const CHAPTER_CODE = { no: 'B.1', se: 'B.2', us: 'B.3', pp: 'B.4' };
+
+const LEVELS = ['Very High', 'High', 'Normal', 'Low', 'Very Low'];
+
+// A10 · Platforms: homepage URLs.
+const PLATFORMS = {
+  'Digitalarkivet': 'https://www.digitalarkivet.no',
+  'Riksarkivet': 'https://sok.riksarkivet.se',
+  'ArkivDigital': 'https://www.arkivdigital.se',
+  'Nasjonalbiblioteket': 'https://www.nb.no',
+  'Ancestry': 'https://www.ancestry.com',
+  'FamilySearch': 'https://www.familysearch.org',
+  'Find a Grave': 'https://www.findagrave.com',
+  'Newspapers.com': 'https://www.newspapers.com',
+  'Fold3': 'https://www.fold3.com',
+  'Chronicling America': 'https://chroniclingamerica.loc.gov',
+  'GenealogyBank': 'https://www.genealogybank.com',
+  'YouTube': 'https://www.youtube.com',
+  'Lantmäteriet': 'https://historiskakartor.lantmateriet.se',
+};
+
+// B.3 §10 · traditional state abbreviations (never USPS codes).
+const STATE_ABBREV = {
+  'Minnesota': 'Minn.', 'Wisconsin': 'Wis.', 'Iowa': 'Iowa', 'South Dakota': 'S. Dak.',
+  'North Dakota': 'N. Dak.', 'New York': 'N.Y.', 'Massachusetts': 'Mass.', 'Connecticut': 'Conn.',
+  'California': 'Cal.', 'Illinois': 'Ill.', 'Michigan': 'Mich.', 'Virginia': 'Va.', 'Pennsylvania': 'Pa.',
+};
+
+// Archive suggestions per chapter (each chapter's §3).
+const ARCHIVES = {
+  no: ['Statsarkivet i Oslo', 'Statsarkivet i Hamar', 'Riksarkivet'],
+  se: ['Värmlandsarkiv', 'Riksarkivet'],
+  us: ['National Archives', 'Minnesota Historical Society', 'Swenson Swedish Immigration Research Center', 'Family History Library'],
+  pp: ['Minnesota Historical Society', 'Library of Virginia'],
+  ge: [],
+};
+
+// A7 parenthetical suggestions per chapter (§9): 1 which entry, 2 source says, 3 evidence.
+const SUGGESTIONS = {
+  no: { which: ['daughter of ', 'son of ', 'at ', 'b. ', 'd. ', 'senior', 'junior'],
+    says: ['tjenestepige', 'tjenestedreng', 'fattigdreng', 'tyende', 'inderst', 'husmand', 'enke', 'enkemann', 'første ekteskap', 'annen ekteskap'],
+    evidence: ['stated age ', 'birth year inferred from age', 'named at '] },
+  se: { which: ['b. ', 'd. ', 'at ', 'junior', 'servant'],
+    says: ['widower', 'widow', 'both in first marriage', 'retired soldier', 'unmarried'],
+    evidence: ['birth year inferred from age', 'stated age ', 'named at ', 'witness at '] },
+  us: { which: ['b. ', 'd. ', 'of  Co.', 'senior', 'junior', 'ED '],
+    says: ['head', 'wife of head', 'son', 'daughter', 'boarder', 'lodger', 'servant', 'widow', 'widower', 'declared', 'naturalized ', 'both in first marriage', 'by license', 'by banns', 'delayed registration', 'amended', 'discharged', 'laborer'],
+    evidence: ['birth year inferred from age', 'birth years inferred from ages', 'stated age ', 'named at ', 'parents named at ', 'informant on ', 'next of kin on ', 'witness at ', 'identified by initials only', 'birthplace inferred from naturalization'] },
+  pp: { which: ['b. ', 'd. ', 'at ', 'senior', 'junior'],
+    says: ['written contemporaneously', 'compiled later', 'damaged page', 'in unrelated handwriting'],
+    evidence: ['reported by ', 'handwritten by ', 'uncited claim in published work', 'second-hand'] },
+  ge: { which: ['b. ', 'd. ', 'at ', 'senior', 'junior'],
+    says: ['grantor', 'grantee', 'witness', 'widow'],
+    evidence: ['named at ', 'stated age ', 'second-hand'] },
+};
+
+// A7 · Usual cited for: the fact a record noun (or a record type without one) is usually cited for. Pinned to the
+// guide's table by test/tables.test.js.
+const USUAL_CITED_FOR = {
+  'birth and baptism entry': 'birth and baptism',
+  'birth entry': 'birth', 'birth certificate': 'birth',
+  'baptism entry': 'baptism',
+  'death entry': 'death', 'death certificate': 'death', 'obituary': 'death',
+  'burial entry': 'burial', 'headstone application': 'burial',
+  'death and burial entry': 'death and burial',
+  'marriage entry': 'marriage', 'marriage license': 'marriage', 'marriage announcement': 'marriage',
+  'confirmation entry': 'confirmation',
+  'communion entry': 'communion',
+  'membership entry': 'membership',
+  'household': 'residence', 'household examination entry': 'residence', 'census entry': 'residence', 'directory entry': 'residence',
+  'estate entry': 'estate', 'estate inventory': 'estate',
+  'matrikkel entry': 'land holding',
+  'land allotment entry': 'land allotment',
+  'signatory entry': 'signature',
+  'croft transfer entry': 'croft transfer',
+  'naturalization petition': 'naturalization',
+  'declaration of intention': 'declaration of intention',
+  'WWII draft card': 'draft registration',
+  'pension file': 'military service', 'compiled service record': 'military service',
+  'funeral notice': 'funeral',
+  'Find a Grave memorial': 'burial',
+  'Passenger manifest': 'arrival',
+};
+
+// C2 document types and their default C4 date meaning.
+const DATE_MEANING = {
+  'vital record': 'event', 'enumeration': 'event', 'legal': 'event', 'immigration': 'event',
+  'military': 'event', 'religious': 'event', 'correspondence': 'creation', 'ephemera': 'event',
+  'publication': 'publication', 'artifact': 'creation', 'research': 'creation', 'interview': 'event',
+};
+
+// A10 · the medium that opens a genealogical record's Pubinfo; the first is the default. Microfilm is film
+// read on a reader at a library or archive.
+const MEDIA = ['Digital images', 'Database with images', 'Database', 'Microfilm'];
+
+// A7 · the forms a cited copy or index takes; an original has none ('').
+const COPY_FORMS = ['index entry', 'transcript', 'extract', 'abstract'];
+
+const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+
+/** '14 March 1925' → '1925-03-14'; anything else → ''. */
+function isoDate(text) {
+  const m = String(text ?? '').trim().match(/^(\d{1,2}) ([A-Za-z]+) (\d{4})$/);
+  if (!m) return '';
+  const month = MONTHS.indexOf(m[2].toLowerCase()) + 1;
+  return month ? `${m[3]}-${String(month).padStart(2, '0')}-${m[1].padStart(2, '0')}` : '';
+}
+
+/** The first four-digit year in a date ('12 March 1897' → '1897'); '' when there is none. */
+function yearOf(text) {
+  return (String(text ?? '').match(/\d{4}/) || [''])[0];
+}
+
+function lastWord(text) {
+  return String(text ?? '').trim().split(/\s+/).pop() || '';
+}
+
+function allButLastWord(text) {
+  return String(text ?? '').trim().split(/\s+/).slice(0, -1).join(' ');
+}
+
+function stateAbbrev(state) {
+  return STATE_ABBREV[String(state ?? '').trim()] || String(state ?? '').trim();
+}
+
+return { CHAPTERS, CHAPTER_CODE, LEVELS, PLATFORMS, STATE_ABBREV, ARCHIVES, SUGGESTIONS, USUAL_CITED_FOR, DATE_MEANING, MEDIA, COPY_FORMS, isoDate, yearOf, lastWord, allButLastWord, stateAbbrev };
+})();
 __modules["template.js"] = (() => {
+const { stateAbbrev } = __modules["tables.js"];
+
 // Template filling. {key} inserts a value; «…» is dropped when any key inside it is blank.
 // A blank required value becomes a gap marker ⟦Label⟧: highlighted on screen, copied as [Label].
 const GAP_OPEN = '⟦';
@@ -332,18 +466,36 @@ function gapLabels(text) {
   return [...String(text ?? '').matchAll(GAP_RE)].map(m => m[1]);
 }
 
+const TOKEN_RE = /\{(\w+)(?:\|(\w+))?\}/g;
+
+// Helpers a template can apply to a value: {author|last}, {date|year}, {state|abbrev}, {title|first}, {noun|lower}.
+const FILTERS = {
+  last: v => String(v).trim().split(/\s+/).pop(),
+  first: v => String(v).split(',')[0].trim(),
+  year: v => (String(v).match(/\d{4}/) || [''])[0],
+  lower: v => String(v).toLowerCase(),
+  abbrev: v => stateAbbrev(v),
+};
+
 function templateKeys(template) {
-  return [...String(template ?? '').matchAll(/\{(\w+)\}/g)].map(m => m[1]);
+  return [...String(template ?? '').matchAll(TOKEN_RE)].map(m => m[1]);
 }
 
 function fill(template, values, labelOf = key => key) {
   if (!template) return '';
+  const value = (key, filter) => {
+    const v = values[key];
+    return isBlank(v) || !FILTERS[filter] ? v : FILTERS[filter](v);
+  };
   const kept = template.replace(/«([^»]*)»/g, (_, inner) =>
-    templateKeys(inner).some(k => isBlank(values[k])) ? '' : inner);
-  return kept.replace(/\{(\w+)\}/g, (_, k) => isBlank(values[k]) ? gap(labelOf(k)) : String(values[k]));
+    [...inner.matchAll(TOKEN_RE)].some(m => isBlank(value(m[1], m[2]))) ? '' : inner);
+  return kept.replace(TOKEN_RE, (_, k, f) => {
+    const v = value(k, f);
+    return isBlank(v) ? gap(labelOf(k)) : String(v);
+  });
 }
 
-return { GAP_OPEN, GAP_CLOSE, isBlank, gap, hasGap, plain, gapLabels, templateKeys, fill };
+return { GAP_OPEN, GAP_CLOSE, isBlank, gap, hasGap, plain, gapLabels, FILTERS, templateKeys, fill };
 })();
 __modules["records/swedish.js"] = (() => {
 // B.2 · Swedish sources.
@@ -630,138 +782,6 @@ const SWEDISH = [
 ];
 
 return { SWEDISH };
-})();
-__modules["tables.js"] = (() => {
-// Lookup tables shared by every record type. PLATFORMS and STATE_ABBREV are pinned to the
-// guide's own tables (A10, B.3 §10) by test/tables.test.js.
-
-const CHAPTERS = { no: 'Norwegian', se: 'Swedish', us: 'US', pp: 'Published & personal', ge: 'General' };
-const CHAPTER_CODE = { no: 'B.1', se: 'B.2', us: 'B.3', pp: 'B.4' };
-
-const LEVELS = ['Very High', 'High', 'Normal', 'Low', 'Very Low'];
-
-// A10 · Platforms: homepage URLs.
-const PLATFORMS = {
-  'Digitalarkivet': 'https://www.digitalarkivet.no',
-  'Riksarkivet': 'https://sok.riksarkivet.se',
-  'ArkivDigital': 'https://www.arkivdigital.se',
-  'Nasjonalbiblioteket': 'https://www.nb.no',
-  'Ancestry': 'https://www.ancestry.com',
-  'FamilySearch': 'https://www.familysearch.org',
-  'Find a Grave': 'https://www.findagrave.com',
-  'Newspapers.com': 'https://www.newspapers.com',
-  'Fold3': 'https://www.fold3.com',
-  'Chronicling America': 'https://chroniclingamerica.loc.gov',
-  'GenealogyBank': 'https://www.genealogybank.com',
-  'YouTube': 'https://www.youtube.com',
-  'Lantmäteriet': 'https://historiskakartor.lantmateriet.se',
-};
-
-// B.3 §10 · traditional state abbreviations (never USPS codes).
-const STATE_ABBREV = {
-  'Minnesota': 'Minn.', 'Wisconsin': 'Wis.', 'Iowa': 'Iowa', 'South Dakota': 'S. Dak.',
-  'North Dakota': 'N. Dak.', 'New York': 'N.Y.', 'Massachusetts': 'Mass.', 'Connecticut': 'Conn.',
-  'California': 'Cal.', 'Illinois': 'Ill.', 'Michigan': 'Mich.', 'Virginia': 'Va.', 'Pennsylvania': 'Pa.',
-};
-
-// Archive suggestions per chapter (each chapter's §3).
-const ARCHIVES = {
-  no: ['Statsarkivet i Oslo', 'Statsarkivet i Hamar', 'Riksarkivet'],
-  se: ['Värmlandsarkiv', 'Riksarkivet'],
-  us: ['National Archives', 'Minnesota Historical Society', 'Swenson Swedish Immigration Research Center', 'Family History Library'],
-  pp: ['Minnesota Historical Society', 'Library of Virginia'],
-  ge: [],
-};
-
-// A7 parenthetical suggestions per chapter (§9): 1 which entry, 2 source says, 3 evidence.
-const SUGGESTIONS = {
-  no: { which: ['daughter of ', 'son of ', 'at ', 'b. ', 'd. ', 'senior', 'junior'],
-    says: ['tjenestepige', 'tjenestedreng', 'fattigdreng', 'tyende', 'inderst', 'husmand', 'enke', 'enkemann', 'første ekteskap', 'annen ekteskap'],
-    evidence: ['stated age ', 'birth year inferred from age', 'named at '] },
-  se: { which: ['b. ', 'd. ', 'at ', 'junior', 'servant'],
-    says: ['widower', 'widow', 'both in first marriage', 'retired soldier', 'unmarried'],
-    evidence: ['birth year inferred from age', 'stated age ', 'named at ', 'witness at '] },
-  us: { which: ['b. ', 'd. ', 'of  Co.', 'senior', 'junior', 'ED '],
-    says: ['head', 'wife of head', 'son', 'daughter', 'boarder', 'lodger', 'servant', 'widow', 'widower', 'declared', 'naturalized ', 'both in first marriage', 'by license', 'by banns', 'delayed registration', 'amended', 'discharged', 'laborer'],
-    evidence: ['birth year inferred from age', 'birth years inferred from ages', 'stated age ', 'named at ', 'parents named at ', 'informant on ', 'next of kin on ', 'witness at ', 'identified by initials only', 'birthplace inferred from naturalization'] },
-  pp: { which: ['b. ', 'd. ', 'at ', 'senior', 'junior'],
-    says: ['written contemporaneously', 'compiled later', 'damaged page', 'in unrelated handwriting'],
-    evidence: ['reported by ', 'handwritten by ', 'uncited claim in published work', 'second-hand'] },
-  ge: { which: ['b. ', 'd. ', 'at ', 'senior', 'junior'],
-    says: ['grantor', 'grantee', 'witness', 'widow'],
-    evidence: ['named at ', 'stated age ', 'second-hand'] },
-};
-
-// A7 · Usual cited for: the fact a record noun (or a record type without one) is usually cited for. Pinned to the
-// guide's table by test/tables.test.js.
-const USUAL_CITED_FOR = {
-  'birth and baptism entry': 'birth and baptism',
-  'birth entry': 'birth', 'birth certificate': 'birth',
-  'baptism entry': 'baptism',
-  'death entry': 'death', 'death certificate': 'death', 'obituary': 'death',
-  'burial entry': 'burial', 'headstone application': 'burial',
-  'death and burial entry': 'death and burial',
-  'marriage entry': 'marriage', 'marriage license': 'marriage', 'marriage announcement': 'marriage',
-  'confirmation entry': 'confirmation',
-  'communion entry': 'communion',
-  'membership entry': 'membership',
-  'household': 'residence', 'household examination entry': 'residence', 'census entry': 'residence', 'directory entry': 'residence',
-  'estate entry': 'estate', 'estate inventory': 'estate',
-  'matrikkel entry': 'land holding',
-  'land allotment entry': 'land allotment',
-  'signatory entry': 'signature',
-  'croft transfer entry': 'croft transfer',
-  'naturalization petition': 'naturalization',
-  'declaration of intention': 'declaration of intention',
-  'WWII draft card': 'draft registration',
-  'pension file': 'military service', 'compiled service record': 'military service',
-  'funeral notice': 'funeral',
-  'Find a Grave memorial': 'burial',
-  'Passenger manifest': 'arrival',
-};
-
-// C2 document types and their default C4 date meaning.
-const DATE_MEANING = {
-  'vital record': 'event', 'enumeration': 'event', 'legal': 'event', 'immigration': 'event',
-  'military': 'event', 'religious': 'event', 'correspondence': 'creation', 'ephemera': 'event',
-  'publication': 'publication', 'artifact': 'creation', 'research': 'creation', 'interview': 'event',
-};
-
-// A10 · the medium that opens a genealogical record's Pubinfo; the first is the default. Microfilm is film
-// read on a reader at a library or archive.
-const MEDIA = ['Digital images', 'Database with images', 'Database', 'Microfilm'];
-
-// A7 · the forms a cited copy or index takes; an original has none ('').
-const COPY_FORMS = ['index entry', 'transcript', 'extract', 'abstract'];
-
-const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
-
-/** '14 March 1925' → '1925-03-14'; anything else → ''. */
-function isoDate(text) {
-  const m = String(text ?? '').trim().match(/^(\d{1,2}) ([A-Za-z]+) (\d{4})$/);
-  if (!m) return '';
-  const month = MONTHS.indexOf(m[2].toLowerCase()) + 1;
-  return month ? `${m[3]}-${String(month).padStart(2, '0')}-${m[1].padStart(2, '0')}` : '';
-}
-
-/** The first four-digit year in a date ('12 March 1897' → '1897'); '' when there is none. */
-function yearOf(text) {
-  return (String(text ?? '').match(/\d{4}/) || [''])[0];
-}
-
-function lastWord(text) {
-  return String(text ?? '').trim().split(/\s+/).pop() || '';
-}
-
-function allButLastWord(text) {
-  return String(text ?? '').trim().split(/\s+/).slice(0, -1).join(' ');
-}
-
-function stateAbbrev(state) {
-  return STATE_ABBREV[String(state ?? '').trim()] || String(state ?? '').trim();
-}
-
-return { CHAPTERS, CHAPTER_CODE, LEVELS, PLATFORMS, STATE_ABBREV, ARCHIVES, SUGGESTIONS, USUAL_CITED_FOR, DATE_MEANING, MEDIA, COPY_FORMS, isoDate, yearOf, lastWord, allButLastWord, stateAbbrev };
 })();
 __modules["records/us.js"] = (() => {
 // B.3 · US sources.
@@ -1725,20 +1745,27 @@ const GENERAL = [
 return { GENERAL };
 })();
 __modules["records/index.js"] = (() => {
-// Every record type, in sidebar order.
+// Every record type, in sidebar order: the shipped ones, and the registry every lookup reads, which Bifrost's
+// saved edits replace (setRecords).
 const { NORWEGIAN } = __modules["records/norwegian.js"];
 const { SWEDISH } = __modules["records/swedish.js"];
 const { US } = __modules["records/us.js"];
 const { PUBLISHED } = __modules["records/published.js"];
 const { GENERAL } = __modules["records/general.js"];
 
-const RECORDS = [...NORWEGIAN, ...SWEDISH, ...US, ...PUBLISHED, ...GENERAL];
+const SHIPPED = [...NORWEGIAN, ...SWEDISH, ...US, ...PUBLISHED, ...GENERAL];
+const RECORDS = [...SHIPPED];
 
 function recordById(id) {
   return RECORDS.find(r => r.id === id) || null;
 }
 
-return { RECORDS, recordById };
+/** Makes every lookup see these record types. */
+function setRecords(list) {
+  RECORDS.splice(0, RECORDS.length, ...list);
+}
+
+return { SHIPPED, RECORDS, recordById, setRecords };
 })();
 __modules["engine.js"] = (() => {
 // Turns one draft of one record type into every output field.
@@ -1768,14 +1795,23 @@ const STANDARD_LABELS = {
   pubmedium: 'Pubinfo medium', home: 'Platform homepage',
 };
 
+/** A10 · the Pubinfo mediums a record type offers: its own list, else the usual ones, Microfilm only where it can cite the film itself. */
+function mediaOf(type) {
+  const own = (type.media || []).map(m => String(m ?? '').trim()).filter(Boolean);
+  if (own.length) return own;
+  const film = [type, ...(type.pageVariants || [])].some(x => x.frnMicrofilm);
+  return MEDIA.filter(m => film || m !== 'Microfilm');
+}
+
 /** A10 · whether a typed Pubinfo medium is film read on a reader. */
 function isFilm(medium) {
   return String(medium ?? '').trim().toLowerCase() === 'microfilm';
 }
 
+/** The guide section a rule refers to for this record type; a chapter rule of a type outside the chapters has none. */
 function ruleRef(type, rule) {
   if (!rule.startsWith('§')) return rule;
-  return CHAPTER_CODE[type.chapter] ? `${CHAPTER_CODE[type.chapter]} ${rule}` : type.rules || rule;
+  return CHAPTER_CODE[type.chapter] ? `${CHAPTER_CODE[type.chapter]} ${rule}` : type.rules || '';
 }
 
 /** The record type with the draft's page variant merged in. */
@@ -1815,7 +1851,7 @@ function newDraft(type) {
   for (const [key] of inputFields(type)) values[key] = '';
   for (const key of STANDARD_VALUES) values[key] = '';
   for (const key of REFERENCE_VALUES) values[key] = type.defaults?.[key] || '';
-  values.pubmedium ||= MEDIA[0];
+  values.pubmedium ||= mediaOf(type)[0];
   const variant = type.pageVariants ? type.pageVariants[0].key : '';
   const resolved = resolveType(type, { variant });
   return {
@@ -1937,6 +1973,8 @@ function paperlessTitle(draft, c) {
 /** A7 · the fact a citation is usually cited for: its record noun's, or with no noun its record type's. */
 function usualCitedFor(type, subject) {
   const noun = String(subject?.noun ?? '').trim();
+  const own = type.usual?.[noun || ''];
+  if (own !== undefined) return own;
   return (noun ? USUAL_CITED_FOR[noun] : USUAL_CITED_FOR[type.name]) || '';
 }
 
@@ -2026,7 +2064,7 @@ function buildOutputs(type, draft, { legacy = false } = {}) {
   return o;
 }
 
-return { REFERENCE_VALUES, STANDARD_VALUES, SUBJECT_KEYS, ENGINE_TOKENS, TEMPLATE_KEYS, OUTPUT_GROUPS, isFilm, ruleRef, resolveType, inputFields, labeler, usesToken, usesDetails, newDraft, setVariant, nextCitationDraft, exampleLabel, draftFromExample, recordNoun, subjectOf, srnSubjectOf, pageLocators, usualCitedFor, attributesOf, endWith, buildOutputs };
+return { REFERENCE_VALUES, STANDARD_VALUES, SUBJECT_KEYS, ENGINE_TOKENS, TEMPLATE_KEYS, OUTPUT_GROUPS, mediaOf, isFilm, ruleRef, resolveType, inputFields, labeler, usesToken, usesDetails, newDraft, setVariant, nextCitationDraft, exampleLabel, draftFromExample, recordNoun, subjectOf, srnSubjectOf, pageLocators, usualCitedFor, attributesOf, endWith, buildOutputs };
 })();
 __modules["checks.js"] = (() => {
 // Rule checks shown in the status bar. Each returns { rule, message } problems.
@@ -2115,8 +2153,12 @@ const RENAMED_NOUNS = {
 };
 const RENAMED_FOR = { 'us-vital': { 'marriage': 'marriage license' }, 'se-husforhor': { 'record': 'household examination entry' } };
 
-/** A saved noun under its current name; a noun the record type no longer lists gives way to its default. */
+/**
+ * A saved noun under its current name; a noun the record type no longer lists gives way to its default. A record type
+ * whose noun is typed freely keeps it as typed.
+ */
 function knownNoun(type, draft, saved) {
+  if (type.freeNoun) return typeof saved === 'string' ? saved : '';
   const nouns = resolveType(type, draft).nouns || [''];
   const noun = RENAMED_FOR[type.id]?.[saved] ?? RENAMED_NOUNS[saved] ?? saved;
   return nouns.includes(noun) ? noun : nouns[0] || '';
@@ -2193,8 +2235,8 @@ return { STORE_KEY, loadState, restoreDraft, saveState };
 })();
 __modules["form.js"] = (() => {
 // Describes what each wizard step asks for and shows, as plain rows the screen draws.
-const { CHAPTERS, LEVELS, PLATFORMS, ARCHIVES, SUGGESTIONS, COPY_FORMS, MEDIA } = __modules["tables.js"];
-const { OUTPUT_GROUPS, TEMPLATE_KEYS, resolveType, usesDetails, usesToken, ruleRef, exampleLabel, isFilm } = __modules["engine.js"];
+const { CHAPTERS, LEVELS, PLATFORMS, ARCHIVES, SUGGESTIONS, COPY_FORMS } = __modules["tables.js"];
+const { OUTPUT_GROUPS, TEMPLATE_KEYS, resolveType, usesDetails, usesToken, ruleRef, exampleLabel, isFilm, mediaOf } = __modules["engine.js"];
 const { expectedFor, diffOutputs } = __modules["compare.js"];
 const { plain } = __modules["template.js"];
 
@@ -2244,7 +2286,7 @@ function referenceRows(type, draft) {
   const rows = [text('values.platform', 'Platform', v.platform, { list: Object.keys(PLATFORMS) })];
   const film = [type, ...(type.pageVariants || [])].some(x => x.frnMicrofilm);
   if (type.pubinfo === undefined || usesToken(type, 'pubmedium')) {
-    rows.push(text('values.pubmedium', 'Pubinfo medium', v.pubmedium, { list: MEDIA.filter(m => film || m !== 'Microfilm') }));
+    rows.push(text('values.pubmedium', 'Pubinfo medium', v.pubmedium, { list: mediaOf(type) }));
   }
   const online = usesToken(type, 'archive', TEMPLATE_KEYS.filter(k => k !== 'frnMicrofilm'));
   if (online || (film && isFilm(v.pubmedium))) rows.push(text('values.archive', 'Archive', v.archive, { list: ARCHIVES[type.chapter] }));
@@ -2358,7 +2400,7 @@ __modules["read.js"] = (() => {
 // citations made before the wizard kept its drafts. A reading is exact when it rebuilds the same page string, FRN,
 // and SRN; one whose page string and FRN rebuild is close (an SRN edited by hand); anything less is none.
 const { RECORDS, recordById } = __modules["records/index.js"];
-const { REFERENCE_VALUES, STANDARD_VALUES, ENGINE_TOKENS, newDraft, setVariant, resolveType, inputFields, recordNoun, subjectOf, srnSubjectOf, pageLocators, buildOutputs } = __modules["engine.js"];
+const { REFERENCE_VALUES, STANDARD_VALUES, ENGINE_TOKENS, newDraft, setVariant, resolveType, inputFields, recordNoun, subjectOf, srnSubjectOf, pageLocators, buildOutputs, mediaOf } = __modules["engine.js"];
 const { COPY_FORMS, MEDIA, PLATFORMS } = __modules["tables.js"];
 const { fill, hasGap } = __modules["template.js"];
 
@@ -2386,9 +2428,10 @@ function shapes(template) {
 function pattern(template, known) {
   let src = '';
   const seen = new Set();
-  for (const part of template.split(/(«|»|\{\w+\})/)) {
+  for (const part of template.split(/(«|»|\{\w+(?:\|\w+)?\})/)) {
     if (part === '«') src += '(?:';
     else if (part === '»') src += ')?';
+    else if (/^\{\w+\|\w+\}$/.test(part)) src += '.+?';
     else if (/^\{\w+\}$/.test(part)) {
       const key = part.slice(1, -1);
       if (filled(known[key])) src += escapeRe(known[key]);
@@ -2589,7 +2632,7 @@ function readerFor(type, variant, cited) {
       return n;
     }
     const online = /^(.+?), (.+) \((\S+)\)\.$/s.exec(text);
-    if (!online || !MEDIA.includes(online[1])) return c;
+    if (!online || !(MEDIA.includes(online[1]) || mediaOf(t).includes(online[1]))) return c;
     const n = taking(c, { platform: online[2] });
     if (!filled(n.d.values.pubmedium)) n.d.values.pubmedium = online[1];
     return n;
@@ -2744,13 +2787,188 @@ function readLoosely(cited) {
 
 return { readCitation, readByFrn, readLoosely };
 })();
-export const { RECORDS, recordById } = __modules["records/index.js"];
-export const { REFERENCE_VALUES, STANDARD_VALUES, SUBJECT_KEYS, ENGINE_TOKENS, TEMPLATE_KEYS, OUTPUT_GROUPS, isFilm, ruleRef, resolveType, inputFields, labeler, usesToken, usesDetails, newDraft, setVariant, nextCitationDraft, exampleLabel, draftFromExample, recordNoun, subjectOf, srnSubjectOf, pageLocators, usualCitedFor, attributesOf, endWith, buildOutputs } = __modules["engine.js"];
-export const { GAP_OPEN, GAP_CLOSE, isBlank, gap, hasGap, plain, gapLabels, templateKeys, fill } = __modules["template.js"];
+__modules["registry.js"] = (() => {
+// Record types as Bifrost holds them: the shipped ones with the saved edits laid over them, and new ones made in
+// Bifrost. An edit is plain data (no code): a built-in type keeps its computed values and guide pins.
+const { GENERAL } = __modules["records/general.js"];
+const { CHAPTERS } = __modules["tables.js"];
+const { plain } = __modules["template.js"];
+const { labeler, resolveType, draftFromExample, buildOutputs, usualCitedFor } = __modules["engine.js"];
+
+const DATA_KEYS = ['name', 'group', 'chapter', 'hint', 'source', 'citation', 'note', 'nouns', 'freeNoun', 'usual',
+  'defaults', 'confidence', 'doctype', 'title', 'abbrev', 'author', 'pubinfo', 'page', 'frn', 'frnMicrofilm', 'srn',
+  'paperlessTitle', 'subjectLabel', 'eventYearLabel', 'detailsLabel', 'eventDate', 'optionalSubject', 'media', 'sample', 'pageVariants', 'tag', 'base'];
+const VARIANT_KEYS = ['key', 'label', 'eventDate', 'citation', 'nouns', 'page', 'frn', 'frnMicrofilm', 'srn'];
+const TEMPLATE_FIELDS = [['title', 'Title'], ['abbrev', 'Abbrev'], ['author', 'Author'], ['pubinfo', 'Pubinfo'],
+  ['page', 'Page'], ['frn', 'FRN'], ['frnMicrofilm', 'FRN on film'], ['srn', 'SRN'], ['paperlessTitle', 'Paperless title']];
+const VARIANT_TEMPLATES = ['page', 'frn', 'frnMicrofilm', 'srn'];
+
+const copy = value => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)));
+
+/** The example inputs a type's preview starts from: its own sample, else its first worked example. */
+function sampleInputs(type) {
+  return { ...(type.examples?.[0]?.inputs || {}), ...(type.sample || {}) };
+}
+
+/** The inputs a preview builds from: the type's example on the page form given, with a record noun that form lists. */
+function previewInputs(type, variant = '') {
+  const inputs = { ...sampleInputs(type), ...(variant ? { variant } : {}) };
+  const t = resolveType(type, { variant });
+  const nouns = t.nouns || [''];
+  if (!t.freeNoun && !nouns.includes(inputs.noun)) inputs.noun = nouns[0];
+  return inputs;
+}
+
+/** What the editor shows and saves of a record type: its data, no code. A standard Pubinfo is null. */
+function toDefinition(type) {
+  const out = {};
+  for (const key of DATA_KEYS) {
+    if (key === 'pageVariants') continue;
+    if (type[key] !== undefined) out[key] = copy(type[key]);
+  }
+  if (!Object.hasOwn(type, 'pubinfo') || type.pubinfo === undefined) out.pubinfo = null;
+  if (type.pageVariants) {
+    out.pageVariants = type.pageVariants.map(v => Object.fromEntries(VARIANT_KEYS.filter(k => v[k] !== undefined).map(k => [k, copy(v[k])])));
+  }
+  out.sample = sampleInputs(type);
+  return out;
+}
+
+function laid(base, definition) {
+  const out = { ...base };
+  for (const key of DATA_KEYS) {
+    if (key === 'pageVariants' || !Object.hasOwn(definition, key)) continue;
+    if (key === 'pubinfo' && definition.pubinfo === null) delete out.pubinfo;
+    else out[key] = copy(definition[key]);
+  }
+  if (Array.isArray(definition.pageVariants)) {
+    out.pageVariants = definition.pageVariants.map((v) => {
+      const shipped = (base.pageVariants || []).find(s => s.key === v.key) || {};
+      const merged = { ...shipped };
+      for (const key of VARIANT_KEYS) if (Object.hasOwn(v, key)) merged[key] = copy(v[key]);
+      return merged;
+    });
+  }
+  return out;
+}
+
+/** A new record type of one's own, in the General form's shape (A14), with a General form citation's values as its example. */
+function blankDefinition(name = 'New record type', from = null) {
+  const out = { ...toDefinition(GENERAL[0]), name, group: 'My record types', hint: '', usual: {}, sample: {} };
+  delete out.tag;
+  if (from) {
+    const typed = Object.entries(from.values || {}).filter(([, v]) => typeof v === 'string' && v.trim());
+    out.sample = { ...Object.fromEntries(typed), name: from.subject?.name || '', noun: from.subject?.noun || '' };
+    if (out.sample.noun) {
+      out.nouns = [out.sample.noun];
+      out.freeNoun = false;
+      if (out.sample.citedFor) out.usual = { [out.sample.noun]: out.sample.citedFor };
+    }
+  }
+  return out;
+}
+
+/** A shipped type's computed values, for a copy of it; a copy whose fields no longer fit computes nothing. */
+function derivedFrom(shipped, id) {
+  const derive = shipped.find(t => t.id === id)?.derive;
+  if (!derive) return undefined;
+  return (values) => {
+    try {
+      return derive(values) || {};
+    } catch {
+      return {};
+    }
+  };
+}
+
+/**
+ * The record types Bifrost holds: shipped ones with their edits laid over them (kind 'override'), new ones (kind
+ * 'custom'), deleted ones left out. Each carries its version (0 when never edited).
+ */
+function applyEdits(shipped, edits = []) {
+  const byId = new Map(edits.map(e => [e.id, e]));
+  const out = [];
+  for (const type of shipped) {
+    const edit = byId.get(type.id);
+    if (edit?.deleted) continue;
+    out.push(edit?.kind === 'override' ? { ...laid(type, edit.definition || {}), version: edit.version || 0, edited: true }
+      : { ...type, version: edit?.version || 0 });
+  }
+  for (const edit of edits) {
+    if (edit.kind !== 'custom' || edit.deleted || shipped.some(t => t.id === edit.id)) continue;
+    const base = { id: edit.id, chapter: 'ge', group: 'My record types', nouns: [''], source: [], citation: [], note: [], examples: [] };
+    const type = laid(base, edit.definition || {});
+    const derive = derivedFrom(shipped, edit.definition?.base);
+    if (derive) type.derive = derive;
+    out.push({ ...type, id: edit.id, examples: [{ guide: 'Example', inputs: sampleInputs(type) }], version: edit.version || 0, custom: true });
+  }
+  return out;
+}
+
+/** A record type as it was at one saved version: the shipped type with that version's edit, or the edit alone. */
+function typeAtVersion(shipped, id, definition, kind) {
+  const edits = definition ? [{ id, kind, definition, version: 0 }] : [];
+  return applyEdits(shipped, edits).find(t => t.id === id) || null;
+}
+
+// What the values the wizard builds read as in the guide's notation.
+const BUILT_FORMS = {
+  pageLoc: 'p. [P] (image [I])', pageRef: 'p. [P]', subject: '[Subject] [record noun]', srnSubject: '[Subject] [record noun]',
+  entryof: '[record noun] of [Name]', medium: 'digital image', name: '[Name]', noun: '[record noun]', home: '[homepage]',
+};
+const HELPER_NAMES = { last: 'last word', first: 'first part', year: 'year', lower: 'lower case', abbrev: 'abbreviated' };
+
+/** A template in the guide's notation: each {token} as [Label], a helper named after it, optional parts unmarked. */
+function guideForm(type, template) {
+  const L = labeler(type);
+  return String(template ?? '').replace(/[«»]/g, '').replace(/\{(\w+)(?:\|(\w+))?\}/g, (_, key, helper) => {
+    if (BUILT_FORMS[key] && !helper) return BUILT_FORMS[key];
+    return `[${L(key)}${helper ? `, ${HELPER_NAMES[helper] || helper}` : ''}]`;
+  });
+}
+
+/** The guide's record-type tables, by chapter, as Markdown: what Bifrost holds now. */
+function printout(types, date = '') {
+  const row = cells => `| ${cells.map(c => String(c ?? '').replace(/\|/g, '\\|').replace(/\s*\n\s*/g, ' ')).join(' | ')} |`;
+  const code = text => (String(text ?? '').trim() ? `\`${text}\`` : '');
+  const table = (heads, rows) => [row(heads), row(heads.map(() => '---')), ...rows.map(row)].join('\n');
+  const out = ['# Record types', ''];
+  if (date) out.push(`Printed from Bifrost, ${date}.`, '');
+  for (const [chapter, label] of Object.entries(CHAPTERS)) {
+    const list = types.filter(t => (CHAPTERS[t.chapter] ? t.chapter : 'ge') === chapter);
+    if (!list.length) continue;
+    const forms = list.flatMap(type => (type.pageVariants?.length
+      ? type.pageVariants.map(v => ({ type, variant: v.key, name: `${type.name} · ${v.label}` }))
+      : [{ type, variant: '', name: type.name }]));
+    for (const f of forms) {
+      f.t = resolveType(f.type, { variant: f.variant });
+      const o = buildOutputs(f.type, draftFromExample(f.type, { guide: 'Example', inputs: previewInputs(f.type, f.variant) }));
+      const shown = Object.keys(sampleInputs(f.type)).length > 0;
+      f.o = Object.fromEntries(Object.entries(o).map(([k, v]) => [k, shown && typeof v === 'string' ? plain(v) : '']));
+    }
+    const first = list.map(type => forms.find(f => f.type === type));
+    const nouns = forms.flatMap(f => (f.t.freeNoun ? [[f.name, 'typed freely', usualCitedFor(f.t, { noun: '' })]]
+      : (f.t.nouns || ['']).map((noun, i) => [i ? '' : f.name, noun || '(none)', usualCitedFor(f.t, { noun })])));
+    out.push(`## ${label}`, '',
+      '### Source title', '', table(['Record type', 'Title format', 'Example'], first.map(f => [f.type.name, code(guideForm(f.t, f.t.title)), code(f.o.title)])), '',
+      '### Abbrev', '', table(['Record type', 'Abbrev', 'Example'], first.map(f => [f.type.name, code(guideForm(f.t, f.t.abbrev)), code(f.o.abbrev)])), '',
+      '### Page-string templates', '', table(['Record type', 'Page string', 'Example'], forms.map(f => [f.name, f.t.page ? code(guideForm(f.t, f.t.page)) : 'none: only what it is cited for', code(f.o.page)])), '',
+      '### Record nouns', '', table(['Record type', 'Record noun', 'Usual cited for'], nouns), '',
+      '### Reference notes', '', table(['Record type', 'FRN', 'SRN'], forms.map(f => [f.name, code(guideForm(f.t, f.t.frn)), code(guideForm(f.t, f.t.srn))])), '');
+  }
+  return out.join('\n');
+}
+
+return { DATA_KEYS, VARIANT_KEYS, TEMPLATE_FIELDS, VARIANT_TEMPLATES, sampleInputs, previewInputs, toDefinition, blankDefinition, applyEdits, typeAtVersion, guideForm, printout };
+})();
+export const { SHIPPED, RECORDS, recordById, setRecords } = __modules["records/index.js"];
+export const { REFERENCE_VALUES, STANDARD_VALUES, SUBJECT_KEYS, ENGINE_TOKENS, TEMPLATE_KEYS, OUTPUT_GROUPS, mediaOf, isFilm, ruleRef, resolveType, inputFields, labeler, usesToken, usesDetails, newDraft, setVariant, nextCitationDraft, exampleLabel, draftFromExample, recordNoun, subjectOf, srnSubjectOf, pageLocators, usualCitedFor, attributesOf, endWith, buildOutputs } = __modules["engine.js"];
+export const { GAP_OPEN, GAP_CLOSE, isBlank, gap, hasGap, plain, gapLabels, FILTERS, templateKeys, fill } = __modules["template.js"];
 export const { CHAPTERS, CHAPTER_CODE, LEVELS, PLATFORMS, STATE_ABBREV, ARCHIVES, SUGGESTIONS, USUAL_CITED_FOR, DATE_MEANING, MEDIA, COPY_FORMS, isoDate, yearOf, lastWord, allButLastWord, stateAbbrev } = __modules["tables.js"];
 export const { runChecks } = __modules["checks.js"];
 export const { COMPARED_FIELDS, expectedFor, diffOutputs } = __modules["compare.js"];
 export const { STORE_KEY, loadState, restoreDraft, saveState } = __modules["store.js"];
 export const { EDITABLE, sampleOf, recordGroups, sourceRows, referenceRows, citationRows, noteRows, outputRows, exampleNote, repositoryName, paperlessMatch, copyAllText } = __modules["form.js"];
 export const { readCitation, readByFrn, readLoosely } = __modules["read.js"];
+export const { DATA_KEYS, VARIANT_KEYS, TEMPLATE_FIELDS, VARIANT_TEMPLATES, sampleInputs, previewInputs, toDefinition, blankDefinition, applyEdits, typeAtVersion, guideForm, printout } = __modules["registry.js"];
 export const GUIDE = {"changed":"2026-10-13","refs":{"A1":{"title":"A1 · Source scoping","text":"A Source is the natural unit a researcher browses or pulls off the shelf. Scope down to that unit, and push everything more granular (rolls, pages, entries, memorial numbers) into the Citation page string."},"A2":{"title":"A2 · Citation date","text":"Leave the Citation date blank. The field is ambiguous (event, record creation, or access?). Every meaning already has a home below:"},"A3":{"title":"A3 · One citation vs. two","text":"Use one citation when all attached facts share the same evidence quality; use separate citations when they do not. The principle is Mills (EE 1.16): each piece of information in a source is appraised separately. Her example is a colonial South Carolina memorial covering the landowner's own acquisition (primary) and a hundred-year chain of title (secondary)."},"A4":{"title":"A4 · Locators","text":"A volume has two identifiers answering different questions. Keep each in its home and never mix them."},"A5":{"title":"A5 · Citation notes","text":"Source-level notes are optional; the Source fields carry the bibliographic data. Each Citation note holds:"},"A6":{"title":"A6 · Confidence","text":"Use the 5-level Gramps scale, anchored to EE's three axes: original vs. derivative source, primary vs. secondary information, direct vs. indirect evidence."},"A7":{"title":"A7 · Page string and attributes","text":"The page string says where the entry is in the Source, then what the citation is cited for: [locators] ([cited for]). The locators come from the chapter's §7. Locator words are lower case, even at the start of the page string (p. 57, image 62, certificate no. 1929-MN-XXXXXX, district 009 Blegstad). A record type with no locator (a headstone application, a compiled service record, a family letter) has only ([cited for])."},"A8":{"title":"A8 · Title","text":"Titles are EE locality-led: largest jurisdiction first, then record series/type and identifier, then year-range. A formal collection name may follow but never leads."},"A9":{"title":"A9 · Repository","text":"Decide in this order: A physical archive holds the original → name it (Statsarkivet i Oslo, Riksarkivet, Värmlandsarkiv, National Archives, [State] Historical Society, [County] County Courthouse, Family History Library when a microfilm number applies). A specific NARA facility goes in the FRN, not here. A family member or private party holds it → [Custodian], private collection (EE 4.24 to 4.29). It is a publication or online-only platform → blank. A website is a publication, not a repository (EE 2.34); the same holds for library-held books."},"A10":{"title":"A10 · Pubinfo","text":"Genealogical records: [medium], [platform] (homepage URL)."},"A11":{"title":"A11 · Bibliography","text":"Gramps fields are built for in-app display. For the book's bibliography, transform them into EE Source List Entries; never print the Title field directly."},"A12":{"title":"A12 · Privacy","text":"Apply EE 4.31 to living informants (interviewees, correspondents, custodians): keep their street address in working files, never in a published citation, while they are alive."},"A13":{"title":"A13 · Universal abbreviations","text":"Used in FRN, SRN, and Abbrev wherever a locator is needed (EE 2.53):"},"A14":{"title":"A14 · General form Pending review","text":"A record with no record type yet (a US deed, a power of attorney, a court order) is cited now from five questions and upgraded once its chapter has a rule (A15). Its citations carry the Gramps tag General form, so they can be found again."},"A15":{"title":"A15 · Rebuilding citations Pending review","text":"A rule change reaches the citations already in Gramps through Bifrost's rebuild, so a citation made under today's rules can be brought up to date later."},"C1":{"title":"C1 · Title","text":"Format: [Subject] [record-noun] [year]"},"C2":{"title":"C2 · Document type","text":"Classified by genealogical content, not by issuer."},"C3":{"title":"C3 · Date","text":"The underlying event's date when there is one; otherwise when the document was created or issued (C4 says which). Year only: use 1 January + qualifier year only (1 January is then a placeholder, never a real date). A range: use the start year; the range can go in the Title. This is separate from the Gramps Citation date, which stays blank (A2)."},"C4":{"title":"C4 · Date meaning","text":""},"C5":{"title":"C5 · Date qualifier","text":""},"C6":{"title":"C6 · Correspondent","text":"The digital provider hosting the image: a small, stable list matching the A10 platforms (FamilySearch, Ancestry, Digitalarkivet, Riksarkivet, ArkivDigital, Newspapers.com, Nasjonalbiblioteket, Lantmäteriet). A platform, never a physical archive or a person. Blank when the document did not come from a digital provider: microfilm read at a library, interviews, personal research, letters, and family-held artifacts."},"C7":{"title":"C7 · Tags","text":"Open (TBD). The worked examples use person, place, date, format, and status tags such as attributed."},"C8":{"title":"C8 · Source URL","text":"The canonical link that takes you back to the image or its indexed record. This deep link differs from Gramps Pubinfo, which holds only the homepage. Film read at a library has no link, so its Source URL is blank."},"C9":{"title":"C9 · Source URL access","text":""},"C10":{"title":"C10 · Permalink","text":"An alternative URL with a persistent identifier, only when the site advertises it as one: https://urn.digitalarkivet.no/URN:NBN:no-a1450-ft20101203340184.jpg · https://goto.digitalarkivet.no/kb20060926010303."},"C11":{"title":"C11 · Family group, Provenance, Physical location","text":""},"B.1 §1":{"title":"B.1 §1 · Scope","text":"One Source per archival volume / fond (A1). Record types covered: Parish records (kirkebøker): ministerialbok and klokkerbok; baptisms, confirmations, marriages, burials. Census (folketelling): the 1801 nominal census and the decennial 1865+ censuses. Court records (sorenskriverarkiv): tingbøker (court journals)."},"B.1 §2":{"title":"B.1 §2 · Source author","text":"Parish or court name alone, no country or umbrella prefix."},"B.1 §3":{"title":"B.1 §3 · Repository","text":""},"B.1 §4":{"title":"B.1 §4 · Source title","text":"Locality-led (A8), with the series in its Norwegian name followed by an English gloss in square brackets (EE 2.28), as in B.2 §4: Norway, [fylke or amt], [parish or court], [Norwegian series name] [English gloss] [volume], [year-range]. Capitalize the series name, and use the same gloss in the FRN and bibliography. Year-ranges follow the volume identifier with no parentheses (Digitalarkivet's own form), using en dashes."},"B.1 §5":{"title":"B.1 §5 · Locator tokens","text":""},"B.1 §6":{"title":"B.1 §6 · Pubinfo","text":""},"B.1 §7":{"title":"B.1 §7 · Page-string templates","text":""},"B.1 §8":{"title":"B.1 §8 · Confidence","text":""},"B.1 §9":{"title":"B.1 §9 · Subject vocabulary","text":"Record nouns (A7); the first is the default:"},"B.1 §10":{"title":"B.1 §10 · Abbrev","text":"House variation: the record-type word is lowercased (EE 2.29 keeps original capitals; lowercase gives visual contrast with the Title), and the Abbrev drops the gloss. Parish format: [Parish] [kirkebok|klokkerbok] [vol] ([year-range]). Court format: [Sorenskriveri] [tingbok|skifteprotokoll] [vol] ([year-range]). Unlike the Title, the Abbrev puts the year-range in parentheses."},"B.1 §11":{"title":"B.1 §11 · Bibliography","text":"A11 geographic form (EE 2.48): country, fylke, prestegjeld/herred, series + bracketed English gloss (EE 2.28), volume + years, repository + call number, medium, publisher, URL : year. Group under Norway:, alphabetize by fylke then prestegjeld."},"B.1 §12":{"title":"B.1 §12 · Worked examples","text":""},"B.2 §1":{"title":"B.2 §1 · Scope","text":"One Source per discrete NAD fond: each parish kyrkoarkiv volume series, each häradsrätt series, each SVAR database (A1). Record types covered: Parish records (kyrkoarkiv): Husförhörslängder (clerical survey), Lysnings- och Vigselbok (banns and marriage), Födelse- och dopböcker (birth and baptism), Dödbok (death/burial). Court records: Bouppteckningar (estate inventories) and other häradsrätt series. SVAR databases: Folkräkning (census) and other Riksarkivet databases."},"B.2 §2":{"title":"B.2 §2 · Source author","text":""},"B.2 §3":{"title":"B.2 §3 · Repository","text":""},"B.2 §4":{"title":"B.2 §4 · Source title","text":"Locality-led (A8), with the series in its original Swedish name followed by an English gloss in square brackets (EE 2.28): Sweden, [län], [parish or härad], [Swedish series name] [English gloss] [volume], [year-range]. Keep the series name's original capitalization, and use the same gloss as the FRN."},"B.2 §5":{"title":"B.2 §5 · Locator tokens","text":""},"B.2 §6":{"title":"B.2 §6 · Pubinfo","text":""},"B.2 §7":{"title":"B.2 §7 · Page-string templates","text":"Standard: p. [P] (image [I]), [entry]. Unpaginated fallback is image [I], [entry]. Each Source is one volume, so the volume is not repeated here (A4)."},"B.2 §8":{"title":"B.2 §8 · Confidence","text":""},"B.2 §9":{"title":"B.2 §9 · Subject vocabulary","text":"Record nouns (A7); the first is the default:"},"B.2 §10":{"title":"B.2 §10 · Abbrev","text":"Record-type word lowercased (Scandinavian house variation, see B.1 §10). Parish: [Parish] [record-type] [vol] ([years]). Court and other state records: [Creating body] [record-type] [vol] ([years]). Land survey: [Parish] [survey type] [act-no] ([years]). The SRN is built as in B.1 §10: the Abbrev, then the locators, then the subject."},"B.2 §11":{"title":"B.2 §11 · Bibliography","text":"A11 geographic form (EE 2.48) with bracketed English glosses (EE 2.28). Group under Sweden:, alphabetize by län then parish or härad. SVAR databases go in a trailing Online databases group by title, with no repository (EE 2.34, 11.53)."},"B.2 §12":{"title":"B.2 §12 · Worked examples","text":"Glosses (in the Title and at the series' first mention in the FRN; the Abbrev and SRN drop them): Husförhörslängder [household examinations] · Lysnings- och Vigselbok [banns and marriage book] · Födelse- och dopböcker [birth and baptism books] · Dödbok [death book] · Bouppteckningar [estate inventories] · Folkräkning [census] · laga skifte [statutory land enclosure]. These match EE 11.47, 11.50, 11.56."},"B.3 §1":{"title":"B.3 §1 · Scope","text":"One Source per unit a researcher browses on Ancestry/FamilySearch or pulls from an archive (A1)."},"B.3 §2":{"title":"B.3 §2 · Source author","text":"Bare body name: Bureau of the Census, never U.S. Bureau of the Census."},"B.3 §3":{"title":"B.3 §3 · Repository","text":""},"B.3 §4":{"title":"B.3 §4 · Source title","text":""},"B.3 §5":{"title":"B.3 §5 · Locator tokens","text":""},"B.3 §6":{"title":"B.3 §6 · Pubinfo","text":"[medium], [platform] (homepage URL). per A10. Examples: Digital images, Ancestry (https://www.ancestry.com). · Database with images, FamilySearch (https://www.familysearch.org). Published directories use the imprint variant (Example 7). Newspapers read on a library's film use Microfilm, Minnesota Historical Society.; a title read both there and online is one Source, and A10 picks its Pubinfo (Example 13). For church records, the named digitized collection (e.g. \"U.S., Evangelical Lutheran Church in America, Swedish American Church Records, 1800–1952\") goes in the FRN, not Pubinfo."},"B.3 §7":{"title":"B.3 §7 · Page-string templates","text":""},"B.3 §8":{"title":"B.3 §8 · Confidence","text":""},"B.3 §9":{"title":"B.3 §9 · Subject vocabulary","text":"Record nouns (A7); the first is the default. Passenger manifest and Find a Grave memorial take no noun: the list or memorial number says what it is."},"B.3 §10":{"title":"B.3 §10 · Abbrev","text":"The US Abbrev keeps whole readable words (St. Louis Co. naturalizations, 1888–1955); heavier abbreviation belongs in the SRN (St. Louis Co. natz.)."},"B.3 §11":{"title":"B.3 §11 · Bibliography","text":"A11 geographic form: [State]. [County]. [Locality/series]. [Series] [volume] ([years]). [Repository], [call number]. [Medium]. [Publisher]. [URL] : [year]. Group under a state header, alphabetize by county. Directories go by publisher (EE 2.46); online-only databases in a trailing group by title."},"B.3 §12":{"title":"B.3 §12 · Worked examples","text":""},"B.4 §1":{"title":"B.4 §1 · Scope","text":"Published works scope by bibliographic unit, artifacts by physical thing, interviews by event (A1)."},"B.4 §2":{"title":"B.4 §2 · Source author","text":""},"B.4 §3":{"title":"B.4 §3 · Repository","text":""},"B.4 §4":{"title":"B.4 §4 · Source title","text":"Most titles here are author-led or artifact-led, not locality-led, because these sources are arranged by author, collection, or custodian (A11). A place-focused history shelved with locality material may use the A8 form. Foreign titles take a bracketed English gloss in the FRN (EE 2.28)."},"B.4 §5":{"title":"B.4 §5 · Locator tokens","text":""},"B.4 §6":{"title":"B.4 §6 · Pubinfo","text":""},"B.4 §7":{"title":"B.4 §7 · Page-string templates","text":""},"B.4 §8":{"title":"B.4 §8 · Confidence","text":""},"B.4 §9":{"title":"B.4 §9 · Subject vocabulary","text":"Record nouns (A7); the first is the default, and (none) means the noun may be left off:"},"B.4 §10":{"title":"B.4 §10 · Abbrev Pending review","text":"Shortest unambiguous work title or artifact identity + year or volume, whole words (heavier abbreviation goes in the SRN):"},"B.4 §11":{"title":"B.4 §11 · Bibliography","text":"Arranged by author (EE 2.46), collection (EE 2.47), or custodian (EE 4.24 to 4.29), not by locality. Authored publications sit alphabetically in the main body; artifacts, interviews, and personal research get trailing headings."},"B.4 §12":{"title":"B.4 §12 · Worked examples","text":"Ordered by EE chapter (4 artifacts, then 13 published works)."}},"examples":{"B.1 Example 1":{"expected":{"title":"Norway, Akershus, Eidsvoll, Klokkerbok [parish register (copy)] I 2, 1866–1871","abbrev":"Eidsvoll klokkerbok I 2 (1866–1871)","author":"Eidsvoll prestekontor","pubinfo":"Digital images, Digitalarkivet (https://www.digitalarkivet.no).","callNumber":"AV/SAO-A-10888/G/Ga/L0002","page":"p. 57 (image 62), no. 21 (birth and baptism)","frn":"Eidsvoll prestekontor, Klokkerbok [parish register (copy)] no. I 2, 1866–1871, p. 57, no. 21, Thor Emil (born 1 September 1869; baptized 16 January 1870), son of Christian Henningsen and Anne Marthe Bergersdatter, baptized at Eidsvoll church; digital image, Digitalarkivet (https://urn.digitalarkivet.no/URN:NBN:no-a1450-kb20060313011115.jpg : accessed 17 April 2026); citing Statsarkivet i Oslo, AV/SAO-A-10888/G/Ga/L0002.","srn":"Eidsvoll klokkerbok I 2 (1866–1871), p. 57, no. 21, Thor Emil birth and baptism entry."},"confidence":"High","citations":[]},"B.1 Example 2":{"expected":{"title":"Norway, Akershus, Eidsvoll, Folketelling [census] 1875","abbrev":"Eidsvoll folketelling 1875","author":"Riksarkivet","pubinfo":"Database with images, Digitalarkivet (https://www.digitalarkivet.no).","callNumber":"AV/RA-S-2231/E","page":"district 009 Blegstad, p. 1270, household 01, person 006 (residence)","frn":"Folketelling [census] 1875, Akershus fylke, Eidsvoll prestegjeld, Eidsvoll sokn, district 009 Blegstad, p. 1270, household no. 01, person no. 006, Karen Indiana Evensdatter (tjenestepige, stated age 14, in Jens Hansen's household); digital image, Digitalarkivet (https://www.digitalarkivet.no/ft20110110330371 : accessed 26 April 2026); transcribed entry at https://www.digitalarkivet.no/pf01052052005225; citing Riksarkivet, Statistisk sentralbyrå, Sosioøkonomiske emner, Folketellinger, boliger og boforhold, E: Folketellinger, source ID 52052; archive reference AV/RA-S-2231/E.","srn":"Eidsvoll folketelling 1875, p. 1270, household 01, Karen Indiana Evensdatter in Hansen household."},"confidence":"High","citations":[]},"B.1 Example 3":{"expected":{"title":"Norway, Akershus, Eidsvoll sorenskriveri, Skifteprotokoll [probate register] II 3, 1815–1825","abbrev":"Eidsvoll sorenskriveri skifteprotokoll II 3 (1815–1825)","author":"Eidsvoll sorenskriveri","pubinfo":"Digital images, Digitalarkivet (https://www.digitalarkivet.no).","callNumber":"AV/SAO-A-10063/H/Hb/L0003","page":"folio 145–148 (estate)","frn":"Eidsvoll sorenskriveri [Eidsvoll district court], Skifteprotokoll [probate register] II 3, 1815–1825, fol. 145–148, estate inventory of Anders Hansen, Vinger gård, died 1822; digital image, Digitalarkivet (https://www.digitalarkivet.no/... : accessed 9 May 2026); citing Statsarkivet i Oslo, AV/SAO-A-10063/H/Hb/L0003.","srn":"Eidsvoll sorenskriveri skifteprotokoll II 3 (1815–1825), fol. 145–148, Anders Hansen estate entry."},"confidence":"High","citations":[]},"B.1 Example 4":{"expected":{"title":"Norway, Akershus amt, Eidsvoll prestegjeld, Matrikkel [land register] 1838","abbrev":"Eidsvoll matrikkel 1838","author":"Riksarkivet","pubinfo":"Database with images, Digitalarkivet (https://www.digitalarkivet.no).","page":"gård no. 234, Vinger gård, løpenummer 12 (land holding)","frn":"Matrikkel [land register] 1838, Akershus amt, Eidsvoll prestegjeld, gård no. 234, Vinger gård, løpenummer 12, listed owner Anders Hansen; digital image, Digitalarkivet (https://www.digitalarkivet.no/... : accessed 9 May 2026); citing Riksarkivet.","srn":"Eidsvoll matrikkel 1838, gård 234 Vinger, løpenr. 12, Anders Hansen matrikkel entry."},"confidence":"High","citations":[]},"B.1 Example 5":{"expected":{"page":"confirmations, p. 88 (image 91), no. 14 (confirmation)","frn":"Eidsvoll prestekontor, Klokkerbok [parish register (copy)] no. I 2, 1866–1871, confirmations section, p. 88, no. 14, Karen Indiana Evensdatter (daughter of Even Hansen), confirmed at Eidsvoll church 1869; digital image, Digitalarkivet (https://www.digitalarkivet.no/... : accessed 15 June 2026); citing Statsarkivet i Oslo, AV/SAO-A-10888/G/Ga/L0002.","srn":"Eidsvoll klokkerbok I 2 (1866–1871), confirmations, p. 88, no. 14, Karen Indiana Evensdatter confirmation entry."},"confidence":"High","citations":[]},"B.2 Example 1":{"expected":{"title":"Sweden, Värmland, Norra Ny, Husförhörslängder [household examinations] AI:11, 1812–1820","abbrev":"Norra Ny husförhörslängd AI:11 (1812–1820)","author":"Norra Ny församling","pubinfo":"Digital images, Riksarkivet (https://sok.riksarkivet.se).","callNumber":"SE/VA/13398/A I/11","page":"p. 8 (image 19) (residence)","frn":"Norra Ny församling, Husförhörslängder [household examinations], vol. AI:11 (1812–1820), p. 8, household of Per Persson, Ambjörby Torpare; digital image, Riksarkivet (https://sok.riksarkivet.se/bildvisning/C0038409_00019 : accessed 20 April 2026); citing Värmlandsarkiv, SE/VA/13398/A I/11.","srn":"Norra Ny husförhörslängd AI:11 (1812–1820), p. 8, Per Persson household."},"confidence":"High","citations":[]},"B.2 Example 2":{"expected":{"title":"Sweden, Värmland, Älvdals härad, Bouppteckningar [estate inventories] FII:26, 1832–1833","abbrev":"Älvdals häradsrätt bouppteckning FII:26 (1832–1833)","author":"Älvdals häradsrätt","pubinfo":"Digital images, ArkivDigital (https://www.arkivdigital.se).","callNumber":"SE/VA/11047/F II/26","page":"pp. 203–205 (estate)","frn":"Älvdals häradsrätt [Älvdal district court], Bouppteckningar [estate inventories], vol. FII:26 (1832–1833), pp. 203–205, estate inventory of Per Persson, Ambjörbymon, Norra Ny parish, died 5 May 1832; digital image, ArkivDigital (https://app.arkivdigital.se/volume/v48177?image=104 : accessed 20 April 2026); citing Värmlandsarkiv, SE/VA/11047/F II/26.","srn":"Älvdals häradsrätt bouppteckning FII:26 (1832–1833), pp. 203–205, Per Persson estate inventory."},"confidence":"High","citations":[]},"B.2 Example 3":{"expected":{"title":"Sweden, Värmland, Norra Ny, Folkräkning [census] 1880","abbrev":"Norra Ny folkräkning 1880","author":"Riksarkivet","pubinfo":"Database with images, Riksarkivet (https://sok.riksarkivet.se).","callNumber":"Folk_817085","page":"p. 4, row 33, family no. 1 (residence)","frn":"Sveriges folkräkning 1880 [Swedish census 1880], Norra Ny församling, Värmlands län, p. 4, row 33, family no. 1, household of Lars Persson Ambjörn, Ambjörby; digital image, Riksarkivet (https://sok.riksarkivet.se/bildvisning/Folk_817085-004 : accessed 21 April 2026).","srn":"Norra Ny folkräkning 1880, p. 4, row 33, Lars Persson Ambjörn household."},"confidence":"High","citations":[]},"B.2 Example 4":{"expected":{"page":"p. 8 (image 19) (confirmation)","frn":"Norra Ny församling, Husförhörslängder [household examinations], vol. AI:11 (1812–1820), p. 8, confirmation entry of Lars Persson; digital image, Riksarkivet (https://sok.riksarkivet.se/... : accessed 20 April 2026); citing Värmlandsarkiv, SE/VA/13398/A I/11.","srn":"Norra Ny husförhörslängd AI:11 (1812–1820), p. 8, Lars Persson confirmation entry."},"confidence":"High","citations":[]},"B.2 Example 5":{"expected":{"title":"Sweden, Värmland, Norra Ny, laga skifte [statutory land enclosure], act 17-NON-148, 1856–1862","abbrev":"Norra Ny laga skifte 17-NON-148 (1856–1862)","author":"Lantmäterimyndigheten i Värmlands län","pubinfo":"Digital images, Lantmäteriet (https://historiskakartor.lantmateriet.se).","page":"delningsbeskrivning p. 40 (land allotment)","frn":"Lantmäterimyndigheten i Värmlands län, laga skifte [statutory land enclosure], Ambjörby, Norra Ny socken, act 17-NON-148, surveyed 1856–1862 by O. Ignelius, confirmed by Älvdals övre tingslags egodelningsrätt 3 October 1863; delningsbeskrivning p. 40, land allotment (Lott A) of the minor Marit Andersdotter, 64 öre 6 penningar skatt; digital image, Lantmäteriet (https://historiskakartor.lantmateriet.se : accessed 16 June 2026).","srn":"Norra Ny laga skifte 17-NON-148 (1856–1862), delningsbeskrivning p. 40, Marit Andersdotter land allotment entry."},"confidence":"High","citations":[]},"B.3 Example 1":{"expected":{"title":"1920 U.S. Federal Census, St. Louis County, Minnesota","abbrev":"St. Louis Co., Minn., 1920 census","author":"Bureau of the Census","pubinfo":"Digital images, Ancestry (https://www.ancestry.com).","callNumber":"T625","page":"roll 859, ED 139, sheet 8A, dwelling [N], family [N] (residence)","frn":"1920 U.S. census, St. Louis County, Minnesota, population schedule, Duluth, enumeration district 139, sheet 8A, dwelling [N], family [N], Steve Maisuk household; digital image, Ancestry (https://www.ancestry.com/... : accessed 6 May 2026); citing National Archives microfilm publication T625, roll 859.","srn":"1920 U.S. census, St. Louis Co., Minn., pop. sched., Duluth, ED 139, sheet 8A, Steve Maisuk household."},"confidence":"High","citations":[]},"B.3 Example 2":{"expected":{"title":"Minnesota, death certificates, 1908–2002","abbrev":"Minn. death certificates, 1908–2002","author":"Minnesota Department of Health, Vital Records","pubinfo":"Database with images, FamilySearch (https://www.familysearch.org).","callNumber":"","page":"certificate no. 1929-MN-XXXXXX (death)","frn":"Minnesota, death certificate no. 1929-MN-XXXXXX (1929), Per Larsson Grund; Minnesota Department of Health, Vital Records; digital image, FamilySearch (https://www.familysearch.org/... : accessed 6 May 2026); citing Minnesota Historical Society.","srn":"Minn. death cert. 1929-MN-XXXXXX (1929), Per Larsson Grund."},"confidence":"Very High","citations":[]},"B.3 Example 3":{"expected":{"title":"Minnesota, St. Louis County, District Court, Naturalization Records, 1888–1955","abbrev":"St. Louis Co. naturalizations, 1888–1955","author":"St. Louis County District Court","pubinfo":"Digital images, Ancestry (https://www.ancestry.com).","page":"petition no. [N] (naturalization)","frn":"St. Louis County District Court (Duluth, Minnesota), Naturalization Records, petition no. [N] (1894), Per Larsson; digital image, Ancestry (https://www.ancestry.com/... : accessed 6 May 2026); citing Minnesota Historical Society.","srn":"St. Louis Co. natz., pet. no. [N] (1894), Per Larsson."},"confidence":"High","citations":[]},"B.3 Example 4":{"expected":{"title":"Minnesota, St. Louis County, Forest Hill Cemetery, Find a Grave Memorials","abbrev":"Forest Hill, Duluth, FAG","author":"","callNumber":"","pubinfo":"Database with images, Find a Grave (https://www.findagrave.com).","page":"memorial no. [N] (burial)","frn":"Find a Grave, memorial no. [N], Per Larsson Grund (1848–1929), Forest Hill Cemetery, Duluth, St. Louis County, Minnesota; database with images, Find a Grave (https://www.findagrave.com/memorial/[N] : accessed 6 May 2026); marker photograph by [contributor name], [date].","srn":"FAG memorial [N], Per Larsson Grund, Forest Hill Cemetery."},"confidence":"High","citations":[]},"B.3 Example 5":{"expected":{"title":"World War II Draft Registration Cards, Minnesota","abbrev":"WWII draft cards, Minn.","author":"Selective Service System","pubinfo":"Digital images, FamilySearch (https://www.familysearch.org).","callNumber":"RG 147","page":"serial no. [N] (draft registration)","frn":"Selective Service System, World War II Draft Registration Cards, Minnesota, serial no. [N], Axel O. Grund (1942); digital image, FamilySearch (https://www.familysearch.org/... : accessed 6 May 2026); citing Record Group 147, National Archives.","srn":"WWII draft card, Minn., Axel O. Grund."},"confidence":"High","citations":[]},"B.3 Example 6":{"expected":{"title":"Applications for Headstones for U.S. Military Veterans, 1925–1941","abbrev":"Headstone applications, 1925–1941","author":"Office of the Quartermaster General","pubinfo":"Digital images, Ancestry (https://www.ancestry.com).","callNumber":"RG 92","page":"(burial)","frn":"Office of the Quartermaster General, \"Applications for Headstones for U.S. Military Veterans, 1925–1941,\" application for Axel O. Grund, died 31 October 1948; digital image, Ancestry (https://www.ancestry.com/search/collections/2375/records/45037 : accessed 6 May 2026); citing NAID 596118, Record Group 92, National Archives at Washington, DC.","srn":"Headstone app., Axel O. Grund (d. 1948)."},"confidence":"Normal","citations":[]},"B.3 Example 7":{"expected":{"title":"Polk's Duluth City Directory, 1900","abbrev":"Polk's Duluth directory, 1900","author":"R. L. Polk & Co.","pubinfo":"Duluth: R. L. Polk & Co., 1900. Digital images, Ancestry (https://www.ancestry.com).","page":"p. 412 (residence)","frn":"R. L. Polk & Co., Polk's Duluth City Directory, 1900 (Duluth: R. L. Polk & Co., 1900), p. 412, Per Larsson Grund; digital image, Ancestry (https://www.ancestry.com/... : accessed 6 May 2026).","srn":"Polk's Duluth dir., 1900, p. 412, Per Larsson Grund."},"confidence":"Normal","citations":[]},"B.3 Example 8":{"expected":{"title":"Duluth Herald, Duluth, Minnesota","abbrev":"Duluth Herald","pubinfo":"Digital images, Newspapers.com (https://www.newspapers.com).","author":"","callNumber":"","page":"14 July 1929, p. 7, col. 3 (death)","frn":"\"Per L. Grund, Duluth Pioneer, Dies at Williams Farm,\" Duluth Herald (Duluth, Minnesota), 14 July 1929, p. 7, col. 3, Per Larsson Grund obituary; digital image, Newspapers.com (https://www.newspapers.com/... : accessed 6 May 2026).","srn":"Duluth Herald, 14 July 1929, p. 7, col. 3, Per Larsson Grund obituary."},"confidence":"Normal","citations":[]},"B.3 Example 9":{"expected":{"title":"Warren Sheaf, Warren, Minnesota","abbrev":"Warren Sheaf","pubinfo":"Digital images, Newspapers.com (https://www.newspapers.com).","page":"3 December 1908, p. 1 (marriage)","frn":"\"[Headline if present],\" Warren Sheaf (Warren, Minnesota), 3 December 1908, p. 1, Grund-Hoiberg marriage announcement; digital image, Newspapers.com (https://www.newspapers.com/image/[N] : accessed 6 May 2026).","srn":"Warren Sheaf, 3 December 1908, p. 1, Grund-Hoiberg marriage announcement."},"confidence":"High","citations":[]},"B.3 Example 10":{"expected":{},"confidence":"","citations":[{"page":"17 May 1916, p. 7, Alma column (lost horse)","confidence":"Normal","frn":"\"Alma\" [column], Warren Sheaf (Warren, Minnesota), 17 May 1916, p. 7, Peter Grund news mention (documenting lost horse); digital image, Newspapers.com (https://www.newspapers.com/image/64259642 : accessed 6 May 2026).","srn":"Warren Sheaf, 17 May 1916, p. 7, Alma column, Peter Grund news mention (lost horse)."},{"page":"17 May 1916, p. 7, Alma column (visit to John Nilson)","confidence":"Normal","frn":"\"Alma\" [column], Warren Sheaf (Warren, Minnesota), 17 May 1916, p. 7, John Olson news mention (documenting visit to John Nilson); digital image, Newspapers.com (https://www.newspapers.com/image/64259642 : accessed 6 May 2026).","srn":"Warren Sheaf, 17 May 1916, p. 7, Alma column, John Olson news mention (visit to John Nilson)."}]},"B.3 Example 11":{"expected":{"title":"Minnesota, Marshall County, Warren, First Lutheran Church records","abbrev":"First Lutheran Church, Warren, Minn., records, 1800–1952","author":"First Lutheran Church, Warren","pubinfo":"Digital images, Ancestry (https://www.ancestry.com).","page":"death and burial register, p. 283 (image 496, right) (death and burial)","frn":"First Lutheran Church (Warren, Marshall County, Minnesota), death and burial register, p. 283 (image 496, right), death and burial of Emma Söderström, died 7 May 1914, buried 9 May 1914; digital image, Ancestry (https://www.ancestry.com/search/collections/61584/records/63230716 : accessed 16 June 2026), \"U.S., Evangelical Lutheran Church in America, Swedish American Church Records, 1800–1952\"; citing Swenson Swedish Immigration Research Center, Augustana College, Rock Island, Illinois.","srn":"First Lutheran Church (Warren, Minn.), death and burial entry of Emma Söderström, p. 283."},"confidence":"Very High","citations":[]},"B.3 Example 12":{"expected":{"title":"Minnesota, Marshall County, District Court, Naturalization Records, 1853–1967","abbrev":"Marshall Co. naturalizations, 1853–1967","author":"Marshall County District Court","pubinfo":"Digital images, FamilySearch (https://www.familysearch.org).","callNumber":"SAM 227","page":"reel 4, final papers vol. C, p. 296 (image [I]) (naturalization)","frn":"Marshall County District Court (Warren, Minnesota), Naturalization Records, final papers vol. C, p. 296 (12 March 1897), Peter L. Grund; digital image, FamilySearch (https://www.familysearch.org/ark:/61903/3:1:... : accessed [date]), Image Group Number 101714756, image [I]; citing Minnesota Historical Society microfilm SAM 227, reel 4.","srn":"Marshall Co. natz., final papers vol. C, p. 296 (1897), Peter L. Grund."},"confidence":"High","citations":[]},"B.3 Example 13":{"expected":{"title":"Warren Sheaf, Warren, Minnesota","abbrev":"Warren Sheaf","pubinfo":"Digital images, Newspapers.com (https://www.newspapers.com).","author":"","callNumber":""},"confidence":"","citations":[{"page":"3 December 1908, p. 1 (marriage)","confidence":"High","frn":"\"[Headline if present],\" Warren Sheaf (Warren, Minnesota), 3 December 1908, p. 1, Grund-Hoiberg marriage announcement; digital image, Newspapers.com (https://www.newspapers.com/image/[N] : accessed 6 May 2026).","srn":"Warren Sheaf, 3 December 1908, p. 1, Grund-Hoiberg marriage announcement."},{"page":"[date], p. [N], col. [N] (death)","confidence":"Normal","frn":"\"[Headline],\" Warren Sheaf (Warren, Minnesota), [date], p. [N], col. [N], [Name] obituary; Minnesota Historical Society microfilm.","srn":"Warren Sheaf, [date], p. [N], col. [N], [Name] obituary."}]},"B.3 Example 14":{"expected":{"title":"Warren Sheaf, Warren, Minnesota","abbrev":"Warren Sheaf","pubinfo":"Digital images, Newspapers.com (https://www.newspapers.com).","author":"","callNumber":"","page":"11 July 1917, p. 3, col. 1 (date and attendees)","frn":"\"This Honored Couple Celebrate Golden Wedding,\" Warren Sheaf (Warren, Minnesota), 11 July 1917, p. 3, col. 1, Olaf Nygren household news mention (documenting date and attendees); digital image, Newspapers.com (https://www.newspapers.com/article/warren-sheaf-mr-mrs-olaf-nygren-50th/12517574/ : accessed 4 October 2026).","srn":"Warren Sheaf, 11 July 1917, p. 3, col. 1, Olaf Nygren household news mention (date and attendees)."},"confidence":"Normal","citations":[]},"B.4 Photograph":{"expected":{"title":"Per Larsson Grund cabinet card, ca. 1890s","abbrev":"Grund cabinet card 1890s","author":"","page":"cabinet card front; inscription on mount, \"Grandma's Grandpa\" ([Cited for])","frn":"Per Larsson Grund cabinet card portrait, ca. 1890s, taken at Miller Studio, St. Cloud, Minnesota; inscription on top of mount in cursive: \"Grandma's Grandpa\"; printed studio mark on bottom of mount: \"Miller\" (with M-M monogram), \"ST. CLOUD, MINN.\"; privately held by Peter Grund, Duluth, Minnesota. Subject identification is family attribution by inscription rather than caption with full name.","srn":"Per Larsson Grund cabinet card, ca. 1890s."},"confidence":"High","citations":[]},"B.4 Audio interview":{"expected":{"title":"Tom Grund interview by Peter Grund, 12 March 2024","abbrev":"Tom Grund interview 2024-03-12","author":"Tom Grund","pubinfo":"Recorded interview, Duluth, Minnesota, 12 March 2024.","page":"minute 23:15 ([Cited for])","frn":"Tom Grund (Duluth, Minnesota), recorded interview by Peter Grund, 12 March 2024; audio recording and transcript privately held by Peter Grund, [ADDRESS FOR PRIVATE USE,] Duluth, Minnesota; minute 23:15, on Edmund Gene Grund's WWII service. Tom is a son of Edmund Gene Grund and reports here on events he learned of from his parents (he was born after the war).","srn":"Tom Grund interview, 12 March 2024, minute 23:15."},"confidence":"Normal","citations":[]},"B.4 Personal research":{"expected":{"title":"Personal research of Siw Alfreddson, Ambjörby, Sweden","abbrev":"Alfreddson research","author":"Siw Alfreddson","pubinfo":"Unpublished research, Ambjörby, Sweden, 2024–2026.","page":"Ambmyra typed page, received 30 April 2026 ([Cited for])","frn":"Siw Alfreddson, personal research on the Grund family of Ambjörby, Sweden, accumulated 2024–2026, typed page on Ambmyra torpare holdings, received by Peter Grund via email 30 April 2026; privately held by Siw Alfreddson, Ambjörby, Sweden, with copies privately held by Peter Grund, Duluth, Minnesota. Siw's notes cite Norra Ny kyrkoarkiv volumes for each fact she records; for facts she draws from those primary records, the underlying primary record should also be cited directly when used in narrative.","srn":"Alfreddson research, Ambmyra typed page, received 30 April 2026."},"confidence":"Normal","citations":[]},"B.4 Published book":{"expected":{"title":"Eidsvoll Bygds Historie: Gardene på vestside av Vorma","abbrev":"Eidsvoll bygdebok 2:2","author":"Birger Kirkeby","pubinfo":"Vol. 2, pt. 2. Oslo: Eidsvoll Bygdebokkomite, 1959.","page":"pp. 432–440 ([Cited for])","frn":"Birger Kirkeby, Eidsvoll Bygds Historie: Gardene på vestside av Vorma [Eidsvoll Parish History: The Farms on the West Side of the Vorma River], vol. 2, pt. 2 (Oslo: Eidsvoll Bygdebokkomite, 1959), pp. 432–440, \"Vinger gård.\"","srn":"Kirkeby, Eidsvoll bygdebok 2:2, pp. 432–440."},"confidence":"Normal","citations":[]},"B.4 Membership directory":{"expected":{"title":"Medlemmer av Den norske sakførerforening 1. juli 1950","abbrev":"Sakførerforening medlemmer 1950","author":"Den norske sakførerforening","pubinfo":"Oslo: Den norske sakførerforening, 1951. Digital images, Nasjonalbiblioteket (https://www.nb.no).","page":"p. 440 (image 443) (residence)","frn":"Den norske sakførerforening, Medlemmer av Den norske sakførerforening 1. juli 1950 [Members of the Norwegian Bar Association as of 1 July 1950] (Oslo: Den norske sakførerforening, 1951), p. 440, entry for Frithjof Siggerud; digital image, Nasjonalbiblioteket (https://www.nb.no/items/b3f9413b2125c7f26063abb8896d95bf?page=443 : accessed 26 April 2026).","srn":"Sakførerforening medlemmer 1950, p. 440, Frithjof Siggerud."},"confidence":"Normal","citations":[]},"B.4 School enrollment register":{"expected":{"title":"Elever ved Kristiania katedralskole som begynte på skolen i årene 1891–1901, hefte 8","abbrev":"Kristiania katedralskole 1891–1901","author":"Anders Langangen","pubinfo":"[Place]: [Publisher], [year]. Digital images, Nasjonalbiblioteket (https://www.nb.no).","page":"p. 112 (image 111), entry no. 498 ([Cited for])","frn":"Anders Langangen, Elever ved Kristiania katedralskole som begynte på skolen i årene 1891–1901, hefte 8 [Pupils at Kristiania Cathedral School Who Began in the Years 1891–1901, Booklet 8] ([Place]: [Publisher], [year]), p. 112, entry no. 498, Erling Frithjof Siggerud; digital image, Nasjonalbiblioteket (https://www.nb.no : accessed 26 April 2026).","srn":"Langangen, Kristiania katedralskole 1891–1901, p. 112, no. 498, Erling Frithjof Siggerud."},"confidence":"Normal","citations":[]},"B.4 Online video":{"expected":{"title":"Norra Ny parish history walking tour","abbrev":"Norra Ny walking tour","author":"Värmland Local History Channel","pubinfo":"Online video, YouTube (https://www.youtube.com), 2025.","page":"minute 12:30–14:15 ([Cited for])","frn":"Värmland Local History Channel, \"Norra Ny parish history walking tour,\" YouTube video (https://www.youtube.com/watch?v=[ID] : accessed 9 May 2026), minute 12:30–14:15, on the Ambjörby torpare landscape.","srn":"Värmland History YouTube, \"Norra Ny walking tour,\" minute 12:30–14:15."},"confidence":"Low","citations":[]}}};

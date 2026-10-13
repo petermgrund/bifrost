@@ -25,14 +25,23 @@ const STANDARD_LABELS = {
   pubmedium: 'Pubinfo medium', home: 'Platform homepage',
 };
 
+/** A10 · the Pubinfo mediums a record type offers: its own list, else the usual ones, Microfilm only where it can cite the film itself. */
+export function mediaOf(type) {
+  const own = (type.media || []).map(m => String(m ?? '').trim()).filter(Boolean);
+  if (own.length) return own;
+  const film = [type, ...(type.pageVariants || [])].some(x => x.frnMicrofilm);
+  return MEDIA.filter(m => film || m !== 'Microfilm');
+}
+
 /** A10 · whether a typed Pubinfo medium is film read on a reader. */
 export function isFilm(medium) {
   return String(medium ?? '').trim().toLowerCase() === 'microfilm';
 }
 
+/** The guide section a rule refers to for this record type; a chapter rule of a type outside the chapters has none. */
 export function ruleRef(type, rule) {
   if (!rule.startsWith('§')) return rule;
-  return CHAPTER_CODE[type.chapter] ? `${CHAPTER_CODE[type.chapter]} ${rule}` : type.rules || rule;
+  return CHAPTER_CODE[type.chapter] ? `${CHAPTER_CODE[type.chapter]} ${rule}` : type.rules || '';
 }
 
 /** The record type with the draft's page variant merged in. */
@@ -72,7 +81,7 @@ export function newDraft(type) {
   for (const [key] of inputFields(type)) values[key] = '';
   for (const key of STANDARD_VALUES) values[key] = '';
   for (const key of REFERENCE_VALUES) values[key] = type.defaults?.[key] || '';
-  values.pubmedium ||= MEDIA[0];
+  values.pubmedium ||= mediaOf(type)[0];
   const variant = type.pageVariants ? type.pageVariants[0].key : '';
   const resolved = resolveType(type, { variant });
   return {
@@ -194,6 +203,8 @@ function paperlessTitle(draft, c) {
 /** A7 · the fact a citation is usually cited for: its record noun's, or with no noun its record type's. */
 export function usualCitedFor(type, subject) {
   const noun = String(subject?.noun ?? '').trim();
+  const own = type.usual?.[noun || ''];
+  if (own !== undefined) return own;
   return (noun ? USUAL_CITED_FOR[noun] : USUAL_CITED_FOR[type.name]) || '';
 }
 

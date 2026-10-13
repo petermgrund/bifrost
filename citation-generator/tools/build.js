@@ -9,7 +9,7 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const SRC = join(ROOT, 'src');
 export const OUT = resolve(ROOT, '../bifrost/web/static/citations/citations.js');
 // The modules whose exports the bundle exports.
-export const ENTRIES = ['records/index.js', 'engine.js', 'template.js', 'tables.js', 'checks.js', 'compare.js', 'store.js', 'form.js', 'read.js'];
+export const ENTRIES = ['records/index.js', 'engine.js', 'template.js', 'tables.js', 'checks.js', 'compare.js', 'store.js', 'form.js', 'read.js', 'registry.js'];
 const IMPORT_RE = /^import \{([^}]*)\} from '(\.{1,2}\/[^']+)';$/gm;
 
 /**

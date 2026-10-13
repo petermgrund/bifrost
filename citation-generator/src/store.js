@@ -15,8 +15,12 @@ const RENAMED_NOUNS = {
 };
 const RENAMED_FOR = { 'us-vital': { 'marriage': 'marriage license' }, 'se-husforhor': { 'record': 'household examination entry' } };
 
-/** A saved noun under its current name; a noun the record type no longer lists gives way to its default. */
+/**
+ * A saved noun under its current name; a noun the record type no longer lists gives way to its default. A record type
+ * whose noun is typed freely keeps it as typed.
+ */
 function knownNoun(type, draft, saved) {
+  if (type.freeNoun) return typeof saved === 'string' ? saved : '';
   const nouns = resolveType(type, draft).nouns || [''];
   const noun = RENAMED_FOR[type.id]?.[saved] ?? RENAMED_NOUNS[saved] ?? saved;
   return nouns.includes(noun) ? noun : nouns[0] || '';

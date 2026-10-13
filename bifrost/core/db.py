@@ -346,6 +346,26 @@ MIGRATIONS: list[str] = [
         hidden_at TEXT NOT NULL
     );
     """,
+    # 27 record types as Bifrost holds them, every saved version kept
+    """
+    CREATE TABLE record_types (
+        id         TEXT PRIMARY KEY,
+        kind       TEXT NOT NULL,
+        definition TEXT,
+        version    INTEGER NOT NULL,
+        deleted    INTEGER NOT NULL DEFAULT 0,
+        saved_at   TEXT NOT NULL
+    );
+    CREATE TABLE record_type_versions (
+        id         TEXT NOT NULL,
+        version    INTEGER NOT NULL,
+        kind       TEXT NOT NULL,
+        definition TEXT,
+        deleted    INTEGER NOT NULL DEFAULT 0,
+        saved_at   TEXT NOT NULL,
+        PRIMARY KEY (id, version)
+    );
+    """,
 ]
 
 

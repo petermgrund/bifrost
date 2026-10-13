@@ -294,6 +294,8 @@ test('usesDetails and ruleRef', () => {
   assert.equal(usesDetails({ ...PARISH, frn: 'x', detailsLabel: 'Topic' }), true);
   assert.equal(ruleRef(PARISH, '§4'), 'B.2 §4');
   assert.equal(ruleRef(PARISH, 'A8'), 'A8');
+  assert.equal(ruleRef({ chapter: 'ge', rules: 'A14' }, '§4'), 'A14');
+  assert.equal(ruleRef({ chapter: 'ge' }, '§4'), '', 'a type of one\'s own has no chapter rules');
 });
 
 test('record noun: a copy or index replaces a final "entry", follows any other noun, and needs a noun', () => {

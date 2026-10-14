@@ -27,8 +27,8 @@ _HANDLE_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _GRAMPS_ID_RE = re.compile(r"^[A-Za-z]{0,2}\d+$")
 _WORD_RE = re.compile(r"[^\W_]+(?:['-][^\W_]+)*")
 _PINPOINT_RE = re.compile(
-    r"^(?P<code>[A-Z0-9]{4,8})(?:\.P(?P<page>[1-9]\d*))?"
-    r"(?:\.L(?P<line>\d+)(?:-(?P<last>\d+))?)?(?:\.C(?P<col>[1-9]\d*))?$")
+    r"^(?P<code>[A-Z0-9]{4,8})(?:\.N(?P<note>[1-9]\d*)|(?:\.P(?P<page>[1-9]\d*))?"
+    r"(?:\.L(?P<line>\d+)(?:-(?P<last>\d+))?)?(?:\.C(?P<col>[1-9]\d*))?)$")
 
 RASTER_MIMES = {"image/jpeg", "image/png", "image/webp", "image/gif", "image/tiff", "image/bmp"}
 BROWSER_MIMES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
@@ -254,23 +254,27 @@ def to_csv(grid: dict) -> str:
     return buf.getvalue()
 
 
-# ---- pinpoints: PID[.Pn].Ln[-m][.Cn]
+# ---- pinpoints: PID[.Pn].Ln[-m][.Cn], or a page note PID.Nn
 
 def parse_pinpoint(text: str) -> dict | None:
-    """'69t5au.p2.l1-5' -> {'code': '69T5AU', 'page': 2, 'line': 1, 'last': 5, 'col': None}"""
+    """'69t5au.p2.l1-5' -> {'code': '69T5AU', 'page': 2, 'line': 1, 'last': 5, 'col': None, 'note': None}"""
     m = _PINPOINT_RE.match(re.sub(r"\s+", "", text or "").upper())
     if not m:
         return None
+    if m["note"]:
+        return {"code": m["code"], "page": None, "line": None, "last": None, "col": None, "note": int(m["note"])}
     line = int(m["line"]) if m["line"] else None
     last = int(m["last"]) if m["last"] else line
     if line is not None and last < line:
         line, last = last, line
     return {"code": m["code"], "page": int(m["page"] or 1), "line": line, "last": last,
-            "col": int(m["col"]) if m["col"] else None}
+            "col": int(m["col"]) if m["col"] else None, "note": None}
 
 
 def pinpoint_fragment(pin: dict) -> str:
-    """The viewer's #fragment for a pinpoint: 'L1-5.C6'"""
+    """The viewer's #fragment for a pinpoint: 'L1-5.C6', or 'N3' for a note"""
+    if pin.get("note"):
+        return f"N{pin['note']}"
     parts = []
     if pin["line"] is not None:
         parts.append(f"L{pin['line']}" + (f"-{pin['last']}" if pin["last"] != pin["line"] else ""))
@@ -446,7 +450,7 @@ def list_tables(conn: sqlite3.Connection) -> list[dict]:
 # ---- notes pinned to page points
 
 def _note(row: sqlite3.Row) -> dict:
-    return {k: row[k] for k in ("id", "x", "y", "text", "created_at", "updated_at")}
+    return {k: row[k] for k in ("id", "no", "page", "x", "y", "text", "created_at", "updated_at")}
 
 
 def _note_text(text) -> str:
@@ -468,15 +472,27 @@ def get_note(conn: sqlite3.Connection, note_id: int) -> dict | None:
     return _note(row) if row else None
 
 
+def note_by_no(conn: sqlite3.Connection, doc_id: int, no: int) -> dict | None:
+    """The document's note with that number, the one a PID.Nn pinpoint names"""
+    row = conn.execute("SELECT * FROM page_notes WHERE paperless_id=? AND no=?", (doc_id, no)).fetchone()
+    return _note(row) if row else None
+
+
 def add_note(conn: sqlite3.Connection, doc_id: int, page: int, x, y, text,
              title: str | None = None) -> dict:
+    """A new note with the document's next number, which a deleted note never gives back"""
     point = (_unit(x, "x"), _unit(y, "y"))
     body = _note_text(text)
     now = _now()
     with conn:
+        conn.execute(
+            "INSERT INTO note_counters (paperless_id, last_no) VALUES (?, COALESCE("
+            "(SELECT MAX(no) FROM page_notes WHERE paperless_id=?), 0) + 1) "
+            "ON CONFLICT(paperless_id) DO UPDATE SET last_no = last_no + 1", (doc_id, doc_id))
+        no = conn.execute("SELECT last_no FROM note_counters WHERE paperless_id=?", (doc_id,)).fetchone()[0]
         cur = conn.execute(
-            "INSERT INTO page_notes (paperless_id, page, title, x, y, text, created_at, updated_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (doc_id, page, title, *point, body, now, now))
+            "INSERT INTO page_notes (paperless_id, page, no, title, x, y, text, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (doc_id, page, no, title, *point, body, now, now))
     return get_note(conn, cur.lastrowid)
 
 

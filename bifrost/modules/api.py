@@ -125,6 +125,20 @@ def pinpoint(pin: dict, doc_id: int, title: str, grid: dict, rows: list[int], co
     }
 
 
+def note_pinpoint(pin: dict, doc_id: int, title: str, note: dict) -> dict:
+    """A page note as a pinpoint answer: its page, its spot as a zero-size region, and what it says"""
+    x, y = round(note["x"], 4), round(note["y"], 4)
+    return {
+        "pinpoint": f"{pin['code']}.N{note['no']}",
+        "pid": pin["code"],
+        "paperless_id": doc_id,
+        "title": title,
+        "page": note["page"],
+        "note": {k: note[k] for k in ("no", "x", "y", "text", "created_at", "updated_at")},
+        "region": {"box": [x, y, x, y], "corners": [[x, y] for _ in range(4)]},
+    }
+
+
 def doc_ids(conn: sqlite3.Connection) -> list[int]:
     return [r[0] for r in conn.execute(
         "SELECT paperless_id FROM doc_tables UNION SELECT paperless_id FROM page_notes ORDER BY 1")]
@@ -146,9 +160,10 @@ def document(conn: sqlite3.Connection, doc_id: int, pid: str, people: dict) -> d
     """A document's tables and notes, page by page"""
     by_page = grids(conn, doc_id)
     notes: dict[int, list[dict]] = {}
-    for r in conn.execute("SELECT * FROM page_notes WHERE paperless_id=? ORDER BY page, id", (doc_id,)):
+    for r in conn.execute("SELECT * FROM page_notes WHERE paperless_id=? ORDER BY page, no", (doc_id,)):
         notes.setdefault(r["page"], []).append(
-            {k: r[k] for k in ("x", "y", "text", "created_at", "updated_at")})
+            {"no": r["no"], "pinpoint": f"{pid}.N{r['no']}" if pid else None}
+            | {k: r[k] for k in ("x", "y", "text", "created_at", "updated_at")})
     pages = []
     for page in sorted(set(by_page) | set(notes)):
         grid = by_page.get(page)

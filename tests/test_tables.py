@@ -212,6 +212,34 @@ class TestStorage:
         assert tables.update_note(conn, 999, text="x") is None
         assert tables.delete_note(conn, note["id"]) and not tables.delete_note(conn, note["id"])
 
+    def test_notes_are_numbered_within_their_document_and_numbers_are_never_reused(self, conn):
+        first = tables.add_note(conn, 10, 1, 0.2, 0.2, "a")
+        second = tables.add_note(conn, 10, 2, 0.2, 0.2, "b")
+        other = tables.add_note(conn, 11, 1, 0.2, 0.2, "c")
+        assert (first["no"], first["page"], second["no"], second["page"], other["no"]) == (1, 1, 2, 2, 1)
+        assert tables.delete_note(conn, second["id"])
+        assert tables.add_note(conn, 10, 1, 0.3, 0.3, "d")["no"] == 3
+        assert tables.note_by_no(conn, 10, 3)["text"] == "d"
+        assert tables.note_by_no(conn, 10, 2) is None and tables.note_by_no(conn, 11, 3) is None
+        assert [n["no"] for n in tables.list_notes(conn, 10, 1)] == [1, 3]
+
+    def test_existing_notes_are_numbered_in_order_when_the_database_is_upgraded(self, tmp_path):
+        path = tmp_path / "old.db"
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(db, "MIGRATIONS", db.MIGRATIONS[:27])
+            old = db.connect(path)
+            with old:
+                for doc, page, text in ((10, 2, "x"), (11, 1, "y"), (10, 1, "z")):
+                    old.execute("INSERT INTO page_notes (paperless_id, page, x, y, text, created_at, updated_at)"
+                                " VALUES (?, ?, 0.5, 0.5, ?, 't', 't')", (doc, page, text))
+            old.close()
+        conn = db.connect(path)
+        assert [(n["no"], n["text"]) for n in tables.list_notes(conn, 10, 2) + tables.list_notes(conn, 10, 1)] == [
+            (1, "x"), (2, "z")]
+        assert tables.note_by_no(conn, 11, 1)["text"] == "y"
+        assert tables.add_note(conn, 10, 1, 0.1, 0.1, "w")["no"] == 3
+        conn.close()
+
     def test_list_includes_pages_that_only_have_notes(self, conn):
         tables.save_table(conn, 8, 1, grid(), 0, "Census")
         tables.add_note(conn, 8, 1, 0.5, 0.5, "on the table page")
@@ -443,15 +471,22 @@ class TestPinpoints:
         a = tables.parse_pinpoint(text)
         assert (a["code"], a["page"], a["line"], a["last"], a["col"]) == expected
 
-    @pytest.mark.parametrize("text", ["", "69T5AU.X1", "69T5AU.C0", "69T5AU..L2", "69T5AU.L2.P1", "SIX"])
+    @pytest.mark.parametrize("text", ["", "69T5AU.X1", "69T5AU.C0", "69T5AU..L2", "69T5AU.L2.P1", "SIX",
+                                      "69T5AU.N0", "69T5AU.P2.N3", "69T5AU.N3.L1", "69T5AU.L1.N3"])
     def test_not_pinpoints(self, text):
         assert tables.parse_pinpoint(text) is None
+
+    def test_a_note_pinpoint_names_the_note_and_leaves_the_page_to_it(self):
+        assert tables.parse_pinpoint(" 69t5au.n12 ") == {"code": "69T5AU", "page": None, "line": None, "last": None,
+                                                         "col": None, "note": 12}
+        assert tables.parse_pinpoint("69T5AU.L2")["note"] is None
 
     def test_fragments_mirror_the_suffix(self):
         assert tables.pinpoint_fragment(tables.parse_pinpoint("69T5AU.P2.L1-5")) == "L1-5"
         assert tables.pinpoint_fragment(tables.parse_pinpoint("69T5AU.L14.C6")) == "L14.C6"
         assert tables.pinpoint_fragment(tables.parse_pinpoint("69T5AU.C6")) == "C6"
         assert tables.pinpoint_fragment(tables.parse_pinpoint("69T5AU")) == ""
+        assert tables.pinpoint_fragment(tables.parse_pinpoint("69T5AU.N3")) == "N3"
 
     def test_columns_keep_printed_numbers(self):
         raw = grid()

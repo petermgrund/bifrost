@@ -134,6 +134,19 @@ class TestPinpoint:
             {"column": 12, "name": "Age", "value": "34", "translation": None, "person": None}]
         assert get(app_for(saved), "/api/v1/pinpoint/69T5AU.C3").status_code == 404
 
+    def test_a_note(self, saved):
+        r = get(app_for(saved), "/api/v1/pinpoint/69t5au.n2")
+        assert r.status_code == 200
+        body = r.json()
+        assert (body["pinpoint"], body["pid"], body["paperless_id"], body["page"]) == ("69T5AU.N2", "69T5AU", 8, 2)
+        assert body["title"] == "1910 census, Center City"
+        assert body["note"] == {**body["note"], "no": 2, "x": 0.2, "y": 0.3, "text": "Back of the sheet"}
+        assert set(body["note"]) == {"no", "x", "y", "text", "created_at", "updated_at"}
+        assert body["region"] == {"box": [0.2, 0.3, 0.2, 0.3], "corners": [[0.2, 0.3]] * 4}
+        assert "lines" not in body and "column" not in body
+        assert body["links"] == {"bifrost": "http://bifrost/tables/8?page=2#N2",
+                                 "pid": "http://bifrost/api/v1/pid/69T5AU"}
+
     def test_people_stay_handles_when_gramps_is_down(self, saved):
         body = get(app_for(saved, gramps=Gramps(down=True)), "/api/v1/pinpoint/69T5AU.L51.C1").json()
         assert body["lines"][0]["cells"][0]["person"] == {"handle": "H_ANDERS"}
@@ -144,9 +157,37 @@ class TestPinpoint:
         ("/api/v1/pinpoint/69T5AU.P3.L1", "69T5AU has no table on page 3"),
         ("/api/v1/pinpoint/69T5AU.L53-55", "line 55 isn't in the table on page 1 (lines 51-54)"),
         ("/api/v1/pinpoint/69T5AU.L51.C9", "column 9 isn't in the table on page 1"),
+        ("/api/v1/pinpoint/69T5AU.N9", "69T5AU has no note 9"),
+        ("/api/v1/pinpoint/69T5AU.P2.N1", "'69T5AU.P2.N1' is not a pinpoint"),
     ])
     def test_misses(self, saved, url, detail):
         r = get(app_for(saved), url)
+        assert r.status_code == 404 and r.json()["detail"] == detail
+
+
+class TestOpen:
+    def app(self, conn):
+        from bifrost.web.routes import tables as tables_routes
+        app = app_for(conn)
+        app.include_router(tables_routes.router)
+        return app
+
+    @pytest.mark.parametrize("pinpoint,target", [
+        ("69t5au.l52.c12", "/tables/8?page=1#L52.C12"),
+        ("69T5AU.P2", "/tables/8?page=2"),
+        ("69T5AU.N2", "/tables/8?page=2#N2"),
+    ])
+    def test_a_pinpoint_opens_its_page(self, saved, pinpoint, target):
+        r = get(self.app(saved), f"/tables/at/{pinpoint}")
+        assert (r.status_code, r.headers["location"]) == (302, target)
+
+    @pytest.mark.parametrize("pinpoint,detail", [
+        ("69T5AU.N9", "69T5AU has no note 9"),
+        ("ZZZZZZ.N1", "no Paperless document has the PID ZZZZZZ"),
+        ("69T5AU.N0", "'69T5AU.N0' is not a pinpoint"),
+    ])
+    def test_misses(self, saved, pinpoint, detail):
+        r = get(self.app(saved), f"/tables/at/{pinpoint}")
         assert r.status_code == 404 and r.json()["detail"] == detail
 
 
@@ -156,14 +197,16 @@ class TestPid:
         assert (body["pid"], body["paperless_id"], body["translations"]) == ("69T5AU", 8, True)
         one, two = body["pages"]
         assert one["notes"][0]["text"] == "Enumerator: J. Berg" and set(one["notes"][0]) == {
-            "x", "y", "text", "created_at", "updated_at"}
+            "no", "pinpoint", "x", "y", "text", "created_at", "updated_at"}
+        assert (one["notes"][0]["no"], one["notes"][0]["pinpoint"]) == (1, "69T5AU.N1")
         assert [c["name"] for c in one["table"]["columns"]] == ["Name", "Relation", "Age"]
         assert one["table"]["columns"][0]["household"] and one["table"]["columns"][0]["person_column"]
         assert [ln["line"] for ln in one["table"]["lines"]] == [51, 52, 53, 54]
         assert one["table"]["lines"][2] == {"line": 53, "pinpoint": "69T5AU.L53", "cells": []}
         assert one["table"]["lines"][0]["cells"][0]["person"]["gramps_id"] == "I0007"
         assert one["table"]["layout"]["lines"][1] == [0.25, 0.25]
-        assert two == {"page": 2, "table": None, "notes": [{**two["notes"][0], "text": "Back of the sheet"}]}
+        assert two == {"page": 2, "table": None, "notes": [{**two["notes"][0], "no": 2, "pinpoint": "69T5AU.N2",
+                                                              "text": "Back of the sheet"}]}
         assert body["links"] == {"bifrost": "http://bifrost/tables/8",
                                  "paperless": "http://paperless/documents/8/details",
                                  "gramps": "http://gramps/media/69T5AU",

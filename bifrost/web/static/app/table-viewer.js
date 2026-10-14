@@ -14,7 +14,6 @@ const SIZES_ITSELF = CSS.supports('field-sizing', 'content');
 const LANG_KEY = 'bifrost-tables-lang';
 
 const uid = () => Math.random().toString(36).slice(2, 10);
-const pad = (n) => String(n).padStart(2, '0');
 const year = (date) => /\d{4}/.exec(date || '')?.[0] || '';
 const DITTO = /^\s*(?:[-–—_"'″〃.]+|(?:do|ditto)\b\.?)\s*/i;
 
@@ -43,12 +42,6 @@ function why(e) {
     } catch { }
   }
   return e?.message || String(e);
-}
-
-function when(iso) {
-  const d = new Date(`${iso}Z`);
-  return Number.isNaN(d.getTime()) ? ''
-    : `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 function savedLang() {
@@ -201,7 +194,7 @@ class TableViewer extends BifrostElement {
       grid: null, rev: 0, past: [], future: [], hover: null, cur: null, sel: new Set(), selCol: null, anchor: null,
       draft: null, picked: null, renaming: null, linesDraft: null, imgSize: null, imgError: '',
       conflict: false, saveError: '', tool: 'select', notes: [], noteHover: null, noteEdit: null,
-      placing: false,
+      placing: false, noteShown: null,
     });
     try {
       const [r, notes] = await Promise.all([api(this.gridUrl), api(`${this.gridUrl}/notes`)]);
@@ -698,6 +691,7 @@ class TableViewer extends BifrostElement {
   }
 
   pinpoint() {
+    if (this.noteEdit?.id) return this.noteCode(this.noteEdit);
     const s = this.selection();
     if (!s || !this.info?.code) return '';
     return [this.info.code, ...(this.info.pages > 1 ? [`P${this.page}`] : []), this.suffix(s)].join('.');
@@ -712,8 +706,14 @@ class TableViewer extends BifrostElement {
 
   applyHash() {
     const g = this.grid;
-    if (!g || !this.imgSize) return;
+    if (!this.imgSize) return;
     const frag = decodeURIComponent(location.hash.slice(1));
+    const note = /^N(\d+)$/i.exec(frag);
+    if (note) {
+      this.showNote(Number(note[1]));
+      return;
+    }
+    if (!g) return;
     const old = /^line=(\d+)$/.exec(frag);
     const m = old ? [frag, old[1]] : /^(?:L(\d+)(?:-(\d+))?)?(?:\.?C(\d+))?$/i.exec(frag);
     if (!m || (!m[1] && !m[3])) return;
@@ -729,6 +729,22 @@ class TableViewer extends BifrostElement {
     this.cur = col >= 0 && lo === hi ? { row: lo, col } : null;
     this.selectRows(Array.from({ length: hi - lo + 1 }, (_, k) => lo + k));
     this.ensureVisible(lo, Math.max(col, 0));
+  }
+
+  showNote(no) {
+    const n = this.notes.find((x) => x.no === no);
+    if (!n || this.mode !== 'view' || this.noteShown === no || !this.vp[0]) return;
+    this.noteShown = no;
+    this.noteEdit = { ...n };
+    const [x, y] = this.toScreen([n.x, n.y]);
+    const [vw, vh] = this.vp;
+    const dx = x < 24 ? 24 - x : x > vw - 24 ? vw - 24 - x : 0;
+    const dy = y < HEAD_H + 24 ? HEAD_H + 24 - y : y > vh - 80 ? vh - 80 - y : 0;
+    if (dx || dy) this.panBy(dx, dy);
+  }
+
+  noteCode(n) {
+    return this.info?.code && n.no ? `${this.info.code}.N${n.no}` : '';
   }
 
   selectColumn(i) {
@@ -1729,7 +1745,9 @@ class TableViewer extends BifrostElement {
     const [x, y] = this.toScreen([n.x, n.y]);
     const flip = x + 14 + 320 > this.vp[0];
     const pos = flip ? `right:${this.vp[0] - x + 14}px` : `left:${x + 14}px`;
+    const code = this.noteCode(n);
     return html`<div class="tbl-tip tbl-note-tip ${flip ? 'flip' : ''}" style="${pos};top:${y}px">
+      ${code ? html`<div class="tbl-sub mono">${code}</div>` : nothing}
       <div class="tbl-note-text">${n.text}</div>
     </div>`;
   }
@@ -1742,14 +1760,16 @@ class TableViewer extends BifrostElement {
     const left = x + 16 + width < this.vp[0] ? x + 16 : Math.max(8, x - 16 - width);
     const top = G.clamp(y - 24, 8, Math.max(8, this.vp[1] - 190));
     const keep = (e) => e.preventDefault();
+    const code = ne.id ? this.noteCode(ne) : '';
     return html`<div class="tbl-pop tbl-note-edit" style="left:${left}px;top:${top}px;width:${width}px"
       @pointerdown=${stop} @dblclick=${stop} @wheel=${stop} @focusout=${(e) => this.noteOut(e)}>
-      <div class="field textarea border small no-margin">
-        <textarea rows="4" .value=${ne.text} @input=${(e) => { ne.text = e.target.value; }}
+      <div class="field ${code ? 'label' : ''} textarea border small no-margin">
+        <textarea rows="4" placeholder=" " .value=${ne.text} @input=${(e) => { ne.text = e.target.value; }}
           @keydown=${(e) => this.noteKey(e)}></textarea>
+        ${code ? html`<label class="mono">${code}</label>` : nothing}
       </div>
       <nav class="no-margin">
-        <span class="max small-text secondary-text">${ne.id ? when(ne.updated_at) : ''}</span>
+        <span class="max"></span>
         ${ne.id ? html`<button class="circle transparent" aria-label="Delete note" title="Delete note"
           @mousedown=${keep} @click=${() => this.deleteNote(ne.id)}><i>delete</i></button>` : nothing}
         <button @mousedown=${keep} @click=${() => this.saveNote()}>Done</button>

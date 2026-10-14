@@ -366,6 +366,19 @@ MIGRATIONS: list[str] = [
         PRIMARY KEY (id, version)
     );
     """,
+    # 28 page notes numbered within their document, numbers never reused
+    """
+    ALTER TABLE page_notes ADD COLUMN no INTEGER;
+    UPDATE page_notes SET no = (SELECT COUNT(*) FROM page_notes p
+                                WHERE p.paperless_id = page_notes.paperless_id AND p.id <= page_notes.id);
+    CREATE UNIQUE INDEX page_notes_no ON page_notes (paperless_id, no);
+    CREATE TABLE note_counters (
+        paperless_id INTEGER PRIMARY KEY,
+        last_no      INTEGER NOT NULL
+    );
+    INSERT INTO note_counters (paperless_id, last_no)
+        SELECT paperless_id, MAX(no) FROM page_notes GROUP BY paperless_id;
+    """,
 ]
 
 

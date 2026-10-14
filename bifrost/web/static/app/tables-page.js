@@ -1,7 +1,7 @@
 import { BifrostElement, html, nothing, api, searchField, spinner, statusLine, btn } from './core.js';
 
 const API = '/tables/api';
-const PINPOINT = /^[A-Z0-9]{4,8}(?:\.P\d+)?(?:\.L\d+(?:-\d+)?(?:\.C\d+)?|\.C\d+|(?<=\.P\d+))$/;
+const PINPOINT = /^[A-Z0-9]{4,8}(?:\.N\d+|(?:\.P\d+)?(?:\.L\d+(?:-\d+)?(?:\.C\d+)?|\.C\d+|(?<=\.P\d+)))$/;
 const PAGE_SIZE = 10;
 
 function contents(t) {

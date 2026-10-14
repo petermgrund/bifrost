@@ -55,12 +55,20 @@ def _links(request: Request, st, doc_id: int, pid: str) -> dict:
 
 @router.get("/pinpoint/{pinpoint}")
 async def get_pinpoint(request: Request, pinpoint: str) -> dict:
-    """The cells a pinpoint points at, with their values, people and place on the page"""
+    """The cells a pinpoint points at, with their values, people and place on the page, or the note it names"""
     st = _state(request)
     pin = tables.parse_pinpoint(pinpoint)
     if pin is None:
         raise HTTPException(404, f"'{pinpoint}' is not a pinpoint")
     doc_id = await _doc_id(st, pin["code"])
+    links = {"pid": f"{_base(request)}/api/v1/pid/{pin['code']}"}
+    if pin["note"]:
+        note = tables.note_by_no(st.conn, doc_id, pin["note"])
+        if note is None:
+            raise HTTPException(404, f"{pin['code']} has no note {pin['note']}")
+        out = api.note_pinpoint(pin, doc_id, api.doc_title(st.conn, doc_id), note)
+        return {**out, "links": {"bifrost": f"{_base(request)}/tables/{doc_id}?page={note['page']}#N{note['no']}",
+                                 **links}}
     saved = tables.get_table(st.conn, doc_id, pin["page"])
     if saved is None:
         raise HTTPException(404, f"{pin['code']} has no table on page {pin['page']}")
@@ -73,8 +81,7 @@ async def get_pinpoint(request: Request, pinpoint: str) -> dict:
                        await _people(st, api.handles(grid, rows, cols)))
     frag = tables.pinpoint_fragment(pin)
     return {**out, "links": {"bifrost": f"{_base(request)}/tables/{doc_id}?page={pin['page']}"
-                                        + (f"#{frag}" if frag else ""),
-                             "pid": f"{_base(request)}/api/v1/pid/{pin['code']}"}}
+                                        + (f"#{frag}" if frag else ""), **links}}
 
 
 @router.get("/pid/{pid}")

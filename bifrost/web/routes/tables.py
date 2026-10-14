@@ -311,7 +311,7 @@ async def export_csv(request: Request, doc_id: int, page: int) -> Response:
 
 @router.get("/at/{pinpoint}")
 async def open_pinpoint(request: Request, pinpoint: str):
-    """Open the page a pinpoint points into, with its cells selected"""
+    """Open the page a pinpoint points into, with its cells selected or its note open"""
     st = _state(request)
     pin = tables.parse_pinpoint(pinpoint)
     if pin is None:
@@ -319,8 +319,14 @@ async def open_pinpoint(request: Request, pinpoint: str):
     doc_id = await tables.find_doc(st.paperless, st.conn, st.cfg.sync_paperless.gramps_id_field_id, pin["code"])
     if doc_id is None:
         raise HTTPException(404, f"no Paperless document has the PID {pin['code']}")
+    page = pin["page"]
+    if pin["note"]:
+        note = tables.note_by_no(st.conn, doc_id, pin["note"])
+        if note is None:
+            raise HTTPException(404, f"{pin['code']} has no note {pin['note']}")
+        page = note["page"]
     frag = tables.pinpoint_fragment(pin)
-    return RedirectResponse(f"/tables/{doc_id}?page={pin['page']}" + (f"#{frag}" if frag else ""), status_code=302)
+    return RedirectResponse(f"/tables/{doc_id}?page={page}" + (f"#{frag}" if frag else ""), status_code=302)
 
 
 @router.get("/{doc_id}", response_class=HTMLResponse)

@@ -20,7 +20,6 @@ x-gramps-volumes: &gramps-volumes
   - ./data/paperless/media/documents/originals:/app/media/paperless:ro
   - ./data/immich/library/upload:/app/media/immich:ro
   - ./data/immich/library/thumbs:/app/media/immich-previews:ro
-  - ./data/boundaries:/app/static/boundaries:ro
 
 x-bifrost: &bifrost
   build:
@@ -34,7 +33,6 @@ x-bifrost: &bifrost
     TZ: ${TZ:-Etc/UTC}
   volumes:
     - ..:/app
-    - ./data/boundaries:/boundaries
 
 services:
   bifrost:

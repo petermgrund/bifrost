@@ -9,6 +9,12 @@ import re
 
 import httpx
 
+# keys Gramps 6 stores on a place, the only ones the API accepts back
+PLACE_KEYS = frozenset({
+    "_class", "alt_loc", "alt_names", "change", "citation_list", "code", "gramps_id", "handle",
+    "lat", "long", "media_list", "name", "note_list", "place_type", "placeref_list", "private",
+    "tag_list", "title", "urls"})
+
 
 class GrampsError(Exception):
     """Wraps non-2xx response from Gramps Web"""
@@ -57,7 +63,7 @@ class GrampsClient:
             self._token = token
 
     async def _request(
-        self, method: str, path: str, ok_404: bool = False, **kwargs
+        self, method: str, path: str, ok_404: bool = False, ok_409: bool = False, **kwargs
     ) -> httpx.Response:
         await self._ensure_token()
         headers = kwargs.pop("headers", {}) or {}
@@ -74,6 +80,8 @@ class GrampsClient:
                 method, f"{self._base}{path}", headers=headers, **kwargs
             )
         if resp.status_code == 404 and ok_404:
+            return resp
+        if resp.status_code == 409 and ok_409:
             return resp
         if resp.status_code >= 400:
             raise GrampsError(f"{method} {path} → {resp.status_code}: {resp.text[:500]}")
@@ -158,8 +166,8 @@ class GrampsClient:
         )
         return resp.json()
 
-    async def list_media(self) -> list[dict]:
-        return await self._paged("/media/")
+    async def list_media(self, keys: str | None = None) -> list[dict]:
+        return await self._paged("/media/", **({"keys": keys} if keys else {}))
 
     async def recent_media(self, limit: int = 30) -> list[dict]:
         """Media objects most recently changed in Gramps"""
@@ -224,6 +232,31 @@ class GrampsClient:
         )
         return resp.json()
 
+    async def upload_media(self, content: bytes, mime: str) -> str:
+        """Upload a file as a new media object; its handle"""
+        resp = await self._request(
+            "POST", "/media/", content=content, headers={"Content-Type": mime})
+        for t in resp.json() or []:
+            if t.get("_class") == "Media" and t.get("type") == "add":
+                return t["handle"]
+        raise GrampsError("POST /media/ answered without a new media object")
+
+    async def replace_media_file(self, handle: str, content: bytes, mime: str) -> bool:
+        """Swap a media object's file for new content, keeping its handle; False when the content is unchanged"""
+        resp = await self._request(
+            "PUT", f"/media/{handle}/file", ok_409=True,
+            content=content, headers={"Content-Type": mime})
+        return resp.status_code != 409
+
+    async def find_media_by_checksum(self, checksum: str) -> list[dict]:
+        """Media objects whose file has this MD5, each with its backlinks"""
+        resp = await self._request(
+            "GET", "/media/",
+            params={"gql": f'checksum="{checksum}"', "backlinks": "true",
+                    "keys": "handle,gramps_id,mime,backlinks"})
+        items = resp.json()
+        return items if isinstance(items, list) else []
+
     async def media_md5(self, handle: str) -> str:
         """MD5 of the file Gramps serves for a media object, the value Gramps keeps as its checksum"""
         for fresh in (False, True):
@@ -255,9 +288,11 @@ class GrampsClient:
         return True
 
     async def update_place(self, handle: str, place_obj: dict) -> dict:
+        """Save a place, minus keys outside the Place schema (a stray 'type' would make Gramps refuse it)"""
         resp = await self._request(
             "PUT", f"/places/{handle}",
-            json=place_obj, headers={"Content-Type": "application/json"},
+            json={k: v for k, v in place_obj.items() if k in PLACE_KEYS},
+            headers={"Content-Type": "application/json"},
         )
         return resp.json()
 
@@ -372,8 +407,8 @@ class GrampsClient:
                     return p
         return None
 
-    async def get_place(self, handle: str) -> dict:
-        resp = await self._request("GET", f"/places/{handle}")
+    async def get_place(self, handle: str, **params) -> dict:
+        resp = await self._request("GET", f"/places/{handle}", params=params or None)
         return resp.json()
 
     async def list_places(self, keys: str = "handle") -> list[dict]:

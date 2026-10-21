@@ -21,7 +21,7 @@ Your family-tree data itself always lives in Gramps and the source systems. Bifr
 * Build a Gramps Source and Citation for a Paperless document step by step, by the rules of the citation style guide, attach the citation to the events, people and families it supports, and file the scan in Paperless with matching metadata. Change the record types the rules follow, or add your own, on the Record types page; Rebuild brings existing citations up to date.
 * Old handwriting and faded print often defeat regular OCR. Bifrost sends the page to an AI model and writes the transcription back into Paperless and Gramps.
 * Rebuild a Paperless PDF so every page shares the same width.
-* Give places boundaries on the minimap so you can see the extent of their jurisdiction.
+* Give places their OpenStreetMap boundaries so you can see the extent of their jurisdiction. Each boundary is a GeoJSON map file in the place's gallery, which Gramps Web (26.10.2 or later) draws on the Map.
 * Attach documents downloaded from Ancestry to the citations Ancestry created.
 * Index census pages and other tables in Paperless: lay a grid over the page once, then hover over any cell to see its column, line and value, like Ancestry's census viewer. Gemini can transcribe the cells.
 

@@ -16,7 +16,7 @@ Then open http://localhost:8800.
 | Paperless-ngx | http://localhost:8000 | `admin` / `bifrost-dev` |
 | Immich | http://localhost:2283 | `owner@bifrost.dev` or `partner@bifrost.dev` / `bifrost-dev` |
 
-Place boundaries on the Gramps minimap need a checkout of [gramps-boundary-overlay](https://github.com/petermgrund/gramps-boundary-overlay): set `BOUNDARY_OVERLAY_DIR` in `dev/.env` to it (relative to `dev/`) and run `up` again.
+Place boundaries are GeoJSON map files in each place's gallery, which Gramps Web 26.10.2 or later draws on its Map; `GRAMPSWEB_VERSION=latest` is new enough.
 
 ## Commands
 

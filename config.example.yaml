@@ -42,9 +42,6 @@ gemini:
   model: "gemini-3-flash-preview"
   # thinking_budget: 8192
 
-places:
-  boundaries_dir: "/boundaries"
-
 immich:
   base_url: "http://{device}:2283"
   accounts:

@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
-from pathlib import Path
 from typing import AsyncIterator
 
 import httpx
@@ -23,6 +23,12 @@ NOMINATIM_PAUSE_S = 1.1
 LINK_SCAN_CAP = 50
 OSM_API_BASE = "https://api.openstreetmap.org/api/0.6"
 USER_AGENT = "bifrost/1.0 (self-hosted genealogy tool)"
+
+# A place's boundary is a GeoJSON map file in its gallery whose OSM URL attribute
+# names the OSM object it came from. Gramps Web draws it on the Map.
+MAP_FILE_MIME = "application/geo+json"
+OSM_URL_ATTR = "OSM URL"
+MAP_FILE_STYLE = {"stroke": "#cc2a36", "stroke-width": 2, "fill": "#cc2a36", "fill-opacity": 0.22}
 
 
 class BoundaryFetchError(Exception):
@@ -95,30 +101,26 @@ async def _try_get_geojson(client: httpx.AsyncClient, relation_id: int) -> dict 
     return data
 
 
-def write_sidecar(
-    boundaries_dir: Path, place: dict, geom: dict, osm_type: str, osm_id: int,
-) -> Path:
-    """Write the boundary as a GeoJSON Feature keyed by the place's gramps_id"""
-    gramps_id = place.get("gramps_id")
-    if not gramps_id:
-        raise BoundaryFetchError("place has no gramps_id")
-    name = (place.get("name") or {}).get("value") or gramps_id
-    feature = {
-        "type": "Feature",
-        "properties": {
-            "gramps_id": gramps_id,
-            "osm_type": osm_type,
-            "osm_id": osm_id,
-            "name": name,
-        },
-        "geometry": geom,
+def place_name(place: dict) -> str:
+    return (place.get("name") or {}).get("value") or place.get("gramps_id") or "?"
+
+
+def osm_url(osm_type: str, osm_id: int) -> str:
+    return f"https://www.openstreetmap.org/{osm_type}/{osm_id}"
+
+
+def map_file(place: dict, geom: dict, osm_type: str, osm_id: int) -> bytes:
+    """The boundary as a compact GeoJSON Feature, outlined and filled in red"""
+    props = {
+        "gramps_id": place.get("gramps_id"),
+        "osm_type": osm_type,
+        "osm_id": osm_id,
+        "name": place_name(place),
     }
     if osm_type == "relation":
-        feature["properties"]["relation_id"] = osm_id  # just a legacy key
-    boundaries_dir.mkdir(parents=True, exist_ok=True)
-    sidecar = boundaries_dir / f"{gramps_id}.geojson"
-    sidecar.write_text(json.dumps(feature))
-    return sidecar
+        props["relation_id"] = osm_id  # just a legacy key
+    feature = {"type": "Feature", "properties": {**props, **MAP_FILE_STYLE}, "geometry": geom}
+    return json.dumps(feature, separators=(",", ":")).encode()
 
 
 def osm_ref(place: dict) -> tuple[str, int] | None:
@@ -129,26 +131,40 @@ def osm_ref(place: dict) -> tuple[str, int] | None:
     return None
 
 
-def sidecar_osm(boundaries_dir: Path | None, gramps_id: str) -> tuple[str, int] | None:
-    """OSM object a sidecar came from"""
-    if not boundaries_dir or not gramps_id:
-        return None
-    try:
-        props = json.loads((boundaries_dir / f"{gramps_id}.geojson").read_text()).get("properties") or {}
-        return (props.get("osm_type") or "relation", int(props["osm_id"]))
-    except (OSError, ValueError, TypeError, KeyError):
-        return None
+def is_boundary(media: dict) -> bool:
+    return media.get("mime") == MAP_FILE_MIME and any(
+        a.get("type") == OSM_URL_ATTR for a in media.get("attribute_list") or [])
+
+
+def boundary_of(place: dict, media_by_handle: dict) -> dict | None:
+    """The place's boundary map file, if it has one"""
+    for ref in place.get("media_list") or []:
+        m = media_by_handle.get(ref.get("ref"))
+        if m and is_boundary(m):
+            return m
+    return None
+
+
+def boundary_osm(media: dict) -> tuple[str, int] | None:
+    """OSM object a map file came from"""
+    for a in media.get("attribute_list") or []:
+        if a.get("type") == OSM_URL_ATTR:
+            m = OSM_REF_RE.search(a.get("value") or "")
+            return (m.group(1), int(m.group(2))) if m else None
+    return None
 
 
 def outdated(row: dict) -> bool:
-    """Sidecar built from a different OSM object"""
+    """Map file built from a different OSM object"""
     return bool(row["has_boundary"] and row["boundary_osm"]
                 and row["osm_id"] and row["boundary_osm"] != (row["osm_type"], row["osm_id"]))
 
 
-async def listing(gramps: GrampsClient, boundaries_dir: Path | None) -> list[dict]:
+async def listing(gramps: GrampsClient, with_boundaries: bool = True) -> list[dict]:
     places = await gramps.list_places_full()
     by_handle = {p["handle"]: p for p in places}
+    media = await gramps.list_media(keys="handle,mime,attribute_list") if with_boundaries else []
+    media_by_handle = {m["handle"]: m for m in media}
 
     def hierarchy(place: dict) -> list[str]:
         """Place names, innermost first"""
@@ -164,8 +180,7 @@ async def listing(gramps: GrampsClient, boundaries_dir: Path | None) -> list[dic
     for p in places:
         gid = p.get("gramps_id", "")
         ref = osm_ref(p)
-        has_geojson = bool(
-            boundaries_dir and gid and (boundaries_dir / f"{gid}.geojson").is_file())
+        boundary = boundary_of(p, media_by_handle)
         rows.append({
             "handle": p["handle"],
             "gramps_id": gid,
@@ -174,8 +189,8 @@ async def listing(gramps: GrampsClient, boundaries_dir: Path | None) -> list[dic
             "osm_type": ref[0] if ref else None,
             "osm_id": ref[1] if ref else None,
             "has_coords": bool((p.get("lat") or "").strip() and (p.get("long") or "").strip()),
-            "has_boundary": has_geojson,
-            "boundary_osm": sidecar_osm(boundaries_dir, gid) if has_geojson else None,
+            "has_boundary": boundary is not None,
+            "boundary_osm": boundary_osm(boundary) if boundary else None,
         })
     rows.sort(key=lambda r: r["name"].lower())
     return rows
@@ -223,7 +238,7 @@ async def write_place(
         existing = osm_ref(place)
         if existing and not replace:
             raise ValueError("place already has OSM URL")
-        path = f"https://www.openstreetmap.org/{osm[0]}/{osm[1]}"
+        path = osm_url(*osm)
         if existing:
             for url in place.get("urls", []):
                 if OSM_REF_RE.search(url.get("path") or ""):
@@ -247,26 +262,67 @@ async def set_relation(
     return {"handle": handle, "osm_type": osm_type, "osm_id": osm_id}
 
 
-async def generate_one(
-    gramps: GrampsClient, boundaries_dir: Path, place_handle: str, force: bool,
-) -> dict:
-    """Fetch the place's OSM boundary and write its GeoJSON sidecar"""
+async def _unattached(gramps: GrampsClient, content: bytes) -> str | None:
+    """A map file with this content that an interrupted run uploaded but never attached"""
+    checksum = hashlib.md5(content, usedforsecurity=False).hexdigest()
+    for m in await gramps.find_media_by_checksum(checksum):
+        if m.get("mime") == MAP_FILE_MIME and not any((m.get("backlinks") or {}).values()):
+            return m["handle"]
+    return None
+
+
+async def _describe(gramps: GrampsClient, handle: str, place: dict, osm: tuple[str, int]) -> bool:
+    """Label a map file and name its OSM object; False when it already was"""
+    media = await gramps.get_object("media", handle)
+    desc = f"OSM boundary: {place_name(place)}"
+    attrs = media.get("attribute_list") or []
+    if media.get("desc") == desc and [
+            a.get("value") for a in attrs if a.get("type") == OSM_URL_ATTR] == [osm_url(*osm)]:
+        return False
+    media["desc"] = desc
+    media["attribute_list"] = [a for a in attrs if a.get("type") != OSM_URL_ATTR] + [
+        {"_class": "Attribute", "type": OSM_URL_ATTR, "value": osm_url(*osm),
+         "private": False, "citation_list": [], "note_list": []}]
+    await gramps.update_media(handle, media)
+    return True
+
+
+async def _attach(gramps: GrampsClient, place_handle: str, media_handle: str) -> None:
+    """Add a map file to the end of the place's gallery"""
     place = await gramps.get_place(place_handle)
-    name = (place.get("name") or {}).get("value") or place.get("gramps_id") or "?"
+    refs = place.get("media_list") or []
+    if any(r.get("ref") == media_handle for r in refs):
+        return
+    place["media_list"] = refs + [{"_class": "MediaRef", "ref": media_handle, "rect": [], "private": False,
+                                   "attribute_list": [], "citation_list": [], "note_list": []}]
+    await gramps.update_place(place_handle, place)
+
+
+async def generate_one(gramps: GrampsClient, place_handle: str, force: bool) -> dict:
+    """Fetch the place's OSM boundary and keep it as a map file in the place's gallery"""
+    place = await gramps.get_place(place_handle, extend="media_list")
     ref = osm_ref(place)
     if ref is None:
         raise BoundaryFetchError(
-            f"no OSM URL on place '{name}'")
+            f"no OSM URL on place '{place_name(place)}'")
     osm_type, osm_id = ref
-    gramps_id = place.get("gramps_id")
-    sidecar = boundaries_dir / f"{gramps_id}.geojson" if gramps_id else None
-    if sidecar is not None and sidecar.exists() and not force:
-        return {"place_handle": place_handle, "osm_type": osm_type,
-                "osm_id": osm_id, "gramps_id": gramps_id, "written": False}
-    geom = await fetch_geojson(osm_type, osm_id)
-    write_sidecar(boundaries_dir, place, geom, osm_type, osm_id)
-    return {"place_handle": place_handle, "osm_type": osm_type,
-            "osm_id": osm_id, "gramps_id": gramps_id, "written": True}
+    existing = next((m for m in (place.get("extended") or {}).get("media") or []
+                     if is_boundary(m)), None)
+    result = {"place_handle": place_handle, "osm_type": osm_type,
+              "osm_id": osm_id, "gramps_id": place.get("gramps_id")}
+    if existing and not force and boundary_osm(existing) in (None, ref):
+        return {**result, "media_handle": existing["handle"], "written": False}
+    content = map_file(place, await fetch_geojson(osm_type, osm_id), osm_type, osm_id)
+    if existing:
+        handle = existing["handle"]
+        written = await gramps.replace_media_file(handle, content, MAP_FILE_MIME)
+    else:
+        handle = await _unattached(gramps, content) or await gramps.upload_media(content, MAP_FILE_MIME)
+        written = True
+    written = await _describe(gramps, handle, place, ref) or written
+    if not existing:
+        await _attach(gramps, place_handle, handle)
+    return {**result, "media_handle": handle, "written": written}
 
 
 def _progress(label: str, done: int, total: int) -> SyncEvent:
@@ -295,11 +351,8 @@ def _plan(row: dict, match: dict) -> dict:
     return plan
 
 
-def _boundary_source(row: dict, plan: dict, match: dict,
-                     boundaries_dir: Path | None) -> tuple[str, int] | None:
+def _boundary_source(row: dict, plan: dict, match: dict) -> tuple[str, int] | None:
     """The OSM area whose boundary the apply should fetch, if any"""
-    if not boundaries_dir:
-        return None
     if "osm" in plan:
         return match["osm_type"], match["osm_id"]
     if row["osm_type"] in ("relation", "way") and (not row["has_boundary"] or outdated(row)):
@@ -313,11 +366,9 @@ async def _find(row: dict) -> dict | None:
     return await search_osm(", ".join(row["hierarchy"]))
 
 
-async def scan_links(
-    gramps: GrampsClient, boundaries_dir: Path | None, suggestions: dict,
-) -> AsyncIterator[SyncEvent]:
+async def scan_links(gramps: GrampsClient, suggestions: dict) -> AsyncIterator[SyncEvent]:
     """Suggest OSM links and coordinates for places missing them"""
-    rows = [r for r in await listing(gramps, boundaries_dir)
+    rows = [r for r in await listing(gramps)
             if not r["osm_id"] or not r["has_coords"]]
     todo = rows[:LINK_SCAN_CAP]
     scope = f"{len(rows)} place(s) without an OpenStreetMap link or coordinates"
@@ -341,7 +392,7 @@ async def scan_links(
                 suggestions[row["handle"]] = match
                 counts["linked"] += "osm" in plan
                 counts["located"] += "coordinates" in plan
-                if _boundary_source(row, plan, match, boundaries_dir):
+                if _boundary_source(row, plan, match):
                     plan["boundary"] = "fetch"
                 yield SyncEvent(**_row(row),
                                 action="would_create" if "osm" in plan else "would_update",
@@ -355,10 +406,10 @@ async def scan_links(
 
 
 async def apply_links(
-    gramps: GrampsClient, boundaries_dir: Path | None, selected: set[str], suggestions: dict,
+    gramps: GrampsClient, selected: set[str], suggestions: dict,
 ) -> AsyncIterator[SyncEvent]:
     """Write accepted OSM links and coordinates to Gramps"""
-    by_handle = {r["handle"]: r for r in await listing(gramps, boundaries_dir)}
+    by_handle = {r["handle"]: r for r in await listing(gramps)}
     handles = [k.partition(":")[2] for k in selected if k.startswith("place:")]
     todo = [by_handle[h] for h in handles if h in by_handle]
     yield SyncEvent(kind="started", detail=f"{len(todo)} place(s) to update")
@@ -391,11 +442,11 @@ async def apply_links(
         suggestions.pop(row["handle"], None)
         counts["linked"] += "osm" in plan
         counts["located"] += "coordinates" in plan
-        if _boundary_source(row, plan, match, boundaries_dir):
+        if _boundary_source(row, plan, match):
             try:
-                await generate_one(gramps, boundaries_dir, row["handle"], force=True)
-                counts["generated"] += 1
-                plan["boundary"] = "written"
+                result = await generate_one(gramps, row["handle"], force=True)
+                counts["generated"] += result["written"]
+                plan["boundary"] = "written" if result["written"] else "unchanged"
             except Exception as exc:  # noqa: BLE001
                 counts["errors"] += 1
                 plan["boundary"] = f"failed: {str(exc)[:160]}"
@@ -408,9 +459,9 @@ async def apply_links(
     yield SyncEvent(kind="summary", data=counts)
 
 
-async def scan(gramps: GrampsClient, boundaries_dir: Path) -> AsyncIterator[SyncEvent]:
+async def scan(gramps: GrampsClient) -> AsyncIterator[SyncEvent]:
     """List linked places with missing or outdated boundaries"""
-    places = [r for r in await listing(gramps, boundaries_dir) if r["osm_id"]]
+    places = [r for r in await listing(gramps) if r["osm_id"]]
     todo = [r for r in places if not r["has_boundary"] or outdated(r)]
     yield SyncEvent(kind="started",
                     detail=f"{len(todo)} of {len(places)} OSM-linked place(s) without a current boundary")
@@ -421,18 +472,17 @@ async def scan(gramps: GrampsClient, boundaries_dir: Path) -> AsyncIterator[Sync
         else:
             old_type, old_id = row["boundary_osm"]
             yield SyncEvent(**_row(row), action="would_update",
-                            data={"cols": {"osm": osm, "boundary": f"{old_type} {old_id} on disk"}})
+                            data={"cols": {"osm": osm, "boundary": f"map file of {old_type} {old_id}"}})
     yield SyncEvent(kind="summary", data={"generated": len(todo), "errors": 0})
 
 
 async def generate_missing(
     gramps: GrampsClient,
-    boundaries_dir: Path,
     force: bool = False,
     selected: set[str] | None = None,
 ) -> AsyncIterator[SyncEvent]:
-    """Write boundary sidecars"""
-    places = [r for r in await listing(gramps, boundaries_dir) if r["osm_id"]]
+    """Add or refresh boundary map files"""
+    places = [r for r in await listing(gramps) if r["osm_id"]]
     todo = places if force else [r for r in places if not r["has_boundary"] or outdated(r)]
     if selected is not None:
         todo = [r for r in todo if f"place:{r['handle']}" in selected]
@@ -442,14 +492,19 @@ async def generate_missing(
     for i, row in enumerate(todo):
         yield _progress("Fetching boundaries from OpenStreetMap", i, len(todo))
         try:
-            await generate_one(gramps, boundaries_dir, row["handle"], force or outdated(row))
+            result = await generate_one(gramps, row["handle"], force)
         except Exception as exc:  # noqa: BLE001
             counts["errors"] += 1
             yield SyncEvent(**_row(row), action="failed", detail=str(exc))
             continue
-        counts["generated"] += 1
-        yield SyncEvent(**_row(row), action="updated" if row["has_boundary"] else "created",
-                        data={"cols": {"osm": f'{row["osm_type"]} {row["osm_id"]}'}})
+        cols = {"osm": f'{row["osm_type"]} {row["osm_id"]}'}
+        if result["written"]:
+            counts["generated"] += 1
+            yield SyncEvent(**_row(row), action="updated" if row["has_boundary"] else "created",
+                            data={"cols": cols})
+        else:
+            yield SyncEvent(**_row(row), action="skipped", detail="boundary unchanged",
+                            data={"cols": cols})
         await asyncio.sleep(1)
     if todo:
         yield _progress("Fetching boundaries from OpenStreetMap", len(todo), len(todo))

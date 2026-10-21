@@ -86,7 +86,7 @@ class PlacesLinksPage extends SyncPage {
     try {
       const r = await post('/places/api/set-relation', { gramps_id, relation });
       if (r.boundary_error) {
-        this.linkError = `${r.name} (${r.gramps_id}) is linked but its boundary wasn't fetched: `
+        this.linkError = `${r.name} (${r.gramps_id}) is linked but its boundary map file wasn't added: `
           + `${r.boundary_error}. Retry later.`;
       }
       this.placePick = null;
@@ -139,8 +139,7 @@ class PlacesPage extends SyncPage {
   get jobName() { return 'places.boundaries'; }
   get itemColLabel() { return 'Gramps place'; }
   get lastColLabel() { return 'Place object'; }
-  get scanHeading() { return 'Scan Gramps places for missing boundaries'; }
-  get disabledText() { return 'No boundaries directory configured (places.boundaries_dir)'; }
+  get scanHeading() { return 'Scan Gramps places for missing or outdated boundary map files'; }
   get primaryEntity() { return 'place'; }
 }
 customElements.define('places-page', PlacesPage);

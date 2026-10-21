@@ -69,11 +69,6 @@ class SyncPaperlessConfig:
 
 
 @dataclass(frozen=True)
-class PlacesConfig:
-    boundaries_dir: Path | None = None
-
-
-@dataclass(frozen=True)
 class GeminiConfig:
     api_key: str = ""
     model: str = "gemini-3-flash-preview"
@@ -90,7 +85,6 @@ class Config:
     sync_immich: SyncImmichConfig = SyncImmichConfig()
     sync_paperless: SyncPaperlessConfig = SyncPaperlessConfig()
     gemini: GeminiConfig = GeminiConfig()
-    places: PlacesConfig = PlacesConfig()
 
 
 DEFAULT_PATH = Path(__file__).resolve().parents[2] / "config.yaml"
@@ -218,8 +212,5 @@ def load_config(path: str | Path | None = None) -> Config:
             api_key=gem_raw.get("api_key") or "",
             model=gem_raw.get("model") or "gemini-3-flash-preview",
             thinking_budget=gem_raw.get("thinking_budget"),
-        ),
-        places=PlacesConfig(
-            boundaries_dir=Path(b) if (b := (raw.get("places") or {}).get("boundaries_dir")) else None,
         ),
     )

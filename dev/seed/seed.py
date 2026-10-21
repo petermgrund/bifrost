@@ -826,7 +826,6 @@ def write_config(gramps: dict, paperless: dict | None, immich: dict | None) -> N
         },
         "gemini": {"api_key": os.environ.get("GEMINI_API_KEY") or "REPLACE_ME",
                    "model": os.environ.get("GEMINI_MODEL") or "gemini-3-flash-preview"},
-        "places": {"boundaries_dir": "/boundaries"},
     }
     if immich:
         cfg["immich"] = {"base_url": URLS["immich"],

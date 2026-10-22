@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 
 import httpx
@@ -164,18 +163,6 @@ class PaperlessClient:
         resp = await self._request("GET", "/api/documents/", params=params)
         return resp.json().get("results", [])
 
-    async def document_types(self) -> list[dict]:
-        return await self._paginated("/api/document_types/", params={"page_size": 100})
-
-    async def correspondents(self) -> list[dict]:
-        return await self._paginated("/api/correspondents/", params={"page_size": 100})
-
-    async def custom_fields(self) -> list[dict]:
-        return await self._paginated("/api/custom_fields/", params={"page_size": 100})
-
-    async def patch_document(self, doc_id: int, fields: dict) -> None:
-        await self._request("PATCH", f"/api/documents/{doc_id}/", json=fields)
-
     async def patch_content(self, doc_id: int, content: str) -> None:
         """Overwrite doc searchable text field in place"""
         await self._request(
@@ -202,46 +189,8 @@ class PaperlessClient:
         except ValueError:
             return resp.text.strip().strip('"')
 
-    async def post_document(
-        self, data: bytes, filename: str, mime: str, title: str = "",
-        tags: list[int] | None = None, correspondent: int | None = None,
-        custom_fields: dict[int, object] | None = None,
-    ) -> str:
-        """Upload a new document with its metadata; returns the consume task's id"""
-        form: dict = {}
-        if title:
-            form["title"] = title
-        if tags:
-            form["tags"] = [str(t) for t in tags]
-        if correspondent:
-            form["correspondent"] = str(correspondent)
-        if custom_fields:
-            form["custom_fields"] = json.dumps({str(k): v for k, v in custom_fields.items()})
-        resp = await self._request(
-            "POST", "/api/documents/post_document/",
-            files={"document": (filename, data, mime)}, data=form, timeout=300.0,
-        )
-        try:
-            return str(resp.json()).strip()
-        except ValueError:
-            return resp.text.strip().strip('"')
-
-    async def documents_with_bytes(self, data: bytes) -> list[dict]:
-        """Documents whose original file is these bytes (SHA-256 checksums since Paperless 3, MD5 before)"""
-        for digest in (hashlib.sha256(data).hexdigest(), hashlib.md5(data).hexdigest()):
-            resp = await self._request("GET", "/api/documents/", params={
-                "checksum__iexact": digest, "fields": "id,title"})
-            if found := resp.json().get("results"):
-                return found
-        return []
-
     async def add_note(self, doc_id: int, text: str) -> None:
         await self._request("POST", f"/api/documents/{doc_id}/notes/", json={"note": text})
-
-    async def documents_with_field(self, field_id: int, fields: str) -> list[dict]:
-        """Every document carrying the custom field, newest first, with only the given fields"""
-        return await self._paginated("/api/documents/", params={
-            "custom_fields__id__all": field_id, "fields": fields, "page_size": 100, "ordering": "-added"})
 
     async def task_status(self, task_uuid: str) -> dict | None:
         """task row from /api/tasks/"""

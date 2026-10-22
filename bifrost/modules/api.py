@@ -212,17 +212,6 @@ def collections(conn: sqlite3.Connection) -> list[dict]:
     return out
 
 
-def citation_inputs(conn: sqlite3.Connection) -> dict:
-    return {
-        "sources": [{"source_handle": r["handle"], "record_type": r["record_type"],
-                     "inputs": json.loads(r["inputs"]), "used_at": r["used_at"]}
-                    for r in conn.execute("SELECT * FROM citation_sources ORDER BY used_at")],
-        "citations": [{"citation_handle": r["citation_handle"], "record_type": r["record_type"],
-                       "draft": json.loads(r["draft"]), "created_at": r["created_at"]}
-                      for r in conn.execute("SELECT * FROM citation_drafts ORDER BY created_at")],
-    }
-
-
 def export(conn: sqlite3.Connection, pids: dict[int, str], code_rows: list[dict]) -> dict:
     """Everything only Bifrost holds, people as bare Gramps handles"""
     kids = children(conn)
@@ -233,6 +222,5 @@ def export(conn: sqlite3.Connection, pids: dict[int, str], code_rows: list[dict]
         "codes": [code(r, kids) for r in code_rows if known(r)],
         "collections": collections(conn),
         "person_links": faces.list_links(conn),
-        "citation_inputs": citation_inputs(conn),
     }
 

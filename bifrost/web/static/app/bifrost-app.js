@@ -10,8 +10,6 @@ import './ancestry-links-page.js';
 import './codes-page.js';
 
 const SECTIONS = [
-  { id: 'inbox', title: 'Inbox', desc: 'Capture records during research and cite them later',
-    body: html`<a class="button" href="/inbox"><span>Open Inbox</span></a>` },
   { id: 'sync', title: 'Sync',
     desc: 'Sync Paperless docs and Immich photos to Gramps media objects',
     body: html`<paperless-sync-page></paperless-sync-page>
@@ -29,10 +27,6 @@ const SECTIONS = [
     body: html`<tables-page></tables-page>` },
   { id: 'reprocess', title: 'Reprocess', desc: 'Rebuild a Paperless doc so all pages are the same width',
     body: html`<reprocess-page></reprocess-page>` },
-  { id: 'citations', title: 'Citations', desc: 'Create Gramps sources and citations for Paperless docs',
-    body: html`<nav class="wrap"><a class="button" href="/citations"><span>Open Citations</span></a>
-      <a class="button border" href="/citations/rebuild"><span>Rebuild citations</span></a>
-      <a class="button border" href="/citations/types"><span>Record types</span></a></nav>` },
   { id: 'places', title: 'Places', desc: 'Link Gramps places to OpenStreetMap and draw their boundaries on the map',
     body: html`<places-links-page></places-links-page>
       <div class="large-space"></div>

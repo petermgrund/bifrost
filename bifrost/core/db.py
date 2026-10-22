@@ -379,6 +379,15 @@ MIGRATIONS: list[str] = [
     INSERT INTO note_counters (paperless_id, last_no)
         SELECT paperless_id, MAX(no) FROM page_notes GROUP BY paperless_id;
     """,
+    # 29 the Inbox and the citations wizard are gone, with their tables
+    """
+    DROP TABLE captures;
+    DROP TABLE inbox_hidden;
+    DROP TABLE citation_sources;
+    DROP TABLE citation_drafts;
+    DROP TABLE record_types;
+    DROP TABLE record_type_versions;
+    """,
 ]
 
 

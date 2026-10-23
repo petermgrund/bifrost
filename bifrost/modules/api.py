@@ -1,4 +1,4 @@
-"""Read-only v1 views of what only Bifrost holds: tables, page notes, the Codes ledger, collections, links"""
+"""Read-only v1 views of what only Bifrost holds: tables, page notes, the Codes ledger, collections, photo links, person links"""
 
 from __future__ import annotations
 
@@ -212,6 +212,14 @@ def collections(conn: sqlite3.Connection) -> list[dict]:
     return out
 
 
+def photo_links(conn: sqlite3.Connection) -> list[dict]:
+    """Every photo that has links, with them in the order they were added"""
+    out: dict[str, list[dict]] = {}
+    for r in conn.execute("SELECT asset_id, url, added_at FROM photo_links ORDER BY asset_id, id"):
+        out.setdefault(r["asset_id"], []).append({"url": r["url"], "added_at": r["added_at"]})
+    return [{"asset_id": a, "links": links} for a, links in out.items()]
+
+
 def export(conn: sqlite3.Connection, pids: dict[int, str], code_rows: list[dict]) -> dict:
     """Everything only Bifrost holds, people as bare Gramps handles"""
     kids = children(conn)
@@ -221,6 +229,7 @@ def export(conn: sqlite3.Connection, pids: dict[int, str], code_rows: list[dict]
         "documents": [document(conn, d, pids.get(d, ""), {}) for d in doc_ids(conn)],
         "codes": [code(r, kids) for r in code_rows if known(r)],
         "collections": collections(conn),
+        "photo_links": photo_links(conn),
         "person_links": faces.list_links(conn),
     }
 

@@ -36,6 +36,8 @@ CANONICAL = {
     si.TAG_DATE_MONTH: "Date/Month", si.TAG_DATE_DECADE: "Date/Decade",
 }
 _DATE_RE = re.compile(r"^\s*(\d{4})(?:-(\d{1,2})(?:-(\d{1,2}))?)?\s*$")
+_LINK_RE = re.compile(r"^https?://\S+$", re.IGNORECASE)
+LINK_MAX = 2000
 
 
 def _now() -> str:
@@ -218,6 +220,33 @@ def mark_dated(conn: sqlite3.Connection, asset_id: str, dated: bool) -> None:
 
 def is_dated(conn: sqlite3.Connection, asset_id: str) -> bool:
     return conn.execute("SELECT 1 FROM dated_photos WHERE asset_id=?", (asset_id,)).fetchone() is not None
+
+
+def links_for(conn: sqlite3.Connection, asset_id: str) -> list[dict]:
+    """A photo's links, oldest first"""
+    return [dict(r) for r in conn.execute(
+        "SELECT id, url, added_at FROM photo_links WHERE asset_id=? ORDER BY id", (asset_id,))]
+
+
+def add_link(conn: sqlite3.Connection, asset_id: str, url: str) -> dict:
+    """Keep a web link on a photo"""
+    url = (url or "").strip()
+    if not _LINK_RE.match(url):
+        raise ValueError("That is not a link starting with http:// or https://.")
+    if len(url) > LINK_MAX:
+        raise ValueError(f"That is too long (at most {LINK_MAX} characters).")
+    if conn.execute("SELECT 1 FROM photo_links WHERE asset_id=? AND url=?", (asset_id, url)).fetchone():
+        raise ValueError("This photo already has that link.")
+    with conn:
+        cur = conn.execute("INSERT INTO photo_links (asset_id, url, added_at) VALUES (?, ?, ?)",
+                           (asset_id, url, _now()))
+    return dict(conn.execute("SELECT id, url, added_at FROM photo_links WHERE id=?", (cur.lastrowid,)).fetchone())
+
+
+def remove_link(conn: sqlite3.Connection, asset_id: str, link_id: int) -> bool:
+    with conn:
+        cur = conn.execute("DELETE FROM photo_links WHERE id=? AND asset_id=?", (link_id, asset_id))
+    return cur.rowcount > 0
 
 
 def registered_gid(conn: sqlite3.Connection, asset_id: str,
@@ -674,6 +703,7 @@ async def load(accounts: list[ImmichClient], conn: sqlite3.Connection, cfg: Sync
         "versions": versions,
         "suggestions": suggestions,
         "collections": photo_collections.for_asset(conn, asset_id),
+        "links": links_for(conn, asset_id),
     }
 
 
@@ -791,7 +821,7 @@ async def match_all(accounts: list[ImmichClient], client: ImmichClient, cfg: Syn
 
 
 def move_identity(conn: sqlite3.Connection, old: str, new: str, prefer_new: bool = False) -> None:
-    """Notes, the dated mark and collection memberships follow the photo's new main image"""
+    """Notes, the dated mark, links and collection memberships follow the photo's new main image"""
     with conn:
         has_new = conn.execute("SELECT 1 FROM photo_notes WHERE asset_id=?", (new,)).fetchone()
         if has_new and prefer_new:
@@ -803,6 +833,9 @@ def move_identity(conn: sqlite3.Connection, old: str, new: str, prefer_new: bool
         conn.execute("INSERT OR IGNORE INTO dated_photos (asset_id, dated_at) "
                      "SELECT ?, dated_at FROM dated_photos WHERE asset_id=?", (new, old))
         conn.execute("DELETE FROM dated_photos WHERE asset_id=?", (old,))
+        conn.execute("INSERT OR IGNORE INTO photo_links (asset_id, url, added_at) "
+                     "SELECT ?, url, added_at FROM photo_links WHERE asset_id=? ORDER BY id", (new, old))
+        conn.execute("DELETE FROM photo_links WHERE asset_id=?", (old,))
     photo_collections.move_items(conn, old, new)
 
 

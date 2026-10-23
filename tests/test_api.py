@@ -10,7 +10,7 @@ from fastapi import FastAPI
 
 from bifrost.core import db
 from bifrost.core.config import SyncPaperlessConfig
-from bifrost.modules import codes, faces, photo_collections, tables
+from bifrost.modules import codes, faces, photo_collections, photos, tables
 from bifrost.web.routes import api as routes
 
 
@@ -259,6 +259,8 @@ def test_export(saved, ledger):
     cid = photo_collections.create(saved, "Portraits")["id"]
     photo_collections.add_items(saved, cid, ["asset-1", "asset-2"])
     faces.set_link(saved, "H_ANDERS", "imm-person-1", label="Anders")
+    photos.add_link(saved, "asset-2", "https://example.org/album/2")
+    photos.add_link(saved, "asset-1", "https://example.org/album/1")
     tables.save_table(saved, 11, 1, census(), 0, "Unsynced page")
     app = app_for(saved, paperless=Paperless({8: "69t5au", 11: None}),
                   gramps=Gramps({"H_ANDERS": ("I0007", "Anders")}, media={"R7KM3D": "Album"}))
@@ -275,7 +277,10 @@ def test_export(saved, ledger):
     assert body["collections"][0]["name"] == "Portraits"
     assert [s["asset_id"] for s in body["collections"][0]["slots"]] == ["asset-1", "asset-2"]
     assert body["person_links"][0]["immich_person_id"] == "imm-person-1"
-    assert set(body) == {"api", "exported_at", "documents", "codes", "collections", "person_links"}
+    assert [(p["asset_id"], [x["url"] for x in p["links"]]) for p in body["photo_links"]] == [
+        ("asset-1", ["https://example.org/album/1"]), ("asset-2", ["https://example.org/album/2"])]
+    assert body["photo_links"][0]["links"][0]["added_at"]
+    assert set(body) == {"api", "exported_at", "documents", "codes", "collections", "photo_links", "person_links"}
 
 
 def test_export_without_paperless_or_gramps(saved, ledger):

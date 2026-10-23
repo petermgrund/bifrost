@@ -388,6 +388,16 @@ MIGRATIONS: list[str] = [
     DROP TABLE record_types;
     DROP TABLE record_type_versions;
     """,
+    # 30 web links kept on a photo
+    """
+    CREATE TABLE photo_links (
+        id       INTEGER PRIMARY KEY AUTOINCREMENT,
+        asset_id TEXT NOT NULL,
+        url      TEXT NOT NULL,
+        added_at TEXT NOT NULL,
+        UNIQUE (asset_id, url)
+    );
+    """,
 ]
 
 

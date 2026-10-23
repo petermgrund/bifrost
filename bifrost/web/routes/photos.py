@@ -312,6 +312,37 @@ async def remove_version(request: Request, asset_id: str, member_id: str) -> dic
         raise HTTPException(exc.status, exc.detail)
 
 
+class LinkBody(BaseModel):
+    url: str
+
+
+@router.post("/api/photo/{asset_id}/links")
+async def add_link(request: Request, asset_id: str, body: LinkBody) -> dict:
+    st = _state(request)
+    accounts = _accounts_or_503(request)
+    try:
+        primary, _client = await photos._primary_and_client(accounts, asset_id)
+        photos.add_link(st.conn, primary["id"], body.url)
+        return await photos.load(accounts, st.conn, st.cfg.sync_immich, asset_id, await _place_rows(request))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except SyncError as exc:
+        raise HTTPException(exc.status, exc.detail)
+
+
+@router.delete("/api/photo/{asset_id}/links/{link_id}")
+async def remove_link(request: Request, asset_id: str, link_id: int) -> dict:
+    st = _state(request)
+    accounts = _accounts_or_503(request)
+    try:
+        primary, _client = await photos._primary_and_client(accounts, asset_id)
+        if not photos.remove_link(st.conn, primary["id"], link_id):
+            raise HTTPException(404, "that link is not on this photo")
+        return await photos.load(accounts, st.conn, st.cfg.sync_immich, asset_id, await _place_rows(request))
+    except SyncError as exc:
+        raise HTTPException(exc.status, exc.detail)
+
+
 class CollectionBody(BaseModel):
     name: str
     description: str = ""

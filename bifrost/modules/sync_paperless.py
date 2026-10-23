@@ -189,6 +189,13 @@ def _doc_gramps_id(doc: dict, field_id: int) -> str | None:
     return None
 
 
+def _media_mime(metadata: dict, doc: dict) -> str:
+    """MIME of the file the media points at, the latest version; Paperless's
+    doc mime_type describes the original, which a new version may not match"""
+    guessed, _ = mimetypes.guess_type(metadata["media_filename"])
+    return guessed or doc.get("mime_type", "application/octet-stream")
+
+
 async def paperless_id_for_media(gramps: GrampsClient, media_gramps_id: str) -> int | None:
     media = await gramps.get_media_by_gramps_id(media_gramps_id.strip())
     if not media:
@@ -337,7 +344,7 @@ async def sync(
             "gramps_id": gramps_id,
             "desc": title,
             "path": gramps_path,
-            "mime": doc.get("mime_type", "application/octet-stream"),
+            "mime": _media_mime(metadata, doc),
             "private": False,
             "change": int(datetime.utcnow().timestamp()),
             "attribute_list": [
@@ -434,8 +441,7 @@ async def sync(
             continue
 
         new_path = f"paperless/{metadata['media_filename']}"
-        guessed, _ = mimetypes.guess_type(metadata["media_filename"])
-        new_mime = guessed or doc.get("mime_type", "application/octet-stream")
+        new_mime = _media_mime(metadata, doc)
         media = await gramps.get_media_by_gramps_id(gramps_id)
         if not media:
             counts["errors"] += 1

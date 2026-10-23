@@ -320,6 +320,14 @@ class TestChecksums:
         (media,) = gramps.media.values()
         assert media["checksum"] == f"md5-{media['handle']}"
 
+    def test_created_media_mime_follows_the_latest_version_not_the_original(self, conn):
+        # the original was a JPEG, the latest version (0000001.pdf) is a PDF
+        gramps = TestMinting.Gramps()
+        self._sync(conn, gramps, [{"id": 1, "title": "New", "custom_fields": [], "tags": [1],
+                                   "mime_type": "image/jpeg"}])
+        (media,) = gramps.media.values()
+        assert (media["path"], media["mime"]) == ("paperless/0000001.pdf", "application/pdf")
+
     def test_a_new_version_at_the_same_path_refreshes_the_checksum(self, conn):
         gramps, docs = self._synced(conn, "old-md5", tracked="old")
         events = self._sync(conn, gramps, docs, versions_only=True)

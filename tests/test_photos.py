@@ -918,6 +918,80 @@ class TestVersionLabels:
         assert sync_immich.link_record("X", CFG, "", "lbl") == {"gramps_id": "X", "gramps_url": "https://gramps.example/media/X", "version_label": "lbl"}
 
 
+class TestLinks:
+    def _stack(self):
+        a = tagged("a1", "Sync/Gramps")
+        a.update({"width": 100, "height": 80, "ownerId": "me-1"})
+        v = tagged("v1")
+        v.update({"width": 100, "height": 80, "ownerId": "me-1"})
+        im = VersionsImmich(assets={"a1": a, "v1": v})
+        stacked(im, "a1", "v1")
+        return im
+
+    def test_add_list_and_remove(self, conn):
+        link = photos.add_link(conn, "a1", "  https://example.org/box-3 ")
+        assert link["url"] == "https://example.org/box-3" and link["added_at"]
+        with pytest.raises(ValueError, match="already"):
+            photos.add_link(conn, "a1", "https://example.org/box-3")
+        photos.add_link(conn, "a1", "http://example.org/other")
+        assert [x["url"] for x in photos.links_for(conn, "a1")] == ["https://example.org/box-3",
+                                                                   "http://example.org/other"]
+        assert photos.links_for(conn, "b1") == []
+        assert photos.remove_link(conn, "b1", link["id"]) is False
+        assert photos.remove_link(conn, "a1", link["id"]) is True
+        assert photos.remove_link(conn, "a1", link["id"]) is False
+        assert [x["url"] for x in photos.links_for(conn, "a1")] == ["http://example.org/other"]
+
+    @pytest.mark.parametrize("url", ["", "example.org/x", "ftp://example.org", "https://a b",
+                                     "https://" + "x" * photos.LINK_MAX])
+    def test_refusals(self, conn, url):
+        with pytest.raises(ValueError):
+            photos.add_link(conn, "a1", url)
+        assert photos.links_for(conn, "a1") == []
+
+    def test_links_are_in_the_record_and_follow_the_main_image(self, conn):
+        im = self._stack()
+        photos.add_link(conn, "a1", "https://example.org/a")
+        photos.add_link(conn, "a1", "https://example.org/shared")
+        photos.add_link(conn, "v1", "https://example.org/shared")
+        rec = run(photos.load([im], conn, CFG, "a1"))
+        assert [x["url"] for x in rec["links"]] == ["https://example.org/a", "https://example.org/shared"]
+        run(photos.promote([im], conn, CFG, FakeGramps(), "a1", "v1", redraw_faces=False))
+        rec = run(photos.load([im], conn, CFG, "v1"))
+        assert [x["url"] for x in rec["links"]] == ["https://example.org/shared", "https://example.org/a"]
+        assert photos.links_for(conn, "a1") == []
+
+    def test_api(self, conn):
+        from types import SimpleNamespace
+        import httpx
+        from fastapi import FastAPI
+        from bifrost.web.routes import photos as photos_routes
+        app = FastAPI()
+        app.include_router(photos_routes.router)
+        app.state.conn = conn
+        app.state.cfg = SimpleNamespace(sync_immich=CFG)
+        app.state.immich_accounts = [self._stack()]
+        app.state.gramps = FakeGramps()
+        app.state.caches = {}
+
+        def call(method, url, **kw):
+            async def go():
+                async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://b") as c:
+                    return await c.request(method, url, **kw)
+            return asyncio.run(go())
+
+        r = call("POST", "/photos/api/photo/a1/links", json={"url": "https://example.org/x"})
+        assert r.status_code == 200, r.text
+        [link] = r.json()["links"]
+        assert link["url"] == "https://example.org/x"
+        r = call("POST", "/photos/api/photo/a1/links", json={"url": "x"})
+        assert r.status_code == 400 and "http" in r.json()["detail"]
+        assert call("POST", "/photos/api/photo/v1/links", json={"url": "https://example.org/y"}).status_code == 400
+        assert call("DELETE", f"/photos/api/photo/a1/links/{link['id'] + 1}").status_code == 404
+        r = call("DELETE", f"/photos/api/photo/a1/links/{link['id']}")
+        assert r.status_code == 200 and r.json()["links"] == []
+
+
 class TestAlbumImport:
     def test_import_makes_an_ordered_collection_of_main_images(self, conn):
         a, v, b, c = tagged("a1", desc="A"), tagged("v1"), tagged("b1", desc="B"), tagged("c1", desc="C")

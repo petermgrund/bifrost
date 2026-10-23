@@ -11,6 +11,7 @@
   import CollectionsTab from './CollectionsTab.svelte';
   import DetailsTab from './DetailsTab.svelte';
   import Lightbox from './Lightbox.svelte';
+  import LinksTab from './LinksTab.svelte';
   import VersionsTab from './VersionsTab.svelte';
 
   let { assetId, onClose } = $props();
@@ -40,11 +41,13 @@
     if (!rec) return [];
     const versions = rec.versions?.members?.length || 0;
     const cols = rec.collections?.length || 0;
+    const links = rec.links?.length || 0;
     return [
       { id: 'details', label: 'Details' },
       { id: 'versions', label: versions > 1 ? `Versions (${versions})` : 'Versions' },
       { id: 'people', label: rec.people.length ? `People (${rec.people.length})` : 'People' },
       { id: 'collections', label: cols ? `Collections (${cols})` : 'Collections' },
+      { id: 'links', label: links ? `Links (${links})` : 'Links' },
     ];
   });
 
@@ -305,6 +308,36 @@
     }
   }
 
+  async function addLink(url) {
+    if (!rec || busy) return false;
+    busy = 'link';
+    status = { kind: 'busy', msg: 'Adding the link' };
+    try {
+      applyRecord(await post(`/photos/api/photo/${rec.asset_id}/links`, { url }), null, true);
+      succeed('Link added');
+      return true;
+    } catch (e) {
+      fail(e);
+      return false;
+    } finally {
+      busy = '';
+    }
+  }
+
+  async function removeLink(l) {
+    if (!rec || busy) return;
+    busy = 'link';
+    status = { kind: 'busy', msg: 'Removing the link' };
+    try {
+      applyRecord(await del(`/photos/api/photo/${rec.asset_id}/links/${l.id}`), null, true);
+      succeed('Link removed');
+    } catch (e) {
+      fail(e);
+    } finally {
+      busy = '';
+    }
+  }
+
   function mainAsVersion(r) {
     const main = (r.versions?.members || []).find((m) => m.is_primary);
     return main || { asset_id: r.asset_id, filename: r.filename, width: r.width, height: r.height, label: r.label };
@@ -432,6 +465,9 @@
               </Tabs.Content>
               <Tabs.Content value="collections" class="immich-scrollbar -mx-1 min-h-0 flex-1 overflow-y-auto px-1 pt-4">
                 <CollectionsTab {rec} {busy} onAdd={addToCollection} onRemove={removeFromCollection} onGo={onClose} />
+              </Tabs.Content>
+              <Tabs.Content value="links" class="immich-scrollbar -mx-1 min-h-0 flex-1 overflow-y-auto px-1 pt-4">
+                <LinksTab {rec} {busy} onAdd={addLink} onRemove={removeLink} />
               </Tabs.Content>
             </Tabs.Root>
           </div>

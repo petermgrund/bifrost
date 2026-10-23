@@ -12,7 +12,7 @@ Your family-tree data itself always lives in Gramps and the source systems. Bifr
 
 # Features
 
-* Sync Immich photos into Gramps as media objects. Use Tags in Immich to mark a photo for sync and define a fuzzy date (like about 1920 or before June 1955).
+* Sync Immich photos into Gramps as media objects, and attach web links to a photo. Use Tags in Immich to mark a photo for sync and define a fuzzy date (like about 1920 or before June 1955).
 * Sync documents in Paperless-ngx to Gramps Web as media objects, and keep their versions, titles, dates, and transcription text up to date.
 * Link Immich's face recognition to Gramps people by pairing each recognized face with its Gramps person once. Then, every synced photo gets face boxes in Gramps.
 * Old handwriting and faded print often defeat regular OCR. Bifrost sends the page to an AI model and writes the transcription back into Paperless and Gramps.
@@ -44,7 +44,7 @@ Read-only JSON for what only Bifrost holds. `/docs` lists every endpoint.
 | `/api/v1/pinpoint/{pinpoint}` | The cells a pinpoint like `69T5AU.L2.C6` points at: values, translations, linked people, and their place on the page |
 | `/api/v1/pid/{pid}` | A document's tables and page notes |
 | `/api/v1/code/{code}` | A code's Codes ledger entry: description, location, parent and children, pencilings, scans, history |
-| `/api/v1/export` | Everything above plus photo collections and Gramps-Immich person links, as one file |
+| `/api/v1/export` | Everything above plus photo collections, photo links and Gramps-Immich person links, as one file |
 
 # Feature Requests
 

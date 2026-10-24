@@ -63,7 +63,7 @@ class GrampsClient:
             self._token = token
 
     async def _request(
-        self, method: str, path: str, ok_404: bool = False, ok_409: bool = False, **kwargs
+        self, method: str, path: str, ok_404: bool = False, **kwargs
     ) -> httpx.Response:
         await self._ensure_token()
         headers = kwargs.pop("headers", {}) or {}
@@ -81,20 +81,9 @@ class GrampsClient:
             )
         if resp.status_code == 404 and ok_404:
             return resp
-        if resp.status_code == 409 and ok_409:
-            return resp
         if resp.status_code >= 400:
             raise GrampsError(f"{method} {path} → {resp.status_code}: {resp.text[:500]}")
         return resp
-
-    async def page_of(self, path: str, page: int, page_size: int = 200,
-                      **params) -> tuple[list[dict], int]:
-        """One page of a listing plus the total count"""
-        resp = await self._request(
-            "GET", path, params={"pagesize": page_size, "page": page, **params})
-        items = resp.json()
-        items = items if isinstance(items, list) else []
-        return items, int(resp.headers.get("X-Total-Count") or len(items))
 
     async def _paged(self, path: str, page_size: int = 200, **params) -> list[dict]:
         items: list[dict] = []
@@ -136,13 +125,6 @@ class GrampsClient:
         resp = await self._request("GET", "/people/", params=params)
         items = resp.json()
         return items if isinstance(items, list) else []
-
-    async def person_profile(self, handle: str) -> dict | None:
-        """One person with its profile, or None when Gramps has no such handle"""
-        resp = await self._request(
-            "GET", f"/people/{handle}", ok_404=True,
-            params={"profile": "self", "keys": "handle,gramps_id,profile,media_list"})
-        return None if resp.status_code == 404 else resp.json()
 
     async def person_photo(self, handle: str, size: int = 64) -> tuple[bytes, str] | None:
         """The person's first picture as a square thumbnail, cropped to its region"""
@@ -223,31 +205,6 @@ class GrampsClient:
             json=media_obj, headers={"Content-Type": "application/json"},
         )
         return resp.json()
-
-    async def upload_media(self, content: bytes, mime: str) -> str:
-        """Upload a file as a new media object; its handle"""
-        resp = await self._request(
-            "POST", "/media/", content=content, headers={"Content-Type": mime})
-        for t in resp.json() or []:
-            if t.get("_class") == "Media" and t.get("type") == "add":
-                return t["handle"]
-        raise GrampsError("POST /media/ answered without a new media object")
-
-    async def replace_media_file(self, handle: str, content: bytes, mime: str) -> bool:
-        """Swap a media object's file for new content, keeping its handle; False when the content is unchanged"""
-        resp = await self._request(
-            "PUT", f"/media/{handle}/file", ok_409=True,
-            content=content, headers={"Content-Type": mime})
-        return resp.status_code != 409
-
-    async def find_media_by_checksum(self, checksum: str) -> list[dict]:
-        """Media objects whose file has this MD5, each with its backlinks"""
-        resp = await self._request(
-            "GET", "/media/",
-            params={"gql": f'checksum="{checksum}"', "backlinks": "true",
-                    "keys": "handle,gramps_id,mime,backlinks"})
-        items = resp.json()
-        return items if isinstance(items, list) else []
 
     async def media_md5(self, handle: str) -> str:
         """MD5 of the file Gramps serves for a media object, the value Gramps keeps as its checksum"""

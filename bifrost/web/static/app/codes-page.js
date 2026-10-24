@@ -5,17 +5,14 @@ const PAGE_SIZE = 25;
 const API = '/codes/api';
 
 const FILTERS = [
-  ['all', 'All'], ['reserved', 'Reserved'], ['penciled', 'Penciled'],
-  ['in use', 'In use'], ['withdrawn', 'Withdrawn'], ['attention', 'Needs attention'],
+  ['all', 'All'], ['reserved', 'Reserved'], ['in use', 'In use'],
+  ['withdrawn', 'Withdrawn'], ['attention', 'Needs attention'],
 ];
 const STATUS_CHIP = {
   reserved: ['', 'Reserved'],
-  penciled: ['secondary-container', 'Penciled'],
   'in use': ['primary-container', 'In use'],
   withdrawn: ['surface-variant', 'Withdrawn'],
 };
-const PENCIL_HELP = 'Pencil the code on the item: on the back of a photograph, on a document’s folder, '
-  + 'or inside the back cover of an album or scrapbook. Never on an album page.';
 const COUNTS = Array.from({ length: 20 }, (_, i) => i + 1);
 
 const pad = (n) => String(n).padStart(2, '0');
@@ -66,7 +63,6 @@ class CodesPage extends BifrostElement {
     q: { state: true },
     filter: { state: true },
     page: { state: true },
-    busy: { state: true },
     toast: { state: true },
     dlg: { state: true },
     target: { state: true },
@@ -88,7 +84,6 @@ class CodesPage extends BifrostElement {
     this.q = '';
     this.filter = 'all';
     this.page = 0;
-    this.busy = '';
     this.toast = null;     // { msg, failed } for the snackbar
     this.dlg = null;       // 'new' | 'edit' | 'withdraw'
     this.target = null;    // the row being edited or withdrawn
@@ -153,24 +148,6 @@ class CodesPage extends BifrostElement {
   setFilter(f) { this.filter = f; this.page = 0; }
 
   // ---- row actions
-
-  async pencil(code, fromDialog = false) {
-    this.busy = code;
-    try {
-      const r = await post(`${API}/${encodeURIComponent(code)}/penciled`);
-      if (fromDialog && this.minted) {
-        this.minted = this.minted.map((m) => (m.code === code ? r.item : m));
-      } else {
-        this.say(`${code} marked penciled`);
-      }
-      await this.load();
-    } catch (e) {
-      if (fromDialog) this.formError = why(e);
-      else this.say(why(e), true);
-    } finally {
-      this.busy = '';
-    }
-  }
 
   async copy(code) {
     let ok = false;
@@ -247,8 +224,6 @@ class CodesPage extends BifrostElement {
   }
 
   removeInstance(code, id) { this.popupCall(code, `/instances/${id}`, { method: 'DELETE' }); }
-
-  crossOut(code, id) { this.popupCall(code, `/pencilings/${id}/cross-out`); }
 
   openWithdraw(r) {
     this.target = r;
@@ -572,27 +547,6 @@ class CodesPage extends BifrostElement {
       </nav>`}`;
   }
 
-  pencilingsTable(r) {
-    return html`
-      <h6 class="small">Penciled</h6>
-      ${r.pencilings.length ? html`<table>
-        <tbody>
-          ${r.pencilings.map((p) => html`<tr>
-            <td class="min secondary-text">#${p.n}</td>
-            <td>${p.crossed ? html`<s>${minute(p.at)}</s>` : minute(p.at)}</td>
-            <td class="min">${p.crossed ? nothing : html`<button class="circle transparent small"
-                aria-label="Cross out penciling #${p.n}" ?disabled=${this.adding}
-                @click=${() => this.crossOut(r.code, p.id)}><i>strikethrough_s</i>
-                <div class="tooltip left">Cross out</div></button>`}</td>
-          </tr>`)}
-        </tbody>
-      </table>` : html`<p class="secondary-text">Not penciled yet</p>`}
-      ${r.status === 'withdrawn' ? nothing : html`<nav>
-        ${btn(r.pencilings.length ? 'Pencil again' : 'Mark penciled', this.adding,
-          () => this.popupCall(r.code, '/penciled'), 'border')}
-      </nav>`}`;
-  }
-
   history(r) {
     if (!r.history.length) return nothing;
     return html`
@@ -610,14 +564,11 @@ class CodesPage extends BifrostElement {
   actions(r) {
     if (!r.in_ledger) return nothing;
     const withdrawn = r.status === 'withdrawn';
-    const busy = this.busy === r.code;
     const act = (icon, tip, name, onClick) => html`<button class="circle transparent small"
-        aria-label=${name} ?disabled=${busy} @click=${onClick}>
+        aria-label=${name} @click=${onClick}>
         <i>${icon}</i><div class="tooltip left">${tip}</div></button>`;
     const empty = html`<span></span>`;
     return html`<div class="codes-actions">
-      ${!withdrawn && r.type !== 'document' ? act('edit_note', r.penciled ? 'Pencil again' : 'Mark penciled',
-        `Mark ${r.code} penciled`, () => this.pencil(r.code)) : empty}
       ${r.type
         ? act('info', 'Details', `Details of ${r.code}`, () => this.openEdit(r))
         : act('edit', 'Edit', `Edit ${r.code}`, () => this.openEdit(r))}
@@ -661,17 +612,12 @@ class CodesPage extends BifrostElement {
     const list = this.minted || [];
     return html`
       <h5 id="codes-dialog-title">${list.length === 1 ? 'Your new code' : `Your ${list.length} new codes`}</h5>
-      <p>${PENCIL_HELP}</p>
       ${list.map((m) => html`
         <nav class="wrap">
           <h3 class="mono max" aria-label=${m.code.split('').join(' ')}>${m.code}</h3>
           <button class="circle transparent" aria-label="Copy ${m.code}" @click=${() => this.copy(m.code)}>
             <i>${this.copied === m.code ? 'check' : 'content_copy'}</i></button>
           ${this.copied === m.code ? html`<span class="small-text" role="status">Copied</span>` : nothing}
-          ${m.penciled
-            ? html`<span class="chip secondary-container"><i>check</i><span>Penciled</span></span>`
-            : btn(this.busy === m.code ? 'Saving...' : 'Mark penciled', this.busy === m.code,
-              () => this.pencil(m.code, true), 'border')}
         </nav>
         ${m.note ? html`<p class="small-text secondary-text">${m.note}</p>` : nothing}
         ${field('Notes (optional)', this.mintNotes[m.code] ?? '',
@@ -705,7 +651,6 @@ class CodesPage extends BifrostElement {
           @error=${() => { this.thumbGone = true; }}>` : nothing}
       </div>
       ${this.instancesTable(r)}
-      ${r.type === 'document' ? nothing : this.pencilingsTable(r)}
       ${this.history(r)}
       ${this.formError ? html`<p>${statusLine('error', this.formError)}</p>` : nothing}
       <nav>

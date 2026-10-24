@@ -19,7 +19,7 @@ def _scan_tag(request: Request) -> str:
 
 @router.get("")
 async def reprocess_page(request: Request):
-    return RedirectResponse(url="/#reprocess")
+    return RedirectResponse(url="/#other")
 
 
 @router.get("/api/config")

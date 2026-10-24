@@ -997,7 +997,7 @@ async def cards_for(accounts: list[ImmichClient], conn: sqlite3.Connection,
     return out
 
 
-async def search(accounts: list[ImmichClient], conn: sqlite3.Connection, cfg: SyncImmichConfig,
+async def search(accounts: list[ImmichClient], conn: sqlite3.Connection,
                  mode: str = "recent", q: str = "", person: str = "", page: int = 1,
                  browse: list[ImmichClient] | None = None) -> dict:
     """One page of photo cards, stack variants folded into their main image"""
@@ -1029,13 +1029,7 @@ async def search(accounts: list[ImmichClient], conn: sqlite3.Connection, cfg: Sy
     else:
         for client in (browse if browse is not None else accounts):
             try:
-                if mode == "tagged":
-                    tag = await client.find_tag(cfg.sync_tag)
-                    if tag is None:
-                        continue
-                    pages = [await client.search_assets(page=page, size=PAGE_SIZE, tag_id=tag["id"],
-                                                        person_id=person or None)]
-                elif q:
+                if q:
                     pages = [await client.search_assets(page=page, size=PAGE_SIZE, description=q,
                                                         person_id=person or None),
                              await client.search_assets(page=page, size=PAGE_SIZE, filename=q,

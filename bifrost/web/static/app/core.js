@@ -155,7 +155,6 @@ export class BifrostElement extends LitElement {
 
 const ACTION_WORDS = {
   created: ['create', 'created', 'item'],
-  generated: ['generate', 'generated', 'boundary', 'boundaries'],
   versions_updated: ['update', 'updated', 'version'],
   titles_updated: ['update', 'updated', 'title'],
   dates_updated: ['set', 'set', 'date'],
@@ -171,7 +170,6 @@ const ACTION_WORDS = {
   uploaded: ['upload', 'uploaded', 'new version', 'new versions'],
   id_tags_written: ['write', 'wrote', 'ID tag', 'ID tags'],
   faces_linked: ['link', 'linked', 'face'],
-  citations_linked: ['attach', 'attached', 'citation'],
   boxes_added: ['add', 'added', 'face box', 'face boxes'],
 };
 const QUIET = new Set(['skipped', 'tx_skipped', 'baselined', 'errors', 'unreadable', 'unmatched', 'in_place', 'unsynced']);

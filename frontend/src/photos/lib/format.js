@@ -22,6 +22,7 @@ export const MONTH_OPTIONS = [{ value: '0', label: '—' }, ...MONTHS.map((label
 
 export const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 export const LINK_RE = /^https?:\/\/\S+$/i;
+export const shortLink = (url, max = 25) => (url.length > max ? `${url.slice(0, max)}…` : url);
 
 export function dateParts(d) {
   return {

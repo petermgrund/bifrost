@@ -1,4 +1,4 @@
-"""Codes page + API: mint, claim, pencil, describe and withdraw GDA codes"""
+"""Codes page + API: mint, claim, describe and withdraw GDA codes"""
 
 from __future__ import annotations
 
@@ -157,7 +157,7 @@ async def claim(request: Request, body: ClaimBody) -> dict:
 
 @router.get("/api/open")
 async def open_codes(request: Request) -> dict:
-    """Reserved and penciled codes a photo can take when it is synced"""
+    """Reserved codes a photo can take when it is synced"""
     st = _state(request)
     titles, gramps_error = await _live(st)
     if titles is None:
@@ -175,26 +175,6 @@ async def export_csv(request: Request) -> Response:
     name = f"gda-codes-{date.today().isoformat()}.csv"
     return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
                     headers={"Content-Disposition": f'attachment; filename="{name}"'})
-
-
-@router.post("/api/{code}/penciled")
-async def penciled(request: Request, code: str) -> dict:
-    st = _state(request)
-    try:
-        code = codes.mark_penciled(st.conn, code)
-    except codes.CodeError as exc:
-        raise _refuse(exc)
-    return {"item": _item(st, code)}
-
-
-@router.post("/api/{code}/pencilings/{penciling_id}/cross-out")
-async def cross_out(request: Request, code: str, penciling_id: int) -> dict:
-    st = _state(request)
-    try:
-        code = codes.cross_out_penciling(st.conn, code, penciling_id)
-    except codes.CodeError as exc:
-        raise _refuse(exc)
-    return {"item": _item(st, code)}
 
 
 class WithdrawBody(BaseModel):

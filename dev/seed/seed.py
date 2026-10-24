@@ -500,7 +500,6 @@ def seed_paperless(docs: list[dict]) -> dict:
         "Gramps ID": p.get_or_create_field("Gramps ID", "string"),
         "Gramps URL": p.get_or_create_field("Gramps URL", "url"),
         "Date qualifier": p.get_or_create_field("Date qualifier", "select", DATE_QUALIFIERS),
-        "Source URL": p.get_or_create_field("Source URL", "url"),
         "Date meaning": p.get_or_create_field("Date meaning", "select", DATE_MEANINGS),
     }
     for name in DOCUMENT_TYPES:
@@ -819,7 +818,6 @@ def write_config(gramps: dict, paperless: dict | None, immich: dict | None) -> N
                 "gramps_id_field_id": paperless["fields"]["Gramps ID"] if paperless else None,
                 "gramps_url_field_id": paperless["fields"]["Gramps URL"] if paperless else None,
                 "date_qualifier_field_id": paperless["fields"]["Date qualifier"] if paperless else None,
-                "source_url_field_id": paperless["fields"]["Source URL"] if paperless else None,
                 "transcription_tag_id": paperless["tags"]["transcription"] if paperless else None,
                 "ocr_tag": "Gemini OCR",
             },

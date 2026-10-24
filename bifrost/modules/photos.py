@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import re
 import sqlite3
 from datetime import date, datetime, timezone
+from typing import AsyncIterator
 
+from ..core import settings as ui_settings
 from ..core.clients import GrampsClient, ImmichClient
 from ..core.clients.immich import ImmichError
 from ..core.config import SyncImmichConfig
-from . import photo_collections
+from ..core.events import SyncEvent
+from . import codes, photo_collections
 from . import sync_immich as si
-from .sync_immich import SyncError
+from .sync_immich import SyncError, compose_description
 from .sync_paperless import format_gramps_date
 
 PAGE_SIZE = 24
@@ -38,6 +40,9 @@ CANONICAL = {
 _DATE_RE = re.compile(r"^\s*(\d{4})(?:-(\d{1,2})(?:-(\d{1,2}))?)?\s*$")
 _LINK_RE = re.compile(r"^https?://\S+$", re.IGNORECASE)
 LINK_MAX = 2000
+EMPTY_DATE = {"_class": "Date", "dateval": [0, 0, 0, False], "modifier": 0, "quality": 0, "text": ""}
+_MODIFIER_NAMES = {v: k for k, v in si._MODIFIERS.items()}
+_QUALITY_NAMES = {v: k for k, v in si._QUALITIES.items()}
 
 
 def _now() -> str:
@@ -87,6 +92,51 @@ def date_display(form: dict | None) -> str:
     return format_gramps_date(gramps_date(form)) if form else ""
 
 
+def gramps_date_text(d: dict | None) -> str:
+    """A Gramps date as Gramps Web shows it, text-only dates included"""
+    if not d:
+        return ""
+    if d.get("modifier") == si._MODIFIERS["textonly"] or format_gramps_date(d) == "(none)":
+        return (d.get("text") or "").strip()
+    return format_gramps_date(d)
+
+
+def date_from_gramps(d: dict | None) -> tuple[dict | None, str | None]:
+    """(editor form, None) for a Gramps date the form can hold, (None, its text) for one it cannot,
+    (None, None) for no date"""
+    dv = list((d or {}).get("dateval") or [])
+    text = gramps_date_text(d)
+    if not text:
+        return None, None
+    modifier, quality = d.get("modifier") or 0, d.get("quality") or 0
+    if (len(dv) < 4 or dv[3] or d.get("calendar") or d.get("newyear") or dv[2] <= 0
+            or modifier not in (0, 1, 2, 3, 4) or quality not in _QUALITY_NAMES):
+        return None, text
+    form = {"quality": _QUALITY_NAMES[quality]}
+    if modifier == 4:
+        if len(dv) < 8 or dv[7] or any(dv[i] for i in (0, 1, 4, 5)) or not 0 <= dv[6] - dv[2] <= SPAN_MAX:
+            return None, text
+        start, stop = dv[2], dv[6]
+        form.update({"value": f"{start:04d}-01-01", "precision": "year"})
+        if start % 10 == 0 and stop == start + 9:
+            form["modifier"] = "decade"
+        else:
+            form.update({"modifier": "span", "minus": 0, "plus": stop - start})
+    else:
+        day, month, year = dv[0], dv[1], dv[2]
+        name = _MODIFIER_NAMES[modifier]
+        if name == "about" and day:
+            return None, text
+        try:
+            value = date(year, month or 1, day or 1).isoformat()
+        except ValueError:
+            return None, text
+        form.update({"value": value, "modifier": name,
+                     "precision": "exact" if day else "month" if month else "year"})
+    form["display"] = date_display(form)
+    return form, None
+
+
 def date_form(asset: dict) -> dict | None:
     """The editor's date fields from an asset's date and tags; None until a date is curated"""
     exif = asset.get("exifInfo") or {}
@@ -126,14 +176,25 @@ def date_tags(form: dict) -> set[str]:
     return tags
 
 
+def validate_link(url: str) -> str:
+    url = (url or "").strip()
+    if not _LINK_RE.match(url):
+        raise ValueError("That is not a link starting with http:// or https://.")
+    if len(url) > LINK_MAX:
+        raise ValueError(f"That is too long (at most {LINK_MAX} characters).")
+    return url
+
+
 def validate_form(form: dict) -> dict:
     """Normalize a save body; ValueError for bad values"""
-    sync = form.get("sync") or {}
+    change = form.get("change")
     out = {
         "title": (form.get("title") or "").strip(),
         "notes": (form.get("notes") or "").strip(),
         "place_gramps_id": (form.get("place_gramps_id") or "").strip() or None,
-        "sync": {k: bool(sync.get(k)) for k in ("media", "title", "date", "note")},
+        "links": list(dict.fromkeys(validate_link(u) for u in form.get("links") or [])),
+        "change": int(change) if change is not None else None,
+        "gramps_id": (form.get("gramps_id") or "").strip() or None,
         "date": None,
     }
     d = form.get("date")
@@ -172,10 +233,6 @@ def spelled(value: str, cfg: SyncImmichConfig) -> str:
     return "/".join(seg[:1].upper() + seg[1:] for seg in value.split("/"))
 
 
-def compose_description(title: str, gramps_url: str | None) -> str:
-    return f"{title}\n{gramps_url}" if gramps_url else title
-
-
 async def apply_tags(client: ImmichClient, asset_id: str, add: dict[str, str],
                      remove: set[str]) -> None:
     """add maps lower-cased values to their spelling, remove holds lower-cased values"""
@@ -190,63 +247,6 @@ async def apply_tags(client: ImmichClient, asset_id: str, add: dict[str, str],
         tag = index.get(low)
         if tag:
             await client.untag_asset(tag["id"], asset_id)
-
-
-def set_note(conn: sqlite3.Connection, asset_id: str, gramps_id: str | None, text: str) -> None:
-    text = (text or "").strip()
-    with conn:
-        if not text:
-            conn.execute("UPDATE photo_notes SET text='', updated_at=? "
-                         "WHERE asset_id=? AND note_handle IS NOT NULL", (_now(), asset_id))
-            conn.execute("DELETE FROM photo_notes WHERE asset_id=? AND note_handle IS NULL",
-                         (asset_id,))
-            return
-        conn.execute(
-            "INSERT INTO photo_notes (asset_id, gramps_id, text, updated_at) VALUES (?, ?, ?, ?) "
-            "ON CONFLICT(asset_id) DO UPDATE SET text=excluded.text, "
-            "gramps_id=COALESCE(excluded.gramps_id, photo_notes.gramps_id), "
-            "updated_at=excluded.updated_at",
-            (asset_id, gramps_id, text, _now()))
-
-
-def mark_dated(conn: sqlite3.Connection, asset_id: str, dated: bool) -> None:
-    with conn:
-        if dated:
-            conn.execute("INSERT OR REPLACE INTO dated_photos (asset_id, dated_at) VALUES (?, ?)",
-                         (asset_id, _now()))
-        else:
-            conn.execute("DELETE FROM dated_photos WHERE asset_id=?", (asset_id,))
-
-
-def is_dated(conn: sqlite3.Connection, asset_id: str) -> bool:
-    return conn.execute("SELECT 1 FROM dated_photos WHERE asset_id=?", (asset_id,)).fetchone() is not None
-
-
-def links_for(conn: sqlite3.Connection, asset_id: str) -> list[dict]:
-    """A photo's links, oldest first"""
-    return [dict(r) for r in conn.execute(
-        "SELECT id, url, added_at FROM photo_links WHERE asset_id=? ORDER BY id", (asset_id,))]
-
-
-def add_link(conn: sqlite3.Connection, asset_id: str, url: str) -> dict:
-    """Keep a web link on a photo"""
-    url = (url or "").strip()
-    if not _LINK_RE.match(url):
-        raise ValueError("That is not a link starting with http:// or https://.")
-    if len(url) > LINK_MAX:
-        raise ValueError(f"That is too long (at most {LINK_MAX} characters).")
-    if conn.execute("SELECT 1 FROM photo_links WHERE asset_id=? AND url=?", (asset_id, url)).fetchone():
-        raise ValueError("This photo already has that link.")
-    with conn:
-        cur = conn.execute("INSERT INTO photo_links (asset_id, url, added_at) VALUES (?, ?, ?)",
-                           (asset_id, url, _now()))
-    return dict(conn.execute("SELECT id, url, added_at FROM photo_links WHERE id=?", (cur.lastrowid,)).fetchone())
-
-
-def remove_link(conn: sqlite3.Connection, asset_id: str, link_id: int) -> bool:
-    with conn:
-        cur = conn.execute("DELETE FROM photo_links WHERE id=? AND asset_id=?", (link_id, asset_id))
-    return cur.rowcount > 0
 
 
 def registered_gid(conn: sqlite3.Connection, asset_id: str,
@@ -319,10 +319,9 @@ def _member(m: dict, primary: str | None) -> dict:
 
 def managed_tags(asset: dict, cfg: SyncImmichConfig) -> dict[str, str]:
     """lower-cased value -> spelling of the tags Bifrost keeps identical across versions"""
-    prefixes = ["sync/", "date/"]
-    for prefix in (cfg.id_tag_prefix, cfg.place_tag_prefix):
-        if prefix:
-            prefixes.append(prefix.lower() + "/")
+    prefixes = ["sync/"]
+    if cfg.id_tag_prefix:
+        prefixes.append(cfg.id_tag_prefix.lower() + "/")
     out = {}
     for t in asset.get("tags") or []:
         value = t.get("value") or ""
@@ -333,20 +332,12 @@ def managed_tags(asset: dict, cfg: SyncImmichConfig) -> dict[str, str]:
 
 def version_fields(asset: dict, cfg: SyncImmichConfig) -> dict:
     """The metadata every version of a photo should share"""
-    exif = asset.get("exifInfo") or {}
-    return {"description": (exif.get("description") or "").strip(),
-            "date": (asset.get("localDateTime") or "")[:10],
-            "coords": si.asset_coords(asset),
-            "tags": managed_tags(asset, cfg)}
+    return {"coords": si.asset_coords(asset), "tags": managed_tags(asset, cfg)}
 
 
 def drift(primary: dict, member: dict) -> list[str]:
     """What differs between two version_fields results, main image first"""
     out = []
-    if primary["description"] != member["description"]:
-        out.append("title")
-    if primary["date"] != member["date"]:
-        out.append("date")
     if primary["coords"] and primary["coords"] != member["coords"]:
         out.append("location")
     missing = sorted(v for k, v in primary["tags"].items() if k not in member["tags"])
@@ -425,17 +416,8 @@ async def match_version(client: ImmichClient, cfg: SyncImmichConfig, source: dic
     """Copy the shared metadata from source to target; returns what changed"""
     before = drift(version_fields(source, cfg), version_fields(target, cfg))
     src, dst = version_fields(source, cfg), version_fields(target, cfg)
-    fields: dict = {}
-    if src["description"] != dst["description"]:
-        fields["description"] = src["description"]
-    if src["date"] and src["date"] != dst["date"]:
-        fields["dateTimeOriginal"] = f"{src['date']}T12:00:00.000Z"
     if src["coords"] and src["coords"] != dst["coords"]:
-        fields["latitude"], fields["longitude"] = src["coords"]
-    if fields:
-        await client.update_asset(target["id"], **fields)
-        if "dateTimeOriginal" in fields:
-            await _wait_for_date(client, target["id"], src["date"])
+        await client.update_asset(target["id"], latitude=src["coords"][0], longitude=src["coords"][1])
     add = {k: v for k, v in src["tags"].items() if k not in dst["tags"]}
     remove = {k for k in dst["tags"] if k not in src["tags"]}
     await apply_tags(client, target["id"], add, remove)
@@ -460,9 +442,10 @@ async def _primary_and_client(accounts: list[ImmichClient], asset_id: str) -> tu
     return asset, client
 
 
-async def add_version(accounts: list[ImmichClient], conn: sqlite3.Connection, cfg: SyncImmichConfig,
-                      asset_id: str, new_id: str, place_rows: dict | None = None) -> dict:
-    """Stack another asset under this photo and give it the photo's metadata"""
+async def add_version(gramps: GrampsClient, accounts: list[ImmichClient], conn: sqlite3.Connection,
+                      cfg: SyncImmichConfig, asset_id: str, new_id: str,
+                      place_rows: dict | None = None) -> dict:
+    """Stack another asset under this photo and give it the photo's tags, location and faces"""
     primary, client = await _primary_and_client(accounts, asset_id)
     if new_id == asset_id:
         raise SyncError(400, "that is this photo's main image")
@@ -480,23 +463,23 @@ async def add_version(accounts: list[ImmichClient], conn: sqlite3.Connection, cf
                              "a stack can stand for only one media object")
     if new_gid and not main_gid:
         await client.create_stack([new_id, asset_id] + others)
-        move_identity(conn, asset_id, new_id, prefer_new=True)
+        photo_collections.move_items(conn, asset_id, new_id)
         main_id = new_id
     else:
         await client.create_stack([asset_id] + others + [new_id])
         main_id = asset_id
     await match_all(accounts, client, cfg, conn, main_id, [asset_id, *others, new_id])
-    return await load(accounts, conn, cfg, main_id, place_rows)
+    return await load(gramps, accounts, conn, cfg, main_id, place_rows)
 
 
-async def upload_version(accounts: list[ImmichClient], conn: sqlite3.Connection, cfg: SyncImmichConfig,
-                         asset_id: str, filename: str, data, modified_at: str,
+async def upload_version(gramps: GrampsClient, accounts: list[ImmichClient], conn: sqlite3.Connection,
+                         cfg: SyncImmichConfig, asset_id: str, filename: str, data, modified_at: str,
                          place_rows: dict | None = None) -> tuple[str, dict]:
     """Upload a file to the main image's Immich account and add it as a version"""
     _primary, client = await _primary_and_client(accounts, asset_id)
     new_id = (await client.upload_asset(filename, data, modified_at or _now()))["id"]
     await _wait_for_thumbnail(client, new_id)
-    return new_id, await add_version(accounts, conn, cfg, asset_id, new_id, place_rows)
+    return new_id, await add_version(gramps, accounts, conn, cfg, asset_id, new_id, place_rows)
 
 
 async def _wait_for_thumbnail(client: ImmichClient, asset_id: str,
@@ -508,19 +491,21 @@ async def _wait_for_thumbnail(client: ImmichClient, asset_id: str,
         await asyncio.sleep(pause)
 
 
-async def match_member(accounts: list[ImmichClient], conn: sqlite3.Connection, cfg: SyncImmichConfig,
-                       asset_id: str, member_id: str, place_rows: dict | None = None) -> dict:
+async def match_member(gramps: GrampsClient, accounts: list[ImmichClient], conn: sqlite3.Connection,
+                       cfg: SyncImmichConfig, asset_id: str, member_id: str,
+                       place_rows: dict | None = None) -> dict:
     primary, client = await _primary_and_client(accounts, asset_id)
     _versions, member_ids = await _stack_members(client, primary)
     if member_id not in member_ids or member_id == asset_id:
         raise SyncError(404, "that asset is not a version of this photo")
     member = await si._merged_one(accounts, member_id)
     await match_version(client, cfg, primary, member, conn)
-    return await load(accounts, conn, cfg, asset_id, place_rows)
+    return await load(gramps, accounts, conn, cfg, asset_id, place_rows)
 
 
-async def remove_version(accounts: list[ImmichClient], conn: sqlite3.Connection, cfg: SyncImmichConfig,
-                         asset_id: str, member_id: str, place_rows: dict | None = None) -> dict:
+async def remove_version(gramps: GrampsClient, accounts: list[ImmichClient], conn: sqlite3.Connection,
+                         cfg: SyncImmichConfig, asset_id: str, member_id: str,
+                         place_rows: dict | None = None) -> dict:
     """Unstack a version; its sync and ID tags go too, so no second media object gets minted"""
     primary, client = await _primary_and_client(accounts, asset_id)
     if member_id == asset_id:
@@ -534,7 +519,7 @@ async def remove_version(accounts: list[ImmichClient], conn: sqlite3.Connection,
              if k == cfg.sync_tag.lower()
              or (cfg.id_tag_prefix and k.startswith(cfg.id_tag_prefix.lower() + "/"))}
     await apply_tags(client, member_id, {}, strip)
-    return await load(accounts, conn, cfg, asset_id, place_rows)
+    return await load(gramps, accounts, conn, cfg, asset_id, place_rows)
 
 
 async def clear_face_rects(gramps: GrampsClient, gramps_id: str) -> int:
@@ -567,7 +552,7 @@ async def promote(accounts: list[ImmichClient], conn: sqlite3.Connection, cfg: S
     member = await si._merged_one(accounts, member_id)
     await match_version(client, cfg, primary, member, conn)
     await client.update_stack(primary["stack"]["id"], member_id)
-    move_identity(conn, asset_id, member_id)
+    photo_collections.move_items(conn, asset_id, member_id)
     gid = registered_gid(conn, asset_id, member_ids)
     if redraw_faces and gid:
         await clear_face_rects(gramps, gid)
@@ -620,9 +605,31 @@ async def _stack_members(client: ImmichClient, asset: dict) -> tuple[dict | None
     return versions, [m["id"] for m in members]
 
 
-async def load(accounts: list[ImmichClient], conn: sqlite3.Connection, cfg: SyncImmichConfig,
-               asset_id: str, place_rows: dict[str, dict] | None = None) -> dict:
-    """The editor's record for one asset; a stack variant opens as its main image"""
+def _place_info(gid: str, place_rows: dict | None, place: dict | None = None) -> dict:
+    known = (place_rows or {}).get(gid)
+    name = known["name"] if known else si.place_label(place) if place else gid
+    return {"gramps_id": gid, "name": name, "hierarchy": known["hierarchy"] if known else [],
+            "tagged": bool(known and known.get("tagged")), "known": bool(known)}
+
+
+async def _gramps_side(gramps: GrampsClient, gid: str) -> tuple[dict | None, list[dict], list[dict], str | None]:
+    """(media, its notes, the places whose gallery holds it, error) for a registered photo"""
+    try:
+        media = await gramps.get_media_by_gramps_id(gid, backlinks=True)
+        if media is None:
+            return None, [], [], f"the register points at {gid}, which is not in Gramps"
+        backlinks = media.pop("backlinks", None) or {}
+        notes = await si.media_notes(gramps, media)
+        places = [await gramps.get_place(h) for h in backlinks.get("place") or []]
+    except Exception as exc:  # noqa: BLE001
+        return None, [], [], f"Gramps could not be read: {str(exc)[:200]}"
+    return media, notes, places, None
+
+
+async def load(gramps: GrampsClient, accounts: list[ImmichClient], conn: sqlite3.Connection,
+               cfg: SyncImmichConfig, asset_id: str, place_rows: dict[str, dict] | None = None) -> dict:
+    """The editor's record for one asset, its facts from the Gramps media object once it has one;
+    a stack variant opens as its main image"""
     asset = await si._merged_one(accounts, asset_id)
     main = (asset.get("stack") or {}).get("primaryAssetId")
     if main and main != asset_id:
@@ -653,20 +660,26 @@ async def load(accounts: list[ImmichClient], conn: sqlite3.Connection, cfg: Sync
     suggestions = await _suggestions(client, cfg, asset, member_ids, gid)
     for sg in suggestions:
         sg["gramps_id"] = registered_gid(conn, sg["asset_id"])
-    tagged_date = date_form(asset)
-    dated = is_dated(conn, asset_id)
-    row = si.note_for(conn, asset_id, gid)
-    notes = row["text"] if row else ""
-    digest = hashlib.sha256(notes.strip().encode("utf-8")).hexdigest() if notes.strip() else None
-    place = None
-    place_gid = si.place_tag_value(asset, cfg)
-    if place_gid:
-        known = (place_rows or {}).get(place_gid)
-        place = {"gramps_id": place_gid, "name": known["name"] if known else place_gid,
-                 "hierarchy": known["hierarchy"] if known else [],
-                 "tagged": bool(known and known.get("tagged")), "known": bool(known)}
-    links = si.person_links_map(conn)
-    people = [{"id": p["id"], "name": p.get("name") or "", "linked": p["id"] in links}
+    media, gramps_error, change = None, None, None
+    date_readonly = None
+    places: list[dict] = []
+    if gid:
+        media, notes, holders, gramps_error = await _gramps_side(gramps, gid)
+    if media is not None:
+        title = media.get("desc") or ""
+        date_form_, date_readonly = date_from_gramps(media.get("date"))
+        notes_text = si.note_text(si.first_media_note(notes)).strip()
+        links = si.media_links(media)
+        places = [_place_info(h.get("gramps_id") or "", place_rows, h) for h in holders if h.get("gramps_id")]
+        change = media.get("change")
+    else:
+        date_form_ = None if gramps_error else date_form(asset)
+        notes_text, links = ("", []) if gramps_error else si.leftover_rows(conn, asset_id)
+        place_gid = None if gramps_error else si.place_tag_value(asset, cfg)
+        if place_gid:
+            places = [_place_info(place_gid, place_rows)]
+    people_links = si.person_links_map(conn)
+    people = [{"id": p["id"], "name": p.get("name") or "", "linked": p["id"] in people_links}
               for p in asset.get("people") or [] if p.get("id")]
     return {
         "asset_id": asset_id,
@@ -683,27 +696,21 @@ async def load(accounts: list[ImmichClient], conn: sqlite3.Connection, cfg: Sync
         "title": title,
         "link_line": link_line,
         "label": labels.get(asset_id, ""),
-        "date": tagged_date if gid or dated else None,
-        "dated": dated,
-        "tagged_date": tagged_date,
+        "date": date_form_,
+        "date_readonly": date_readonly,
         "immich_date": (asset.get("localDateTime") or "")[:10],
-        "place": place,
+        "place": places[0] if len(places) == 1 else None,
+        "places": places,
         "tags": sorted(tags),
-        "sync": {"media": cfg.sync_tag.lower() in tags,
-                 "title": si.TAG_SYNC_DESCRIPTION in tags,
-                 "date": si.TAG_SYNC_DATE in tags,
-                 "note": cfg.note_sync_tag.lower() in tags,
-                 "location": si.TAG_SYNC_LOCATION in tags},
-        "gramps": ({"gramps_id": gid,
-                    "url": f"{cfg.gramps_public_url}/media/{gid}" if cfg.gramps_public_url else None}
-                   if gid else None),
-        "notes": notes,
-        "note_synced": bool(row and row["note_handle"] and digest and row["synced_hash"] == digest),
+        "gramps": {"gramps_id": gid, "url": si.gramps_url(cfg, gid)} if gid else None,
+        "gramps_error": gramps_error,
+        "change": change,
+        "notes": notes_text,
         "people": people,
         "versions": versions,
         "suggestions": suggestions,
         "collections": photo_collections.for_asset(conn, asset_id),
-        "links": links_for(conn, asset_id),
+        "links": [{"url": u} for u in links],
     }
 
 
@@ -720,10 +727,10 @@ async def pending_changes(gramps: GrampsClient, accounts: list[ImmichClient],
     if media is None:
         return ["media"]
     changes: set[str] = set()
-    async for ev in si.update_synced(gramps, accounts, conn, cfg, gid, asset, media, None,
+    async for ev in si.update_synced(gramps, accounts, conn, cfg, gid, asset, media,
                                      False, None, si.new_counts()):
         if ev.action == "would_update":
-            changes |= set((ev.data or {}).get("cols") or [ev.entity])
+            changes |= set((ev.data or {}).get("cols") or [ev.entity]) - {"description"}
     if client:
         async for ev in si.link_asset_faces(gramps, client, asset, asset_id, media["handle"], gid,
                                             si.person_links_map(conn), si.new_face_results(),
@@ -733,73 +740,149 @@ async def pending_changes(gramps: GrampsClient, accounts: list[ImmichClient],
     return sorted(changes)
 
 
-async def save(accounts: list[ImmichClient], conn: sqlite3.Connection, cfg: SyncImmichConfig,
-               asset_id: str, form: dict, link_on: bool,
-               place_rows: dict[str, dict] | None = None) -> dict:
-    """Write the editor's form into Immich (fields, tags, metadata) and Bifrost's notes"""
+async def move_place(gramps: GrampsClient, media_handle: str, old: dict | None, new: dict | None) -> bool:
+    """Take the media out of old's gallery and put it in new's; False when nothing moved"""
+    if (old or {}).get("handle") == (new or {}).get("handle"):
+        return False
+    if old is not None:
+        refs = old.get("media_list") or []
+        old["media_list"] = [r for r in refs if r.get("ref") != media_handle]
+        await gramps.update_place(old["handle"], old)
+    if new is not None:
+        await si._link_place(gramps, new, media_handle)
+    return True
+
+
+def _item(entity: str, action: str, asset_id: str, gid: str | None, title: str, **extra) -> SyncEvent:
+    return SyncEvent(kind="item", entity=entity, action=action, source_id=asset_id,
+                     gramps_id=gid, title=title, **extra)
+
+
+async def save(gramps: GrampsClient, accounts: list[ImmichClient], conn: sqlite3.Connection,
+               cfg: SyncImmichConfig, asset_id: str, form: dict) -> AsyncIterator[SyncEvent]:
+    """Write the editor's form onto the Gramps media object, adding the photo to Gramps on its first save,
+    then copy the title into Immich and finish the sync work"""
     form = validate_form(form)
+    link_on = ui_settings.get_description_link(conn)
     asset = await si._merged_one(accounts, asset_id)
     stack = asset.get("stack") or {}
     if stack.get("primaryAssetId") and stack["primaryAssetId"] != asset_id:
         raise SyncError(400, "this asset is a stack variant, edit the stack's main image")
     client, _err = await si.owner_client(accounts, asset)
-    own = si.owner_tag_values(asset)
-    if own is None:
-        raise SyncError(400, "cannot tell which Immich account owns this asset, so its tags cannot be edited")
     _versions, member_ids = await _stack_members(client, asset)
     gid = registered_gid(conn, asset_id, member_ids)
-    if not gid and not form["sync"]["media"]:
-        form["sync"] = {k: False for k in form["sync"]}
+    current_desc = ((asset.get("exifInfo") or {}).get("description") or "").strip()
+    filled = any([form["title"], form["date"], form["place_gramps_id"], form["notes"], form["links"]])
+    warning = None
 
-    wanted: dict[str, str] = {}
+    async def copy_title(title: str, gid: str | None) -> None:
+        nonlocal warning
+        wanted = compose_description(title, si.gramps_url(cfg, gid) if link_on else None)
+        if wanted == current_desc:
+            return
+        try:
+            await client.update_asset(asset_id, description=wanted)
+        except ImmichError as exc:
+            warning = f"Immich description not updated: {exc.message}"
 
-    def want(value: str) -> None:
-        wanted[value.lower()] = spelled(value, cfg)
+    if not gid and not filled:
+        await copy_title("", None)
+        yield SyncEvent(kind="summary", entity="media", detail="nothing to add",
+                        data={"gramps_id": None, "created": False, "changed": {}, "warning": warning})
+        return
 
-    if form["date"]:
-        for tag in date_tags(form["date"]):
-            want(tag)
-        if form["sync"]["date"]:
-            want(si.TAG_SYNC_DATE)
-    if form["sync"]["title"] and form["title"]:
-        want(si.TAG_SYNC_DESCRIPTION)
-    if form["sync"]["media"]:
-        want(cfg.sync_tag)
-    if form["sync"]["note"] and form["notes"]:
-        want(cfg.note_sync_tag)
-    if form["place_gramps_id"] and cfg.place_tag_prefix:
-        want(f"{cfg.place_tag_prefix}/{form['place_gramps_id']}")
-    managed = set(DATE_TAGS) | {si.TAG_SYNC_DATE, si.TAG_SYNC_DESCRIPTION,
-                                cfg.sync_tag.lower(), cfg.note_sync_tag.lower()}
-    if cfg.place_tag_prefix:
-        managed |= {t for t in own if t.startswith(cfg.place_tag_prefix.lower() + "/")}
-    managed |= {t for t in own if si.is_span_tag(t)}
-    add = {k: v for k, v in wanted.items() if k not in own}
-    remove = (own & managed) - set(wanted)
+    new_place = None
+    if form["place_gramps_id"]:
+        try:
+            new_place = await gramps.get_place_by_gramps_id(form["place_gramps_id"])
+        except Exception as exc:  # noqa: BLE001
+            raise SyncError(502, f"Gramps could not be read: {str(exc)[:200]}")
+        if new_place is None:
+            raise SyncError(400, f"{form['place_gramps_id']} names no Gramps place")
 
-    fields: dict = {}
-    gramps_url = (f"{cfg.gramps_public_url}/media/{gid}"
-                  if link_on and gid and cfg.gramps_public_url else None)
-    description = compose_description(form["title"], gramps_url)
-    if description != ((asset.get("exifInfo") or {}).get("description") or "").strip():
-        fields["description"] = description
-    if form["date"] and (asset.get("localDateTime") or "")[:10] != form["date"]["value"]:
-        fields["dateTimeOriginal"] = f"{form['date']['value']}T12:00:00.000Z"
-    if fields:
-        await client.update_asset(asset_id, **fields)
-        if "dateTimeOriginal" in fields:
-            await _wait_for_date(client, asset_id, form["date"]["value"])
-    await apply_tags(client, asset_id, add, remove)
-    set_note(conn, asset_id, gid, form["notes"])
-    mark_dated(conn, asset_id, bool(form["date"]))
-    record = si.link_record(gid, cfg, form["notes"], si.version_label(conn, asset_id))
-    if record:
-        await client.upsert_asset_metadata(asset_id, si.METADATA_KEY, record)
+    notes = form["notes"]
+    created = False
+    if gid:
+        media, current_notes, holders, error = await _gramps_side(gramps, gid)
+        if media is None:
+            raise SyncError(502 if error.startswith("Gramps could not") else 404, error)
+        if form["change"] is not None and media.get("change") != form["change"]:
+            raise SyncError(409, "changed in Gramps since you opened it, reload")
     else:
-        await client.delete_asset_metadata(asset_id, si.METADATA_KEY)
+        async for ev in si.sync_one_asset(gramps, accounts, conn, cfg, asset_id, gramps_id=form["gramps_id"]):
+            if ev.kind == "item":
+                yield ev
+            elif ev.kind == "summary":
+                gid = ev.data["gramps_id"]
+        created = True
+        media, current_notes, holders, error = await _gramps_side(gramps, gid)
+        if media is None:
+            raise SyncError(502, error)
+        extra = codes.notes_of(conn, gid) if form["gramps_id"] else ""
+        if extra and extra not in notes:
+            notes = f"{notes}\n\n{extra}" if notes else extra
+
+    title = media.get("desc") or ""
+    changed: dict = {}
+    desc = form["title"] or asset.get("originalFileName") or gid
+    if desc != title:
+        media["desc"] = desc
+        changed["title"] = desc
+    had_form, readonly = date_from_gramps(media.get("date"))
+    if form["date"]:
+        new_date = gramps_date(form["date"])
+        if not si.dates_equal(media.get("date"), new_date):
+            media["date"] = new_date
+            changed["date"] = format_gramps_date(new_date)
+    elif had_form and not readonly:
+        media["date"] = dict(EMPTY_DATE)
+        changed["date"] = "(none)"
+    if si.set_media_links(media, form["links"]):
+        changed["links"] = len(form["links"])
+    try:
+        note_action, stale_note = await si.stage_media_note(gramps, media, notes, current_notes)
+        if changed or note_action in ("created", "removed"):
+            await gramps.update_media(media["handle"], media)
+        if stale_note:
+            await gramps.delete_note(stale_note)
+    except Exception as exc:  # noqa: BLE001
+        raise SyncError(502, f"Gramps update failed: {str(exc)[:200]}")
+    if changed:
+        yield _item("media", "updated", asset_id, gid, media["desc"], data={"cols": changed})
+    if note_action:
+        yield _item("note", "updated" if note_action == "removed" else note_action, asset_id, gid,
+                    media["desc"], detail="note removed" if note_action == "removed" else None,
+                    data={"cols": {"note": f"{len(notes)} chars"}})
+
+    place_name = None
+    if len(holders) <= 1:
+        old_place = holders[0] if holders else None
+        try:
+            moved = await move_place(gramps, media["handle"], old_place, new_place)
+        except Exception as exc:  # noqa: BLE001
+            yield _item("place", "failed", asset_id, gid, media["desc"], detail=str(exc)[:200])
+        else:
+            if moved:
+                place_name = si.place_label(new_place) if new_place else None
+                yield _item("place", "updated", asset_id, (new_place or old_place).get("gramps_id"),
+                            place_name or si.place_label(old_place),
+                            detail="added to the gallery" if new_place else "taken out of the gallery")
+
+    await copy_title(media["desc"], gid)
+    if warning:
+        yield _item("media", "skipped", asset_id, gid, media["desc"], detail=warning)
+
+    if not created:
+        async for ev in si.sync_one_asset(gramps, accounts, conn, cfg, asset_id, update=True, description=False):
+            if ev.kind == "item" and ev.action != "skipped":
+                yield ev
     if member_ids:
         await match_all(accounts, client, cfg, conn, asset_id, member_ids)
-    return await load(accounts, conn, cfg, asset_id, place_rows)
+
+    yield SyncEvent(kind="summary", entity="media", gramps_id=gid, title=media["desc"],
+                    detail="created" if created else "saved",
+                    data={"gramps_id": gid, "created": created, "changed": changed,
+                          "note": note_action, "place": place_name, "warning": warning})
 
 
 async def match_all(accounts: list[ImmichClient], client: ImmichClient, cfg: SyncImmichConfig,
@@ -818,25 +901,6 @@ async def match_all(accounts: list[ImmichClient], client: ImmichClient, cfg: Syn
         if await match_version(client, cfg, main, detail, conn):
             changed += 1
     return changed
-
-
-def move_identity(conn: sqlite3.Connection, old: str, new: str, prefer_new: bool = False) -> None:
-    """Notes, the dated mark, links and collection memberships follow the photo's new main image"""
-    with conn:
-        has_new = conn.execute("SELECT 1 FROM photo_notes WHERE asset_id=?", (new,)).fetchone()
-        if has_new and prefer_new:
-            conn.execute("DELETE FROM photo_notes WHERE asset_id=?", (old,))
-        else:
-            conn.execute("DELETE FROM photo_notes WHERE asset_id=?", (new,))
-            conn.execute("UPDATE photo_notes SET asset_id=?, updated_at=? WHERE asset_id=?",
-                         (new, _now(), old))
-        conn.execute("INSERT OR IGNORE INTO dated_photos (asset_id, dated_at) "
-                     "SELECT ?, dated_at FROM dated_photos WHERE asset_id=?", (new, old))
-        conn.execute("DELETE FROM dated_photos WHERE asset_id=?", (old,))
-        conn.execute("INSERT OR IGNORE INTO photo_links (asset_id, url, added_at) "
-                     "SELECT ?, url, added_at FROM photo_links WHERE asset_id=? ORDER BY id", (new, old))
-        conn.execute("DELETE FROM photo_links WHERE asset_id=?", (old,))
-    photo_collections.move_items(conn, old, new)
 
 
 async def _wait_for_date(client: ImmichClient, asset_id: str, value: str,

@@ -8,18 +8,16 @@
 
 Bifrost is a curation console for connecting Gramps Web to other services. Think of it as a companion web app for a Gramps Web family tree. Gramps holds people, families, events, places, sources, and media, but what if your files live elsewhere? Bifrost connects other services, like Paperless-ngx and Immich, to Gramps and lets you bring their content in. Now, you don't need to have several copies of the same file scattered across several different services.
 
-Your family-tree data itself always lives in Gramps and the source systems. Bifrost never becomes the home of any of your files. Bifrost's own database holds the sync registers which record which photos and documents are already in Gramps.
+Your family-tree data itself always lives in Gramps, and documents/photos/videos remain within their respective source system. Bifrost will never become the home of any of your files. Bifrost's own database simply holds the sync registers which record which photos and documents are already in Gramps, and can be used to keep everything up to date and consistent across your genealogy ecosystem. 
 
 # Features
 
-* Sync Immich photos into Gramps as media objects, and attach web links to a photo. Use Tags in Immich to mark a photo for sync and define a fuzzy date (like about 1920 or before June 1955).
+* Describe Immich photos in the Photos editor to add them to Gramps as media objects. Title, date (fuzzy dates like about 1920 or before June 1955), place, notes and web links.
 * Sync documents in Paperless-ngx to Gramps Web as media objects, and keep their versions, titles, dates, and transcription text up to date.
 * Link Immich's face recognition to Gramps people by pairing each recognized face with its Gramps person once. Then, every synced photo gets face boxes in Gramps.
 * Old handwriting and faded print often defeat regular OCR. Bifrost sends the page to an AI model and writes the transcription back into Paperless and Gramps.
-* Rebuild a Paperless PDF so every page shares the same width.
-* Give places their OpenStreetMap boundaries so you can see the extent of their jurisdiction. Each boundary is a GeoJSON map file in the place's gallery, which Gramps Web (26.10.2 or later) draws on the Map.
-* Attach documents downloaded from Ancestry to the citations Ancestry created.
-* Index census pages and other tables in Paperless: lay a grid over the page once, then hover over any cell to see its column, line and value, like Ancestry's census viewer. Gemini can transcribe the cells.
+* Give places their OpenStreetMap boundaries so you can see the extent of their jurisdiction. Each boundary is a GeoJSON map file in the place's gallery which Gramps Web (26.10.2 or later) then draws on the Map.
+* Index census pages and other tables in Paperless.
 
 Developer's comment: I am developing Bifrost to assist me in my genealogical documentation workflow. Therefore, you may not be interested in using all of the features. Feel free to pick and choose which tools you'd like to use. At a minimum, you need to configure Gramps Web and Paperless-ngx.
 
@@ -31,7 +29,7 @@ Copy `config.example.yaml` to `config.yaml` and fill it in. Make sure you create
 * Docker: edit the host-side bind mounts in `docker-compose.yml` to match your machine. Then `docker compose up -d --build`. Create `config.yaml` before the first `compose up`.
 * Photos page: its Svelte source (built on Immich's `@immich/ui`) is in `frontend/`, and the built bundle in `bifrost/web/static/photos/` is committed, so Node is only needed after changing it: `cd frontend && npm ci && npm run build`.
 
-`python -m bifrost.cli doctor` checks the database and the Gramps/Paperless connections. 
+`python -m bifrost.cli doctor` checks the database and the Gramps/Paperless connections. `python -m bifrost.cli photos-handover` moves photo facts from Immich tags and Bifrost's tables onto the Gramps media objects once (`--dry-run`, `--apply decisions.csv`, `--cleanup-tags`).
 
 At the moment Bifrost has no authentication. Keep it on a trusted network, bind it to localhost, or put an authenticating reverse proxy in front.
 
@@ -39,12 +37,7 @@ At the moment Bifrost has no authentication. Keep it on a trusted network, bind 
 
 Read-only JSON for what only Bifrost holds. `/docs` lists every endpoint.
 
-| Endpoint | Returns |
-|---|---|
-| `/api/v1/pinpoint/{pinpoint}` | The cells a pinpoint like `69T5AU.L2.C6` points at: values, translations, linked people, and their place on the page |
-| `/api/v1/pid/{pid}` | A document's tables and page notes |
-| `/api/v1/code/{code}` | A code's Codes ledger entry: description, location, parent and children, pencilings, scans, history |
-| `/api/v1/export` | Everything above plus photo collections, photo links and Gramps-Immich person links, as one file |
+''Work in progress.''
 
 # Feature Requests
 

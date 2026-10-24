@@ -21,6 +21,7 @@ export const MONTHS = [
 export const MONTH_OPTIONS = [{ value: '0', label: '—' }, ...MONTHS.map((label, i) => ({ value: String(i + 1), label }))];
 
 export const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+export const LINK_RE = /^https?:\/\/\S+$/i;
 
 export function dateParts(d) {
   return {
@@ -103,38 +104,35 @@ export function placeItem(p) {
   };
 }
 
-export function formFrom(rec, suggest = true) {
-  const fresh = suggest && !rec.sync.media && !rec.gramps;
+export function formFrom(rec) {
   return {
     title: rec.title || '',
-    date: dateParts(rec.date),
+    date: { ...dateParts(rec.date), replace: false },
     place: rec.place ? placeItem(rec.place) : null,
     notes: rec.notes || '',
-    sync: fresh
-      ? { media: true, title: true, date: true, note: false }
-      : { media: rec.sync.media, title: rec.sync.title, date: rec.sync.date, note: rec.sync.note },
+    links: (rec.links || []).map((l) => l.url),
   };
-}
-
-export function savedForm(rec) {
-  return { ...formFrom(rec, false), date: dateParts(rec.tagged_date) };
 }
 
 export function formKey(f) {
   const d = f.date;
   const span = d.modifier === 'span' ? [years(d.minus), years(d.plus)] : [];
   const date = [d.year.trim(), d.month, d.day.trim(), d.modifier, d.quality, ...span];
-  return JSON.stringify([f.title.trim(), f.notes.trim(), f.place?.id || null, date, f.sync]);
+  return JSON.stringify([f.title.trim(), f.notes.trim(), f.place?.id || null, date, f.links]);
 }
 
-export function payload(f) {
-  const date = dateOf(f.date);
+export function filled(f) {
+  return !!(f.title.trim() || f.notes.trim() || f.place || f.links.length || dateOf(f.date));
+}
+
+export function payload(f, rec) {
   return {
     title: f.title,
     notes: f.notes,
     place_gramps_id: f.place?.id || null,
-    date,
-    sync: { ...f.sync, date: !!date && f.sync.date },
+    date: dateOf(f.date),
+    links: f.links,
+    change: rec.change,
   };
 }
 

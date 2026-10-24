@@ -1,6 +1,6 @@
 <script>
   import { FormModal, Input, ListButton, Text } from '@immich/ui';
-  import { mdiSync } from '@mdi/js';
+  import { mdiContentSaveOutline } from '@mdi/js';
 
   let { codes, onClose } = $props();
 
@@ -17,10 +17,10 @@
 </script>
 
 <FormModal
-  title="Sync to Gramps"
-  icon={mdiSync}
+  title="Add to Gramps"
+  icon={mdiContentSaveOutline}
   size="medium"
-  submitText={picked ? `Sync as ${picked}` : 'Sync with a new code'}
+  submitText={picked ? `Add as ${picked}` : 'Add with a new code'}
   onClose={() => onClose()}
   onSubmit={() => onClose(picked || null)}
 >

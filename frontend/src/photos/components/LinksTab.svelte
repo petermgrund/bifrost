@@ -1,18 +1,30 @@
 <script>
   import { Button, IconButton, Input } from '@immich/ui';
   import { mdiClose, mdiLinkPlus } from '@mdi/js';
+  import { LINK_RE } from '../lib/format.js';
 
-  let { rec, busy, onAdd, onRemove } = $props();
+  let { form = $bindable(), busy, onError } = $props();
 
   let url = $state('');
 
-  const links = $derived(rec.links || []);
-
-  async function add(e) {
+  function add(e) {
     e.preventDefault();
     const value = url.trim();
     if (!value || busy) return;
-    if (await onAdd(value)) url = '';
+    if (!LINK_RE.test(value)) {
+      onError('That is not a link starting with http:// or https://.');
+      return;
+    }
+    if (form.links.includes(value)) {
+      onError('This photo already has that link.');
+      return;
+    }
+    form.links = [...form.links, value];
+    url = '';
+  }
+
+  function remove(value) {
+    form.links = form.links.filter((l) => l !== value);
   }
 </script>
 
@@ -25,12 +37,12 @@
       Add link
     </Button>
   </form>
-  {#if links.length}
+  {#if form.links.length}
     <ul class="flex flex-col">
-      {#each links as l (l.id)}
+      {#each form.links as l (l)}
         <li class="hover:bg-light-100 flex items-center gap-2 rounded-xl px-3 py-1">
-          <a href={l.url} target="_blank" rel="noopener" title={l.url} class="hover:text-primary grow truncate text-sm">
-            {l.url}
+          <a href={l} target="_blank" rel="noopener" title={l} class="hover:text-primary grow truncate text-sm">
+            {l}
           </a>
           <IconButton
             icon={mdiClose}
@@ -38,9 +50,9 @@
             shape="round"
             variant="ghost"
             color="secondary"
-            aria-label="Remove {l.url}"
+            aria-label="Remove {l}"
             disabled={!!busy}
-            onclick={() => onRemove(l)}
+            onclick={() => remove(l)}
           />
         </li>
       {/each}

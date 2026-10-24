@@ -844,12 +844,15 @@ def test_manual_id_mints_a_reservation_that_has_a_scan(conn):
     assert row["status"] == "in use" and row["immich"][0]["id"] == "a1"
 
 
-def test_manual_id_brings_the_codes_notes_to_the_photo(conn):
+def test_manual_id_brings_the_codes_notes_to_the_media_note(conn):
     codes.update(conn, "RSVD22", {"notes": "Penciled on the back, lower left"})
     immich = FakeImmich(assets={"a1": asset("a1")})
-    run_one(conn, "rsvd22", immich=immich)
-    assert sync_immich.note_for(conn, "a1", "RSVD22")["text"] == "Penciled on the back, lower left"
-    assert immich.metadata["a1"]["bifrost"]["notes"] == "Penciled on the back, lower left"
+    gramps = FakeGramps()
+    run_one(conn, "rsvd22", gramps=gramps, immich=immich)
+    [note] = gramps.notes.values()
+    assert note["type"] == "Media Note" and note["text"]["string"] == "Penciled on the back, lower left"
+    assert gramps.media["RSVD22"]["note_list"] == [note["handle"]]
+    assert "notes" not in immich.metadata["a1"]["bifrost"]
     assert by_code(conn, live={"RSVD22", MNTD22})["RSVD22"]["notes"] == ""
 
 
@@ -857,9 +860,12 @@ def test_brought_notes_join_the_photos_own_notes_once(conn):
     codes.update(conn, "RSVD22", {"notes": "From the Codes page"})
     conn.execute("INSERT INTO photo_notes (asset_id, text, updated_at) VALUES ('a1', 'From Photos', 't')")
     conn.commit()
-    sync_immich.bring_code_notes(conn, "a1", "RSVD22")
-    sync_immich.bring_code_notes(conn, "a1", "RSVD22")
-    assert sync_immich.note_for(conn, "a1", "RSVD22")["text"] == "From Photos\n\nFrom the Codes page"
+    gramps = FakeGramps()
+    run_one(conn, "rsvd22", gramps=gramps)
+    run_one(conn, "rsvd22", gramps=gramps)
+    [note] = gramps.notes.values()
+    assert note["text"]["string"] == "From the Codes page\n\nFrom Photos"
+    assert conn.execute("SELECT COUNT(*) FROM photo_notes").fetchone()[0] == 0
 
 
 # ---- notes

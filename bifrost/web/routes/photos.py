@@ -125,13 +125,22 @@ async def places(request: Request, refresh: bool = False) -> list[dict]:
     return await _places(request, refresh)
 
 
+async def _load(request: Request, asset_id: str) -> dict:
+    st = _state(request)
+    return await photos.load(st.gramps, _accounts_or_503(request), st.conn, st.cfg.sync_immich,
+                             asset_id, await _place_rows(request))
+
+
+def _drop_caches(st) -> None:
+    for key in list(st.caches):
+        if key != PLACES_KEY:
+            st.caches.pop(key, None)
+
+
 @router.get("/api/photo/{asset_id}")
 async def photo(request: Request, asset_id: str) -> dict:
-    st = _state(request)
-    accounts = _accounts_or_503(request)
     try:
-        return await photos.load(accounts, st.conn, st.cfg.sync_immich, asset_id,
-                                 await _place_rows(request))
+        return await _load(request, asset_id)
     except SyncError as exc:
         raise HTTPException(exc.status, exc.detail)
 
@@ -145,56 +154,53 @@ class DateBody(BaseModel):
     plus: int | None = None
 
 
-class SyncBody(BaseModel):
-    media: bool = False
-    title: bool = False
-    date: bool = False
-    note: bool = False
-
-
 class PhotoBody(BaseModel):
     title: str = ""
     date: DateBody | None = None
     place_gramps_id: str | None = None
     notes: str = ""
-    sync: SyncBody = SyncBody()
+    links: list[str] = []
+    change: int | None = None
+    gramps_id: str | None = None
+
+
+async def _recorded(request: Request, job: str, gen) -> dict:
+    st = _state(request)
+    try:
+        run_id, events = await record_run(st.conn, job, gen)
+    except SyncError as exc:
+        raise HTTPException(exc.status, exc.detail)
+    _drop_caches(st)
+    summary = next((e for e in reversed(events) if e.kind == "summary"), None)
+    return {"run_id": run_id, "summary": summary.data if summary else {},
+            "events": [e.__dict__ for e in events if e.kind == "item"]}
 
 
 @router.put("/api/photo/{asset_id}")
 async def save_photo(request: Request, asset_id: str, body: PhotoBody) -> dict:
-    st = _state(request)
-    accounts = _accounts_or_503(request)
-    form = {"title": body.title, "notes": body.notes, "place_gramps_id": body.place_gramps_id,
-            "date": dict(body.date) if body.date else None, "sync": dict(body.sync)}
-    try:
-        return await photos.save(accounts, st.conn, st.cfg.sync_immich, asset_id, form,
-                                 ui_settings.get_description_link(st.conn),
-                                 await _place_rows(request))
-    except ValueError as exc:
-        raise HTTPException(400, str(exc))
-    except SyncError as exc:
-        raise HTTPException(exc.status, exc.detail)
-
-
-async def _run_sync(request: Request, asset_id: str, gramps_id: str | None = None) -> dict:
+    """Save the form to the Gramps media object; the first save adds the photo to Gramps"""
     st = _state(request)
     if not st.cfg.sync_immich.enabled:
         raise HTTPException(503, "the Immich sync is disabled in this instance (sync.immich.enabled)")
     accounts = _accounts_or_503(request)
-    gen = sync_immich.sync_one_asset(st.gramps, accounts, st.conn, st.cfg.sync_immich,
-                                     asset_id, gramps_id=gramps_id, update=True)
+    form = {**body.model_dump(), "date": dict(body.date) if body.date else None}
     try:
-        run_id, events = await record_run(st.conn, "photos.sync", gen)
-    except SyncError as exc:
-        raise HTTPException(exc.status, exc.detail)
-    for key in list(st.caches):
-        if key != PLACES_KEY:
-            st.caches.pop(key, None)
-    summary = next((e for e in reversed(events) if e.kind == "summary"), None)
-    photo_rec = await photos.load(accounts, st.conn, st.cfg.sync_immich, asset_id,
-                                  await _place_rows(request))
-    return {"run_id": run_id, "summary": summary.data if summary else {},
-            "events": [e.__dict__ for e in events if e.kind == "item"], "photo": photo_rec}
+        photos.validate_form(form)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    gen = photos.save(st.gramps, accounts, st.conn, st.cfg.sync_immich, asset_id, form)
+    result = await _recorded(request, "photos.save", gen)
+    return {**result, "photo": await _load(request, asset_id)}
+
+
+async def _run_sync(request: Request, asset_id: str) -> dict:
+    st = _state(request)
+    if not st.cfg.sync_immich.enabled:
+        raise HTTPException(503, "the Immich sync is disabled in this instance (sync.immich.enabled)")
+    gen = sync_immich.sync_one_asset(st.gramps, _accounts_or_503(request), st.conn, st.cfg.sync_immich,
+                                     asset_id, update=True)
+    result = await _recorded(request, "photos.sync", gen)
+    return {**result, "photo": await _load(request, asset_id)}
 
 
 @router.get("/api/photo/{asset_id}/pending")
@@ -211,16 +217,6 @@ async def pending(request: Request, asset_id: str) -> dict:
     return {"changes": changes}
 
 
-class SyncPhotoBody(BaseModel):
-    gramps_id: str | None = None
-
-
-@router.post("/api/photo/{asset_id}/sync")
-async def sync_photo(request: Request, asset_id: str, body: SyncPhotoBody = SyncPhotoBody()) -> dict:
-    """Sync one photo; a new one can take a reserved or penciled code as its Gramps ID"""
-    return await _run_sync(request, asset_id, body.gramps_id)
-
-
 class VersionBody(BaseModel):
     asset_id: str
 
@@ -229,7 +225,7 @@ class VersionBody(BaseModel):
 async def add_version(request: Request, asset_id: str, body: VersionBody) -> dict:
     st = _state(request)
     try:
-        return await photos.add_version(_accounts_or_503(request), st.conn, st.cfg.sync_immich,
+        return await photos.add_version(st.gramps, _accounts_or_503(request), st.conn, st.cfg.sync_immich,
                                         asset_id, body.asset_id.strip(), await _place_rows(request))
     except SyncError as exc:
         raise HTTPException(exc.status, exc.detail)
@@ -244,8 +240,9 @@ async def upload_version(request: Request, asset_id: str, filename: str, modifie
             data.write(chunk)
         data.seek(0)
         try:
-            new_id, rec = await photos.upload_version(accounts, st.conn, st.cfg.sync_immich, asset_id,
-                                                      filename, data, modified, await _place_rows(request))
+            new_id, rec = await photos.upload_version(st.gramps, accounts, st.conn, st.cfg.sync_immich,
+                                                      asset_id, filename, data, modified,
+                                                      await _place_rows(request))
         except SyncError as exc:
             raise HTTPException(exc.status, exc.detail)
     return {"asset_id": new_id, "photo": rec}
@@ -255,7 +252,7 @@ async def upload_version(request: Request, asset_id: str, filename: str, modifie
 async def match_version(request: Request, asset_id: str, member_id: str) -> dict:
     st = _state(request)
     try:
-        return await photos.match_member(_accounts_or_503(request), st.conn, st.cfg.sync_immich,
+        return await photos.match_member(st.gramps, _accounts_or_503(request), st.conn, st.cfg.sync_immich,
                                          asset_id, member_id, await _place_rows(request))
     except SyncError as exc:
         raise HTTPException(exc.status, exc.detail)
@@ -273,8 +270,7 @@ async def promote_version(request: Request, asset_id: str, member_id: str,
     try:
         new_main = await photos.promote(accounts, st.conn, st.cfg.sync_immich,
                                         st.gramps, asset_id, member_id, body.redraw_faces)
-        photo_rec = await photos.load(accounts, st.conn, st.cfg.sync_immich, new_main,
-                                      await _place_rows(request))
+        photo_rec = await _load(request, new_main)
     except SyncError as exc:
         raise HTTPException(exc.status, exc.detail)
     if photo_rec["gramps"]:
@@ -296,8 +292,7 @@ async def set_version_label(request: Request, asset_id: str, member_id: str, bod
         if member_id != asset_id and member_id not in member_ids:
             raise SyncError(404, "that asset is not a version of this photo")
         await photos.set_version_label(accounts, st.conn, st.cfg.sync_immich, member_id, body.label)
-        return await photos.load(accounts, st.conn, st.cfg.sync_immich, asset_id,
-                                 await _place_rows(request))
+        return await _load(request, asset_id)
     except SyncError as exc:
         raise HTTPException(exc.status, exc.detail)
 
@@ -306,39 +301,8 @@ async def set_version_label(request: Request, asset_id: str, member_id: str, bod
 async def remove_version(request: Request, asset_id: str, member_id: str) -> dict:
     st = _state(request)
     try:
-        return await photos.remove_version(_accounts_or_503(request), st.conn, st.cfg.sync_immich,
+        return await photos.remove_version(st.gramps, _accounts_or_503(request), st.conn, st.cfg.sync_immich,
                                           asset_id, member_id, await _place_rows(request))
-    except SyncError as exc:
-        raise HTTPException(exc.status, exc.detail)
-
-
-class LinkBody(BaseModel):
-    url: str
-
-
-@router.post("/api/photo/{asset_id}/links")
-async def add_link(request: Request, asset_id: str, body: LinkBody) -> dict:
-    st = _state(request)
-    accounts = _accounts_or_503(request)
-    try:
-        primary, _client = await photos._primary_and_client(accounts, asset_id)
-        photos.add_link(st.conn, primary["id"], body.url)
-        return await photos.load(accounts, st.conn, st.cfg.sync_immich, asset_id, await _place_rows(request))
-    except ValueError as exc:
-        raise HTTPException(400, str(exc))
-    except SyncError as exc:
-        raise HTTPException(exc.status, exc.detail)
-
-
-@router.delete("/api/photo/{asset_id}/links/{link_id}")
-async def remove_link(request: Request, asset_id: str, link_id: int) -> dict:
-    st = _state(request)
-    accounts = _accounts_or_503(request)
-    try:
-        primary, _client = await photos._primary_and_client(accounts, asset_id)
-        if not photos.remove_link(st.conn, primary["id"], link_id):
-            raise HTTPException(404, "that link is not on this photo")
-        return await photos.load(accounts, st.conn, st.cfg.sync_immich, asset_id, await _place_rows(request))
     except SyncError as exc:
         raise HTTPException(exc.status, exc.detail)
 

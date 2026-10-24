@@ -1,10 +1,10 @@
 <script>
   import { Alert, Button, CloseButton, LoadingSpinner, Text, toastManager } from '@immich/ui';
-  import { mdiContentSaveOutline, mdiSync } from '@mdi/js';
+  import { mdiContentSaveOutline, mdiRefresh } from '@mdi/js';
   import { Dialog, Tabs } from 'bits-ui';
   import { untrack } from 'svelte';
   import { del, get, post, put, qs, upload } from '../lib/api.svelte.js';
-  import { dateProblem, formFrom, formKey, payload, savedForm } from '../lib/format.js';
+  import { dateProblem, filled, formFrom, formKey, payload } from '../lib/format.js';
   import { loadCollections, recordChanged } from '../lib/store.svelte.js';
   import AddVersionDialog from './AddVersionDialog.svelte';
   import CodeChoiceModal from './CodeChoiceModal.svelte';
@@ -19,7 +19,6 @@
   let rec = $state(null);
   let form = $state(null);
   let saved = $state('');
-  let presented = $state('');
   let recError = $state('');
   let busy = $state('');
   let status = $state(null);
@@ -28,20 +27,16 @@
   let adding = $state(null);
   let content = $state(null);
   let choosing = $state(null);
-  let pending = $state(false);
-  let pendingFor = 0;
 
-  const undecided = $derived(!!rec && !rec.dated && !rec.gramps && !!rec.tagged_date);
-  const unsaved = $derived(!!form && (formKey(form) !== saved || undecided));
-  const edited = $derived(!!form && formKey(form) !== presented);
+  const edited = $derived(!!form && formKey(form) !== saved);
   const problem = $derived(form ? dateProblem(form.date) : '');
-  const syncable = $derived(!!rec && (!!rec.gramps || rec.sync.media));
+  const savable = $derived(edited && !problem && !!rec && !rec.gramps_error && (!!rec.gramps || filled(form)));
 
   const tabs = $derived.by(() => {
     if (!rec) return [];
     const versions = rec.versions?.members?.length || 0;
     const cols = rec.collections?.length || 0;
-    const links = rec.links?.length || 0;
+    const links = form?.links.length || 0;
     return [
       { id: 'details', label: 'Details' },
       { id: 'versions', label: versions > 1 ? `Versions (${versions})` : 'Versions' },
@@ -56,34 +51,13 @@
     untrack(() => load(id));
   });
 
-  $effect(() => {
-    const r = rec;
-    untrack(() => checkPending(r));
-  });
-
-  async function checkPending(r) {
-    const token = ++pendingFor;
-    pending = false;
-    if (!r?.gramps) return;
-    try {
-      const p = await get(`/photos/api/photo/${r.asset_id}/pending`);
-      if (token === pendingFor) pending = p.changes.length > 0;
-    } catch {
-      if (token === pendingFor) pending = true;
-    }
-  }
-
-  function setForm(f) {
-    form = f;
-    presented = formKey(f);
-  }
-
   async function load(id) {
+    status = null;
     try {
       const r = await get(`/photos/api/photo/${id}`);
       rec = r;
-      saved = formKey(savedForm(r));
-      setForm(formFrom(r));
+      saved = formKey(formFrom(r));
+      form = formFrom(r);
       if (r.asset_id !== id) recordChanged(r, id);
     } catch (e) {
       recError = e.message;
@@ -93,13 +67,13 @@
   function applyRecord(r, replacing = null, keep = false) {
     const keepEdits = keep && edited;
     rec = r;
-    saved = formKey(savedForm(r));
-    if (!keepEdits) setForm(formFrom(r, keep));
+    saved = formKey(formFrom(r));
+    if (!keepEdits) form = formFrom(r);
     recordChanged(r, replacing);
   }
 
   function fail(e) {
-    status = { kind: 'error', msg: e.message };
+    status = { kind: 'error', msg: e.message, code: e.status };
   }
 
   function succeed(msg) {
@@ -126,24 +100,24 @@
     else succeed(prefix + syncSummary(r));
   }
 
-  async function save() {
-    if (!rec || busy || !unsaved || problem) return;
-    busy = 'save';
-    status = { kind: 'busy', msg: 'Saving to Immich' };
-    try {
-      applyRecord(await put(`/photos/api/photo/${rec.asset_id}`, payload(form)));
-      succeed('Saved to Immich');
-    } catch (e) {
-      fail(e);
-    } finally {
-      busy = '';
+  function saveSummary(r) {
+    const s = r.summary || {};
+    const parts = [s.created ? `added to Gramps as ${s.gramps_id}` : `saved ${s.gramps_id}`];
+    const changed = Object.keys(s.changed || {});
+    if (changed.length) parts.push(changed.join(', '));
+    if (s.note) parts.push(`note ${s.note}`);
+    if (s.place) parts.push(`place ${s.place}`);
+    for (const e of r.events || []) {
+      if (e.action === 'failed') parts.push(e.detail);
+      else if (e.entity === 'face' && e.action === 'created') parts.push(`face ${e.title}`);
     }
+    return parts.join('; ');
   }
 
-  async function sync() {
-    if (!rec || busy || unsaved || !syncable) return;
+  async function save() {
+    if (!rec || busy || !savable) return;
     if (!rec.gramps) {
-      busy = 'sync';
+      busy = 'save';
       status = { kind: 'busy', msg: 'Looking up reserved codes' };
       try {
         const open = (await get('/codes/api/open')).items;
@@ -159,16 +133,21 @@
         busy = '';
       }
     }
-    await runSync(null);
+    await runSave(null);
   }
 
-  async function runSync(grampsId) {
-    busy = 'sync';
-    status = { kind: 'busy', msg: grampsId ? `Syncing to Gramps as ${grampsId}` : 'Syncing to Gramps' };
+  async function runSave(grampsId) {
+    busy = 'save';
+    status = { kind: 'busy', msg: rec.gramps ? 'Saving to Gramps' : grampsId ? `Adding to Gramps as ${grampsId}` : 'Adding to Gramps' };
     try {
-      const r = await post(`/photos/api/photo/${rec.asset_id}/sync`, grampsId ? { gramps_id: grampsId } : {});
+      const r = await put(`/photos/api/photo/${rec.asset_id}`, { ...payload(form, rec), gramps_id: grampsId });
       applyRecord(r.photo);
-      synced(r);
+      const failed = (r.events || []).some((e) => e.action === 'failed');
+      if (failed) status = { kind: 'error', msg: saveSummary(r) };
+      else if (r.summary.warning) {
+        status = null;
+        toastManager.warning(`${saveSummary(r)}; ${r.summary.warning}`);
+      } else succeed(saveSummary(r));
     } catch (e) {
       fail(e);
     } finally {
@@ -308,36 +287,6 @@
     }
   }
 
-  async function addLink(url) {
-    if (!rec || busy) return false;
-    busy = 'link';
-    status = { kind: 'busy', msg: 'Adding the link' };
-    try {
-      applyRecord(await post(`/photos/api/photo/${rec.asset_id}/links`, { url }), null, true);
-      succeed('Link added');
-      return true;
-    } catch (e) {
-      fail(e);
-      return false;
-    } finally {
-      busy = '';
-    }
-  }
-
-  async function removeLink(l) {
-    if (!rec || busy) return;
-    busy = 'link';
-    status = { kind: 'busy', msg: 'Removing the link' };
-    try {
-      applyRecord(await del(`/photos/api/photo/${rec.asset_id}/links/${l.id}`), null, true);
-      succeed('Link removed');
-    } catch (e) {
-      fail(e);
-    } finally {
-      busy = '';
-    }
-  }
-
   function mainAsVersion(r) {
     const main = (r.versions?.members || []).find((m) => m.is_primary);
     return main || { asset_id: r.asset_id, filename: r.filename, width: r.width, height: r.height, label: r.label };
@@ -392,6 +341,9 @@
         {:else if !rec}
           <div class="grid flex-1 place-items-center"><LoadingSpinner size="giant" /></div>
         {:else}
+          {#if rec.gramps_error}
+            <Alert color="danger" size="small" title={rec.gramps_error} class="mb-4" />
+          {/if}
           <div
             class="grid min-h-0 flex-1 grid-cols-1 gap-6 max-lg:grid-rows-[minmax(0,2fr)_minmax(0,3fr)] lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]"
           >
@@ -467,7 +419,7 @@
                 <CollectionsTab {rec} {busy} onAdd={addToCollection} onRemove={removeFromCollection} onGo={onClose} />
               </Tabs.Content>
               <Tabs.Content value="links" class="immich-scrollbar -mx-1 min-h-0 flex-1 overflow-y-auto px-1 pt-4">
-                <LinksTab {rec} {busy} onAdd={addLink} onRemove={removeLink} />
+                <LinksTab bind:form {busy} onError={(msg) => (status = { kind: 'error', msg })} />
               </Tabs.Content>
             </Tabs.Root>
           </div>
@@ -486,16 +438,12 @@
               <span class="text-gray-600 dark:text-gray-400">Unsaved changes</span>
             {/if}
           </div>
-          <Button
-            variant="outline"
-            color="secondary"
-            leadingIcon={mdiContentSaveOutline}
-            disabled={!unsaved || !!problem || !!busy}
-            onclick={save}
-          >
-            Save
-          </Button>
-          <Button leadingIcon={mdiSync} disabled={unsaved || !syncable || !!busy || (!!rec.gramps && !pending)} onclick={sync}>Sync to Gramps</Button>
+          {#if status?.code === 409}
+            <Button variant="outline" color="secondary" leadingIcon={mdiRefresh} disabled={!!busy} onclick={() => load(rec.asset_id)}>
+              Reload
+            </Button>
+          {/if}
+          <Button leadingIcon={mdiContentSaveOutline} disabled={!savable || !!busy} onclick={save}>Save</Button>
         </footer>
       {/if}
     </Dialog.Content>
@@ -509,7 +457,7 @@
     codes={choosing}
     onClose={(choice) => {
       choosing = null;
-      if (choice !== undefined) runSync(choice);
+      if (choice !== undefined) runSave(choice);
     }}
   />
 {/if}

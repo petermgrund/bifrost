@@ -100,10 +100,10 @@
         </RadioGroup.Root>
         <Text size="small" color="muted">
           {#if takesOver}
-            Title, date, place and notes will come from {candidateName}, which is already in Gramps as
+            Tags, location and faces will come from {candidateName}, which is already in Gramps as
             {candidate.gramps_id}.{unsaved ? ' Your unsaved changes to this photo will be dropped.' : ''}
           {:else}
-            Title, date, place and notes will come from {rec.title || rec.filename}.
+            Tags, location and faces will come from {rec.title || rec.filename}.
           {/if}
         </Text>
       </div>

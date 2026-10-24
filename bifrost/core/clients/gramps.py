@@ -302,10 +302,12 @@ class GrampsClient:
     async def list_handles(self, path: str) -> set[str]:
         return {o["handle"] for o in await self._paged(path, page_size=1000, keys="handle")}
 
-    async def get_media_by_gramps_id(self, gramps_id: str) -> dict | None:
-        resp = await self._request(
-            "GET", "/media/", ok_404=True, params={"gramps_id": gramps_id}
-        )
+    async def get_media_by_gramps_id(self, gramps_id: str, backlinks: bool = False) -> dict | None:
+        """One media object; with backlinks, the objects referencing it ride along under 'backlinks'"""
+        params = {"gramps_id": gramps_id}
+        if backlinks:
+            params["backlinks"] = "true"
+        resp = await self._request("GET", "/media/", ok_404=True, params=params)
         if resp.status_code == 404:
             return None
         items = resp.json()
@@ -314,6 +316,18 @@ class GrampsClient:
                 if m.get("gramps_id") == gramps_id:
                     return m
         return None
+
+    async def get_note(self, handle: str) -> dict | None:
+        resp = await self._request("GET", f"/notes/{handle}", ok_404=True)
+        return None if resp.status_code == 404 else resp.json()
+
+    async def delete_note(self, handle: str) -> None:
+        """Gramps Web answers a DELETE with 500 after deleting, so the result is checked, not the status"""
+        try:
+            await self._request("DELETE", f"/notes/{handle}")
+        except GrampsError:
+            if await self.get_note(handle) is not None:
+                raise
 
     async def create_note(self, note_obj: dict) -> dict:
         return await self.create_object(note_obj)

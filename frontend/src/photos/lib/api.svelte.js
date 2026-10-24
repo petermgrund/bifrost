@@ -14,7 +14,11 @@ async function failure(resp) {
 
 async function request(path, opts = {}) {
   const resp = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
-  if (!resp.ok) throw new Error(await failure(resp));
+  if (!resp.ok) {
+    const err = new Error(await failure(resp));
+    err.status = resp.status;
+    throw err;
+  }
   return resp.json();
 }
 

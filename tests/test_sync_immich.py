@@ -122,6 +122,7 @@ class FakeImmich:
         if self.fail_tag_write:
             raise ImmichError(500, "tag write boom")
         self.tagged_assets.append((tag_id, asset_id))
+        await self.tag_assets([tag_id], [asset_id])
 
     def _tag_value(self, tag_id):
         for t in [self.tag] + list(self.extra_tags.values()):
@@ -231,14 +232,29 @@ class FakeGramps:
         self.updated_people = []
         self.notes = {}
         self.updated_notes = []
+        self.deleted_notes = []
         self.checksums = {}
         self.unreadable = set()
 
-    async def get_media_by_gramps_id(self, gid):
+    async def get_media_by_gramps_id(self, gid, backlinks=False):
         media = self.media.get(gid)
         if media is not None:
             media.setdefault("checksum", f"md5-{media.get('handle')}")
+            if backlinks:
+                holders = [p["handle"] for p in self.places
+                           if any(r.get("ref") == media.get("handle") for r in p.get("media_list") or [])]
+                return {**media, "backlinks": {"place": holders}}
         return media
+
+    async def get_note(self, handle):
+        return self.notes.get(handle)
+
+    async def delete_note(self, handle):
+        self.deleted_notes.append(handle)
+        self.notes.pop(handle, None)
+
+    async def get_place(self, handle):
+        return next(p for p in self.places if p.get("handle") == handle)
 
     async def media_md5(self, handle):
         path = next((m.get("path") for m in self.media.values() if m.get("handle") == handle), None)
@@ -270,7 +286,10 @@ class FakeGramps:
         self.created.append(obj)
 
     async def update_media(self, handle, obj):
+        obj["change"] = (obj.get("change") or 0) + 1
         self.updated.append(obj)
+        if obj.get("gramps_id") in self.media:
+            self.media[obj["gramps_id"]] = obj
 
     async def list_places_full(self):
         return self.places
@@ -319,6 +338,12 @@ def heic(aid="a1b2c3", name="img.heic", owner="owner-1"):
     return {**asset(aid, name), "originalMimeType": "image/heic", "ownerId": owner}
 
 
+def titled(a, title="t"):
+    """An asset whose Immich description already mirrors its Gramps title"""
+    a.setdefault("exifInfo", {})["description"] = title
+    return a
+
+
 def mint(conn, gid, source_id, title="t"):
     conn.execute(
         "INSERT INTO minted_media (gramps_id, source_system, source_id, title, minted_at) "
@@ -361,7 +386,7 @@ class TestPreviews:
 
     def test_synced_heic_media_is_repointed_at_the_preview(self, conn):
         mint(conn, "BBBBBB", "a1b2c3")
-        im = FakeImmich(assets={"a1b2c3": heic()})
+        im = FakeImmich(assets={"a1b2c3": {**heic(), "exifInfo": {"description": "T"}}})
         im.previews["a1b2c3"] = ("jpeg", "image/jpeg")
         media = {"gramps_id": "BBBBBB", "handle": "h1", "desc": "T", "path": "immich/img.heic",
                  "mime": "image/heic", "attribute_list": [sync_immich._attr("Immich ID", "a1b2c3")]}
@@ -451,19 +476,24 @@ class TestSyncAssetsScan:
         failed = actions(events, "failed")
         assert len(failed) == 1 and "variant" in failed[0].detail
 
-    def test_synced_media_updates_without_the_tag(self, conn):
+    def test_synced_media_gets_the_gramps_title_as_its_description(self, conn):
         self._mint(conn, "BBBBBB", "a1")
         a = asset("a1", "img.jpg")
         a["tags"] = [{"value": "Sync/Description"}]
-        a["exifInfo"] = {"description": "New title"}
+        a["exifInfo"] = {"description": "Immich title"}
         im = FakeImmich(assets={"a1": a}, tagged=set())
         gr = FakeGramps({"BBBBBB": {"gramps_id": "BBBBBB", "handle": "h1",
-                                    "desc": "Old title", "path": "immich/img.jpg",
+                                    "desc": "Gramps title", "path": "immich/img.jpg",
                                     "attribute_list": [
                                         {"type": "Immich ID", "value": "a1"}]}})
         events = run_scan(im, gr, conn)
         updates = actions(events, "would_update")
-        assert len(updates) == 1 and set(updates[0].data["cols"]) == {"title"}
+        assert len(updates) == 1 and set(updates[0].data["cols"]) == {"description"}
+        events = run_scan(im, gr, conn, apply=True)
+        assert gr.updated == []
+        assert im.updated_assets == [("a1", {"description": "Gramps title"})]
+        assert summary_of(events).data["descriptions_updated"] == 1
+        assert actions(run_scan(im, gr, conn), "would_update") == []
 
     def test_minted_media_carry_the_md5_of_their_file(self, conn):
         im = FakeImmich(assets={"a1": asset("a1", "img1.jpg")}, tagged={"a1"})
@@ -483,7 +513,7 @@ class TestSyncAssetsScan:
 
     def test_a_missing_checksum_is_filled_by_the_update_pass(self, conn):
         self._mint(conn, "BBBBBB", "a1")
-        im = FakeImmich(assets={"a1": asset("a1", "img.jpg")}, tagged=set())
+        im = FakeImmich(assets={"a1": titled(asset("a1", "img.jpg"))}, tagged=set())
         gr = FakeGramps({"BBBBBB": {"gramps_id": "BBBBBB", "handle": "h1", "desc": "t",
                                     "path": "immich/img.jpg", "checksum": "",
                                     "attribute_list": [{"type": "Immich ID", "value": "a1"}]}})
@@ -517,7 +547,7 @@ class TestSyncAssetsScan:
 
     def test_stale_immich_attrs_heal_without_a_file_move(self, conn):
         self._mint(conn, "BBBBBB", "a1")
-        im = FakeImmich(assets={"a1": asset("a1", "img.jpg")}, tagged=set())
+        im = FakeImmich(assets={"a1": titled(asset("a1", "img.jpg"))}, tagged=set())
         gr = FakeGramps({"BBBBBB": {"gramps_id": "BBBBBB", "handle": "h1",
                                     "desc": "t", "path": "immich/img.jpg",
                                     "attribute_list": [
@@ -548,7 +578,7 @@ class TestSyncAssetsScan:
 
     def test_tagged_synced_in_step_asset_just_skips(self, conn):
         self._mint(conn, "BBBBBB", "a1")
-        im = FakeImmich(assets={"a1": asset("a1", "img.jpg")}, tagged={"a1"})
+        im = FakeImmich(assets={"a1": titled(asset("a1", "img.jpg"))}, tagged={"a1"})
         gr = FakeGramps({"BBBBBB": {"gramps_id": "BBBBBB", "handle": "h1",
                                     "desc": "t", "path": "immich/img.jpg",
                                     "attribute_list": [
@@ -562,7 +592,7 @@ class TestSyncAssetsScan:
         stacks = [{"id": "s1", "primaryAssetId": "new1",
                    "assets": [{"id": "new1"}, {"id": "old1"}]}]
         im = FakeImmich(
-            assets={"new1": asset("new1", "new.jpg"), "old1": asset("old1", "old.jpg")},
+            assets={"new1": titled(asset("new1", "new.jpg"), "T"), "old1": asset("old1", "old.jpg")},
             stacks=stacks, tagged=set())
         gr = FakeGramps({"BBBBBB": {"gramps_id": "BBBBBB", "handle": "h1",
                                     "desc": "T", "path": "immich/old.jpg",
@@ -596,25 +626,24 @@ class TestSyncAssetsScan:
         assert row["source_id"] == "new1"
         assert summary_of(events).data["versions_updated"] == 1
 
-    def test_apply_writes_title_and_date_drift(self, conn):
+    def test_apply_leaves_the_gramps_title_and_date_alone(self, conn):
         self._mint(conn, "BBBBBB", "a1")
         a = asset("a1")
         a["tags"] = [{"value": "Sync/Description"}, {"value": "Sync/Date"}]
-        a["exifInfo"] = {"description": "New title",
+        a["exifInfo"] = {"description": "Immich title",
                          "dateTimeOriginal": "1955-07-14T10:00:00Z"}
         im = FakeImmich(assets={"a1": a})
         gr = FakeGramps({"BBBBBB": {"gramps_id": "BBBBBB", "handle": "h1",
-                                    "desc": "Old title", "path": "immich/img.jpg",
-                                    "date": None}})
+                                    "desc": "Gramps title", "path": "immich/img.jpg",
+                                    "date": None, "attribute_list": [{"type": "Immich ID", "value": "a1"}]}})
         events = run_scan(im, gr, conn, apply=True)
-        assert len(gr.updated) == 1
-        media = gr.updated[0]
-        assert media["desc"] == "New title"
-        assert sync_immich.dates_equal(media["date"], sync_immich.build_gramps_date(a))
+        assert gr.updated == []
+        assert gr.media["BBBBBB"]["date"] is None
+        assert im.updated_assets == [("a1", {"description": "Gramps title"})]
         s = summary_of(events).data
-        assert s["titles_updated"] == 1 and s["dates_updated"] == 1
+        assert s["descriptions_updated"] == 1 and s["errors"] == 0
 
-    def test_moved_main_with_tagged_metadata_updates_file_title_date(self, conn):
+    def test_moved_main_with_tagged_metadata_updates_the_file_only(self, conn):
         self._mint(conn, "BBBBBB", "old1")
         stacks = [{"id": "s1", "primaryAssetId": "new1",
                    "assets": [{"id": "new1"}, {"id": "old1"}]}]
@@ -630,12 +659,12 @@ class TestSyncAssetsScan:
         preview = run_scan(im, gr, conn)
         updates = actions(preview, "would_update")
         assert len(updates) == 1
-        assert set(updates[0].data["cols"]) == {"file", "title", "date", "link"}
+        assert set(updates[0].data["cols"]) == {"file", "link", "description"}
         run_scan(im, gr, conn, apply=True)
         media = gr.updated[0]
         assert media["path"] == "immich/new.jpg"
-        assert media["desc"] == "Curated title"
-        assert sync_immich.dates_equal(media["date"], sync_immich.build_gramps_date(new1))
+        assert media["desc"] == "T" and media["date"] is None
+        assert new1["exifInfo"]["description"] == "T"
         attrs = {a["type"]: a["value"] for a in media["attribute_list"]}
         assert attrs["Immich ID"] == "new1"
 
@@ -1056,13 +1085,13 @@ class TestUpdatePlan:
             {"dateval": [0, 0, 1921, False], "modifier": 3, "quality": 1})
         assert not sync_immich.dates_equal(None, {"dateval": [0, 0, 1920, False]})
 
-    def test_title_and_date_drift(self):
+    def test_title_and_date_are_not_the_syncs_business(self):
         a = {"originalFileName": "img_0001.jpg",
              "exifInfo": {"description": "Grandma, 1920",
                           "dateTimeOriginal": "1920-06-01T10:00:00Z"},
              "tags": [{"value": "Sync/Description"}, {"value": "Sync/Date"}]}
         media = {"desc": "img_0001.jpg", "date": None, "checksum": "c"}
-        assert set(sync_immich.update_plan(a, media, self.MAPPED)) == {"title", "date"}
+        assert sync_immich.update_plan(a, media, self.MAPPED) == {}
 
     def test_in_sync(self):
         a = {"exifInfo": {"description": "T",
@@ -1145,22 +1174,21 @@ class TestTagScanGates:
             "VALUES (?, 'immich', ?, 't', '2026-01-01')", (gid, source_id))
         conn.commit()
 
-    def test_sync_date_gate_drives_an_update(self, conn):
+    def test_sync_date_gate_no_longer_drives_an_update(self, conn):
         self._mint(conn, "BBBBBB", "a1")
         a = asset("a1")
         a["tags"] = [{"value": "Sync/Date"}]
-        a["exifInfo"] = {"dateTimeOriginal": "1955-07-14T10:00:00Z"}
+        a["exifInfo"] = {"dateTimeOriginal": "1955-07-14T10:00:00Z", "description": "t"}
         im = FakeImmich(assets={"a1": a})
         gr = FakeGramps({"BBBBBB": {"gramps_id": "BBBBBB", "handle": "h1",
-                                    "desc": "t", "path": "immich/img.jpg", "date": None}})
-        events = run_scan(im, gr, conn)
-        updates = actions(events, "would_update")
-        assert len(updates) == 1 and "date" in updates[0].data["cols"]
+                                    "desc": "t", "path": "immich/img.jpg", "date": None,
+                                    "attribute_list": [{"type": "Immich ID", "value": "a1"}]}})
+        assert actions(run_scan(im, gr, conn), "would_update") == []
 
     def test_ungated_exif_date_is_hands_off(self, conn):
         self._mint(conn, "BBBBBB", "a1")
         a = asset("a1")
-        a["exifInfo"] = {"dateTimeOriginal": "1955-07-14T10:00:00Z"}
+        a["exifInfo"] = {"dateTimeOriginal": "1955-07-14T10:00:00Z", "description": "t"}
         im = FakeImmich(assets={"a1": a})
         gr = FakeGramps({"BBBBBB": {"gramps_id": "BBBBBB", "handle": "h1",
                                     "desc": "t", "path": "immich/img.jpg", "date": None,
@@ -1168,36 +1196,36 @@ class TestTagScanGates:
                                         {"type": "Immich ID", "value": "a1"}]}})
         assert actions(run_scan(im, gr, conn), "would_update") == []
 
-    def test_sync_description_gate_drives_a_retitle(self, conn):
+    def test_sync_description_gate_no_longer_retitles(self, conn):
         self._mint(conn, "BBBBBB", "a1")
         a = asset("a1")
         a["tags"] = [{"value": "Sync/Description"}]
         a["exifInfo"] = {"description": "Grandma at the lake"}
         im = FakeImmich(assets={"a1": a})
         gr = FakeGramps({"BBBBBB": {"gramps_id": "BBBBBB", "handle": "h1",
-                                    "desc": "img.jpg", "path": "immich/img.jpg"}})
+                                    "desc": "Grandma, 1920", "path": "immich/img.jpg",
+                                    "attribute_list": [{"type": "Immich ID", "value": "a1"}]}})
         events = run_scan(im, gr, conn)
         updates = actions(events, "would_update")
-        assert len(updates) == 1 and "title" in updates[0].data["cols"]
+        assert len(updates) == 1 and set(updates[0].data["cols"]) == {"description"}
+        run_scan(im, gr, conn, apply=True)
+        assert gr.updated == [] and a["exifInfo"]["description"] == "Grandma, 1920"
 
-    def test_sync_location_links_the_closest_place(self, conn):
+    def test_sync_location_leaves_a_registered_media_alone(self, conn):
         self._mint(conn, "BBBBBB", "a1")
-        a = asset("a1")
+        a = titled(asset("a1"))
         a["tags"] = [{"value": "Sync/Location"}]
-        a["exifInfo"] = {"latitude": 45.0001, "longitude": -93.0001}
+        a["exifInfo"].update({"latitude": 45.0001, "longitude": -93.0001})
         im = FakeImmich(assets={"a1": a})
         gr = FakeGramps(
             {"BBBBBB": {"gramps_id": "BBBBBB", "handle": "h1",
-                        "desc": "t", "path": "immich/img.jpg"}},
+                        "desc": "t", "path": "immich/img.jpg",
+                        "attribute_list": [{"type": "Immich ID", "value": "a1"}]}},
             places=[_place()])
         preview = run_scan(im, gr, conn, cfg=PLACE_CFG)
-        rows = [e for e in preview if e.kind == "item" and e.entity == "place"]
-        assert len(rows) == 1 and rows[0].action == "would_update"
+        assert [e for e in preview if e.kind == "item"] == []
+        run_scan(im, gr, conn, apply=True, cfg=PLACE_CFG)
         assert gr.updated_places == []
-        applied = run_scan(im, gr, conn, apply=True, cfg=PLACE_CFG)
-        assert len(gr.updated_places) == 1
-        assert gr.updated_places[0]["media_list"][0]["ref"] == "h1"
-        assert summary_of(applied).data["places_linked"] == 1
 
     def test_place_link_is_idempotent(self, conn):
         self._mint(conn, "BBBBBB", "a1")
@@ -1214,18 +1242,6 @@ class TestTagScanGates:
         events = run_scan(im, gr, conn, apply=True, cfg=PLACE_CFG)
         assert gr.updated_places == []
         assert [e for e in events if e.entity == "place"] == []
-
-    def test_place_only_row_applies_with_its_own_key(self, conn):
-        self._mint(conn, "BBBBBB", "a1")
-        a = asset("a1")
-        a["tags"] = [{"value": "Sync/Location"}]
-        a["exifInfo"] = {"latitude": 45.0, "longitude": -93.0}
-        im = FakeImmich(assets={"a1": a})
-        gr = FakeGramps({"BBBBBB": {"gramps_id": "BBBBBB", "handle": "h1",
-                                    "desc": "t", "path": "immich/img.jpg"}},
-                        places=[_place()])
-        run_scan(im, gr, conn, apply=True, selected={"place:a1"}, cfg=PLACE_CFG)
-        assert len(gr.updated_places) == 1
 
     def test_create_place_link_is_counted(self, conn):
         a = asset("a1")
@@ -1563,7 +1579,7 @@ class TestIdTags:
 
     def test_tag_present_only_in_the_other_account_still_writes(self, conn):
         self._mint(conn, "BBBBBB", "a1")
-        owner_view = asset("a1")
+        owner_view = titled(asset("a1"))
         owner_view["ownerId"] = "user-b"
         other_view = {**owner_view, "tags": [{"value": "ID/BBBBBB"}]}
         fh = FakeImmich(assets={"a1": other_view}, tagged=set(), me_id="user-a")
@@ -1586,7 +1602,7 @@ class TestIdTags:
 
     def test_existing_tag_is_left_alone(self, conn):
         self._mint(conn, "BBBBBB", "a1")
-        a = asset("a1")
+        a = titled(asset("a1"))
         a["tags"] = [{"value": "ID/BBBBBB"}]
         im = FakeImmich(assets={"a1": a}, tagged=set())
         gr = FakeGramps(self._media())

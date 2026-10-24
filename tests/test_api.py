@@ -10,7 +10,7 @@ from fastapi import FastAPI
 
 from bifrost.core import db
 from bifrost.core.config import SyncPaperlessConfig
-from bifrost.modules import codes, faces, photo_collections, photos, tables
+from bifrost.modules import codes, faces, photo_collections, tables
 from bifrost.web.routes import api as routes
 
 
@@ -259,8 +259,9 @@ def test_export(saved, ledger):
     cid = photo_collections.create(saved, "Portraits")["id"]
     photo_collections.add_items(saved, cid, ["asset-1", "asset-2"])
     faces.set_link(saved, "H_ANDERS", "imm-person-1", label="Anders")
-    photos.add_link(saved, "asset-2", "https://example.org/album/2")
-    photos.add_link(saved, "asset-1", "https://example.org/album/1")
+    saved.executemany("INSERT INTO photo_links (asset_id, url, added_at) VALUES (?, ?, 't')",
+                      [("asset-2", "https://example.org/album/2"), ("asset-1", "https://example.org/album/1")])
+    saved.commit()
     tables.save_table(saved, 11, 1, census(), 0, "Unsynced page")
     app = app_for(saved, paperless=Paperless({8: "69t5au", 11: None}),
                   gramps=Gramps({"H_ANDERS": ("I0007", "Anders")}, media={"R7KM3D": "Album"}))

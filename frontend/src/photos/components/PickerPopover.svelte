@@ -19,6 +19,7 @@
     size = 'small',
     shape = undefined,
     compact = false,
+    class: className = '',
     align = 'start',
     onPick,
     onOpen,
@@ -50,7 +51,7 @@
 <Popover.Root bind:open {onOpenChange}>
   <Popover.Trigger {disabled}>
     {#snippet child({ props })}
-      <Button {...props} {variant} {color} {size} {shape} leadingIcon={icon} {disabled}>
+      <Button {...props} {variant} {color} {size} {shape} class={className} leadingIcon={icon} {disabled}>
         <span class={['max-w-72 truncate', compact && 'max-sm:hidden']}>{label}</span>
       </Button>
     {/snippet}

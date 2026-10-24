@@ -73,7 +73,7 @@
     target="_blank"
     rel="noopener"
     icon={mdiOpenInNew}
-    size="tiny"
+    size="small"
     shape="round"
     variant="ghost"
     color="secondary"
@@ -81,13 +81,14 @@
   />
 {/snippet}
 
-<div class="flex flex-col gap-2">
+<div class="flex flex-col gap-4">
   <Field label="Title">
     <Input bind:value={form.title} />
   </Field>
 
-  <div class="@container flex flex-col gap-1.5">
+  <div class="@container flex flex-col gap-1">
     <Label label="Date" size="small" />
+    <div class="flex flex-col gap-2">
     {#if heldDate}
       <div class="flex flex-wrap items-center gap-2">
         <Badge color="secondary" shape="round" size="small" class="font-mono font-normal">{rec.date_readonly}</Badge>
@@ -147,10 +148,11 @@
         </Badge>
       {/if}
     {/if}
+    </div>
   </div>
 
-  <div class="flex flex-wrap items-end gap-x-4 gap-y-2">
-    <div class="flex flex-col items-start gap-1">
+  <div class="flex flex-wrap items-start gap-x-3 gap-y-2">
+    <div class="flex shrink-0 flex-col gap-1">
       <Label label="Place" size="small" />
       {#if manyPlaces}
         <div class="flex flex-wrap items-center gap-2">
@@ -169,11 +171,12 @@
           bind:query={placeQ}
           placeholder="Search Gramps places"
           empty={!placeQ.trim() ? '' : store.places ? 'No Gramps place matches' : 'Loading places…'}
+          class="h-10"
           onPick={(it) => (form.place = it.id === '__none' ? null : it)}
         />
       {/if}
     </div>
-    <Field label="Link" invalid={!!linkProblem(form.link)} class="min-w-56 grow">
+    <Field label="Link" invalid={!!linkProblem(form.link)} class="min-w-56 grow basis-0">
       <Input bind:value={form.link} placeholder="https://" trailingIcon={validLink(form.link) ? openLink : undefined} />
     </Field>
   </div>

@@ -4,13 +4,14 @@
   import { Dialog, Tabs } from 'bits-ui';
   import { untrack } from 'svelte';
   import { del, get, post, put, qs, upload } from '../lib/api.svelte.js';
-  import { dateProblem, filled, formFrom, formKey, payload } from '../lib/format.js';
+  import { dateProblem, filled, formFrom, formKey, linkProblem, payload } from '../lib/format.js';
   import { loadCollections, recordChanged } from '../lib/store.svelte.js';
   import AddVersionDialog from './AddVersionDialog.svelte';
   import CodeChoiceModal from './CodeChoiceModal.svelte';
   import CollectionsTab from './CollectionsTab.svelte';
   import DetailsTab from './DetailsTab.svelte';
   import Lightbox from './Lightbox.svelte';
+  import PeopleTab from './PeopleTab.svelte';
   import VersionsTab from './VersionsTab.svelte';
 
   let { assetId, onClose } = $props();
@@ -28,7 +29,7 @@
   let choosing = $state(null);
 
   const edited = $derived(!!form && formKey(form) !== saved);
-  const problem = $derived(form ? dateProblem(form.date) : '');
+  const problem = $derived(form ? dateProblem(form.date) || linkProblem(form.link) : '');
   const savable = $derived(edited && !problem && !!rec && !rec.gramps_error && (!!rec.gramps || filled(form)));
 
   const tabs = $derived.by(() => {
@@ -373,9 +374,9 @@
                 {/each}
               </Tabs.List>
               <Tabs.Content value="details" class="immich-scrollbar -mx-1 min-h-0 flex-1 overflow-y-auto px-1 pt-4">
-                <DetailsTab {rec} bind:form {busy} onError={(msg) => (status = { kind: 'error', msg })} />
+                <DetailsTab {rec} bind:form />
               </Tabs.Content>
-              <Tabs.Content value="versions" class="min-h-0 flex-1 pt-4">
+              <Tabs.Content value="versions" class="immich-scrollbar -mx-1 min-h-0 flex-1 overflow-y-auto px-1 pt-4">
                 <VersionsTab
                   {rec}
                   {busy}
@@ -388,29 +389,8 @@
                   onError={(msg) => (status = { kind: 'error', msg })}
                 />
               </Tabs.Content>
-              <Tabs.Content value="people" class="immich-scrollbar min-h-0 flex-1 overflow-y-auto pt-4">
-                {#if rec.people.length}
-                  <ul class="grid grid-cols-[repeat(auto-fill,minmax(10rem,1fr))] gap-3">
-                    {#each rec.people as p (p.id)}
-                      <li class="flex min-w-0 items-center gap-3">
-                        <img
-                          src="/faces/api/person-thumbnail/{p.id}"
-                          alt=""
-                          loading="lazy"
-                          class="size-12 shrink-0 rounded-full bg-gray-200 object-cover dark:bg-gray-700"
-                        />
-                        <div class="min-w-0">
-                          <p class="truncate text-sm">{p.name || '(unnamed)'}</p>
-                          {#if !p.linked}
-                            <p class="text-xs text-gray-600 dark:text-gray-400">Not linked</p>
-                          {/if}
-                        </div>
-                      </li>
-                    {/each}
-                  </ul>
-                {:else}
-                  <Text size="small" color="muted">No faces.</Text>
-                {/if}
+              <Tabs.Content value="people" class="immich-scrollbar -mx-1 min-h-0 flex-1 overflow-y-auto px-1 pt-4">
+                <PeopleTab {rec} />
               </Tabs.Content>
               <Tabs.Content value="collections" class="immich-scrollbar -mx-1 min-h-0 flex-1 overflow-y-auto px-1 pt-4">
                 <CollectionsTab {rec} {busy} onAdd={addToCollection} onRemove={removeFromCollection} onGo={onClose} />

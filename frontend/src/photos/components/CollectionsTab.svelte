@@ -1,8 +1,10 @@
 <script>
-  import { IconButton } from '@immich/ui';
+  import { IconButton, Text } from '@immich/ui';
   import { mdiBookmarkOutline, mdiBookmarkPlusOutline, mdiClose, mdiPlus } from '@mdi/js';
   import { plural } from '../lib/format.js';
   import { store } from '../lib/store.svelte.js';
+  import ListCard from './ListCard.svelte';
+  import ListRow from './ListRow.svelte';
   import PickerPopover from './PickerPopover.svelte';
 
   let { rec, busy, onAdd, onRemove, onGo } = $props();
@@ -24,10 +26,15 @@
     }
     return items;
   });
+
+  const count = (c) => (store.collections || []).find((x) => x.id === c.id)?.count;
 </script>
 
 <div class="flex flex-col gap-3">
-  <div class="flex flex-wrap items-center gap-3">
+  <div class="flex items-center gap-2">
+    <Text size="small" color="muted" class="grow">
+      {mine.length ? `In ${plural(mine.length, 'collection')}` : 'Not in a collection'}
+    </Text>
     <PickerPopover
       label="Add to collection"
       icon={mdiBookmarkPlusOutline}
@@ -36,26 +43,32 @@
       placeholder="Find or name a collection"
       empty={store.collections === null ? 'Loading collections…' : 'Type a name to create one'}
       disabled={!!busy}
+      align="end"
       onPick={onAdd}
     />
   </div>
   {#if mine.length}
-    <ul class="flex flex-col">
+    <ListCard>
       {#each mine as c (c.id)}
-        <li class="hover:bg-light-100 flex items-center gap-2 rounded-xl px-3 py-1">
-          <a href="#/collections/{c.id}" class="hover:text-primary grow truncate text-sm" onclick={onGo}>{c.name}</a>
-          <IconButton
-            icon={mdiClose}
-            size="small"
-            shape="round"
-            variant="ghost"
-            color="secondary"
-            aria-label="Remove from {c.name}"
-            disabled={!!busy}
-            onclick={() => onRemove(c)}
-          />
-        </li>
+        <ListRow icon={mdiBookmarkOutline}>
+          {#snippet trailing()}
+            <IconButton
+              icon={mdiClose}
+              size="small"
+              shape="round"
+              variant="ghost"
+              color="secondary"
+              aria-label="Remove from {c.name}"
+              disabled={!!busy}
+              onclick={() => onRemove(c)}
+            />
+          {/snippet}
+          <a href="#/collections/{c.id}" class="hover:text-primary block truncate text-sm font-medium" onclick={onGo}>{c.name}</a>
+          {#if count(c) !== undefined}
+            <p class="truncate text-xs text-gray-600 dark:text-gray-400">{plural(count(c), 'photo')}</p>
+          {/if}
+        </ListRow>
       {/each}
-    </ul>
+    </ListCard>
   {/if}
 </div>

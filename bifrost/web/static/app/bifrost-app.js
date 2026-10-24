@@ -24,9 +24,7 @@ const SECTIONS = [
   { id: 'other', title: 'Other tools', desc: 'Other tools for managing your data',
     body: html`<reprocess-page></reprocess-page>
       <div class="large-space"></div>
-      <places-links-page></places-links-page>
-      <div class="large-space"></div>
-      <places-manual-page></places-manual-page>` },
+      <places-links-page></places-links-page>` },
 ];
 
 class BifrostApp extends BifrostElement {

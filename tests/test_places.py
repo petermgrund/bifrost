@@ -3,7 +3,6 @@ import copy
 from types import SimpleNamespace
 
 import httpx
-import pytest
 from fastapi import FastAPI
 
 from bifrost.modules import places
@@ -67,10 +66,6 @@ def _fake_osm(monkeypatch):
 
     async def fake_lookup(osm_type, osm_id, **kw):
         lookups.append((osm_type, osm_id))
-        if osm_id == 404:
-            return None
-        if osm_id == 500:
-            raise httpx.ConnectError("nominatim is down")
         return {"osm_type": osm_type, "osm_id": osm_id, "lat": 60.5, "lon": 13.2,
                 "display_name": f"{osm_type} {osm_id}, Värmland, Sverige"}
 
@@ -78,16 +73,6 @@ def _fake_osm(monkeypatch):
     monkeypatch.setattr(places, "lookup_osm", fake_lookup)
     monkeypatch.setattr(places.asyncio, "sleep", _no_sleep)
     return searches, lookups
-
-
-@pytest.mark.parametrize("text,osm", [
-    ("62411", ("relation", 62411)), (" relation/62411 ", ("relation", 62411)), ("way/77", ("way", 77)),
-    ("https://www.openstreetmap.org/relation/62411#map=10/60.5/13.2", ("relation", 62411)),
-    ("https://www.openstreetmap.org/way/77", ("way", 77)),
-    ("", None), ("node/5", None), ("Norra Ny", None),
-])
-def test_parse_osm(text, osm):
-    assert places.parse_osm(text) == osm
 
 
 def test_listing_reads_links_coordinates_and_hierarchy():
@@ -148,60 +133,6 @@ def test_link_apply_reports_a_failed_search(monkeypatch):
     assert gr.updated == [] and events[-1].data == {"linked": 0, "located": 0, "errors": 1}
 
 
-def test_manual_scan_plans_the_link_and_the_coordinates(monkeypatch):
-    _, lookups = _fake_osm(monkeypatch)
-    gr = FakeGramps([PLACE_PARENT, PLACE_CHILD, PLACE_LOCATED])
-    suggestions = {}
-    events = _events(places.scan_manual(gr, "ph-hc", ("relation", 1795848), suggestions))
-    [row] = [e for e in events if e.kind == "item"]
-    assert lookups == [("relation", 1795848)]
-    assert (row.action, row.title, row.gramps_id) == ("would_create", "Hennepin County", "P0101")
-    assert row.data["cols"] == {"osm": "relation 1795848", "coordinates": "60.5000, 13.2000",
-                                "match": "relation 1795848, Värmland, Sverige"}
-    assert events[-1].data == {"linked": 1, "located": 1, "errors": 0}
-    assert suggestions["ph-hc"]["replace"] is True
-
-    events = _events(places.scan_manual(gr, "ph-cc", ("way", 404), suggestions))
-    [row] = [e for e in events if e.kind == "item"]
-    assert row.action == "would_create" and row.data["cols"] == {"osm": "way 404"}
-
-    events = _events(places.apply_links(gr, {"place:ph-hc", "place:ph-cc"}, suggestions))
-    assert {e.gramps_id: e.action for e in events if e.kind == "item"} == {"P0101": "created", "P0102": "created"}
-    assert places.osm_ref(gr.places["ph-hc"]) == ("relation", 1795848) and gr.places["ph-hc"]["lat"] == "60.500000"
-    assert places.osm_ref(gr.places["ph-cc"]) == ("way", 404) and gr.places["ph-cc"]["lat"] == "45.393900"
-
-
-def test_manual_scan_replaces_a_link_and_skips_the_same_one(monkeypatch):
-    _fake_osm(monkeypatch)
-    gr = FakeGramps([PLACE])
-    suggestions = {}
-    events = _events(places.scan_manual(gr, "ph1", ("relation", 62411), suggestions))
-    [row] = [e for e in events if e.kind == "item"]
-    assert row.action == "would_update" and set(row.data["cols"]) == {"coordinates", "match"}
-
-    events = _events(places.scan_manual(gr, "ph1", ("relation", 99), suggestions))
-    [row] = [e for e in events if e.kind == "item"]
-    assert row.action == "would_update" and row.data["cols"]["replaces"] == "relation 62411"
-    _events(places.apply_links(gr, {"place:ph1"}, suggestions))
-    assert places.osm_ref(gr.places["ph1"]) == ("relation", 99)
-
-    located = {**PLACE, "lat": "60.500000", "long": "13.200000"}
-    events = _events(places.scan_manual(FakeGramps([located]), "ph1", ("relation", 62411), {}))
-    [row] = [e for e in events if e.kind == "item"]
-    assert (row.action, row.detail) == ("skipped", "already linked to relation 62411")
-
-
-def test_manual_scan_links_without_nominatim(monkeypatch):
-    _fake_osm(monkeypatch)
-    gr = FakeGramps([PLACE_PARENT, PLACE_CHILD])
-    suggestions = {}
-    events = _events(places.scan_manual(gr, "ph-hc", ("relation", 500), suggestions))
-    [row] = [e for e in events if e.kind == "item"]
-    assert row.action == "would_create" and row.data["cols"] == {"osm": "relation 500"}
-    _events(places.apply_links(gr, {"place:ph-hc"}, suggestions))
-    assert places.osm_ref(gr.places["ph-hc"]) == ("relation", 500) and "lat" not in gr.places["ph-hc"]
-
-
 def _app(gramps):
     app = FastAPI()
     app.include_router(places_routes.router)
@@ -220,27 +151,17 @@ def _call(app, method, url, **kw):
     return asyncio.run(go())
 
 
-def test_manual_link_route(monkeypatch):
+def test_links_route(monkeypatch):
     _fake_osm(monkeypatch)
-    gr = FakeGramps([PLACE, PLACE_PARENT, PLACE_CHILD])
+    gr = FakeGramps([PLACE_PARENT, PLACE_CHILD])
     app = _app(gr)
-    assert _call(app, "GET", "/places/api/manual/config").json() == {"enabled": True}
-    assert [p["gramps_id"] for p in _call(app, "GET", "/places/api/list").json()] == ["P0101", "P0100"]
-
-    r = _call(app, "POST", "/places/api/manual/preview", json={"gramps_id": "p0101", "relation": "Norra Ny"})
-    assert r.status_code == 400 and "relation id" in r.json()["detail"]
-    r = _call(app, "POST", "/places/api/manual/preview", json={"gramps_id": "P9999", "relation": "1795848"})
-    assert r.status_code == 404 and r.json()["detail"] == "no Gramps place 'P9999'"
-
-    r = _call(app, "POST", "/places/api/manual/preview", json={"gramps_id": "p0101", "relation": "1795848"})
+    assert _call(app, "GET", "/places/api/links/config").json() == {"enabled": True}
+    assert _call(app, "GET", "/places").headers["location"] == "/#other"
+    r = _call(app, "POST", "/places/api/links/preview")
     assert r.status_code == 200 and r.json()["apply"] is False
     [row] = [e for e in r.json()["events"] if e["kind"] == "item"]
     assert (row["source_id"], row["action"], row["data"]["cols"]["osm"]) == ("ph-hc", "would_create", "relation 1795848")
-
-    assert _call(app, "POST", "/places/api/manual/apply", json={"selected": []}).status_code == 400
-    r = _call(app, "POST", "/places/api/manual/apply", json={"selected": ["place:ph-hc"]})
-    assert r.status_code == 200 and r.json()["apply"] is True
-    assert [e["action"] for e in r.json()["events"] if e["kind"] == "item"] == ["created"]
+    assert _call(app, "POST", "/places/api/links/apply", json={"selected": []}).status_code == 400
+    r = _call(app, "POST", "/places/api/links/apply", json={"selected": ["place:ph-hc"]})
+    assert r.status_code == 200 and [e["action"] for e in r.json()["events"] if e["kind"] == "item"] == ["created"]
     assert places.osm_ref(gr.places["ph-hc"]) == ("relation", 1795848)
-    assert [p["gramps_id"] for p in _call(app, "GET", "/places/api/list").json()] == ["P0100"]
-    assert _call(app, "GET", "/places").headers["location"] == "/#other"

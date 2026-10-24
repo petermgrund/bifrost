@@ -22,7 +22,8 @@ export const MONTH_OPTIONS = [{ value: '0', label: '—' }, ...MONTHS.map((label
 
 export const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 export const LINK_RE = /^https?:\/\/\S+$/i;
-export const shortLink = (url, max = 25) => (url.length > max ? `${url.slice(0, max)}…` : url);
+export const validLink = (s) => LINK_RE.test(s.trim());
+export const linkProblem = (s) => (s.trim() && !validLink(s) ? 'The link needs to start with http:// or https://' : '');
 
 export function dateParts(d) {
   return {
@@ -111,7 +112,7 @@ export function formFrom(rec) {
     date: { ...dateParts(rec.date), replace: false },
     place: rec.place ? placeItem(rec.place) : null,
     notes: rec.notes || '',
-    links: (rec.links || []).map((l) => l.url),
+    link: rec.links?.[0]?.url || '',
   };
 }
 
@@ -119,11 +120,11 @@ export function formKey(f) {
   const d = f.date;
   const span = d.modifier === 'span' ? [years(d.minus), years(d.plus)] : [];
   const date = [d.year.trim(), d.month, d.day.trim(), d.modifier, d.quality, ...span];
-  return JSON.stringify([f.title.trim(), f.notes.trim(), f.place?.id || null, date, f.links]);
+  return JSON.stringify([f.title.trim(), f.notes.trim(), f.place?.id || null, date, f.link.trim()]);
 }
 
 export function filled(f) {
-  return !!(f.title.trim() || f.notes.trim() || f.place || f.links.length || dateOf(f.date));
+  return !!(f.title.trim() || f.notes.trim() || f.place || f.link.trim() || dateOf(f.date));
 }
 
 export function payload(f, rec) {
@@ -132,7 +133,7 @@ export function payload(f, rec) {
     notes: f.notes,
     place_gramps_id: f.place?.id || null,
     date: dateOf(f.date),
-    links: f.links,
+    links: f.link.trim() ? [f.link.trim()] : [],
     change: rec.change,
   };
 }

@@ -1,6 +1,8 @@
 <script>
-  import { Alert, Badge, Button, ContextMenuButton, Input, MenuItemType, Text } from '@immich/ui';
+  import { Alert, Badge, Button, ContextMenuButton, IconButton, Input, MenuItemType, Text } from '@immich/ui';
   import {
+    mdiCheck,
+    mdiClose,
     mdiImagePlusOutline,
     mdiImageRemoveOutline,
     mdiRenameOutline,
@@ -10,6 +12,8 @@
   } from '@mdi/js';
   import { plural, sizeText } from '../lib/format.js';
   import { searchAssets } from '../lib/store.svelte.js';
+  import ListCard from './ListCard.svelte';
+  import ListRow from './ListRow.svelte';
   import PickerPopover from './PickerPopover.svelte';
 
   let { rec, busy, onAdd, onMatch, onPromote, onRemove, onLabel, onView, onError } = $props();
@@ -110,7 +114,7 @@
   }
 </script>
 
-<div class="flex h-full min-h-0 flex-col gap-3">
+<div class="flex flex-col gap-3">
   <div class="flex items-center gap-2">
     <Text size="small" color="muted" class="grow">
       {members.length > 1 ? plural(members.length, 'version') : 'No other versions'}
@@ -134,15 +138,13 @@
     <Alert color="danger" size="small" title={rec.versions.error} />
   {/if}
 
-  <div class="immich-scrollbar min-h-0 flex-1 overflow-y-auto">
-    {#if members.length}
-      <ul class="flex flex-col divide-y divide-gray-200 rounded-xl border border-gray-200 dark:divide-white/10 dark:border-white/10">
-        {#each members as m (m.asset_id)}
-          <li class="flex items-center gap-3 px-3 py-2">
-            <button type="button" class="shrink-0 cursor-zoom-in" title="View larger" onclick={() => onView(m)}>
-              <img src={m.thumb} alt="" class="size-12 rounded-lg object-cover" />
-            </button>
-            <div class="min-w-0 flex-1">
+  {#if members.length}
+    <ListCard>
+      {#each members as m (m.asset_id)}
+        <ListRow thumb={m.thumb} onView={() => onView(m)}>
+          {#snippet trailing()}
+            <ContextMenuButton aria-label="Actions for {m.label || m.filename}" items={menu(m)} disabled={!!busy} />
+          {/snippet}
               <div class="flex items-center gap-2">
                 {#if editLabel === m.asset_id}
                   <div class="max-w-72 min-w-0 flex-1">
@@ -162,6 +164,25 @@
                       onblur={() => saveLabel(m)}
                     />
                   </div>
+                  <IconButton
+                    icon={mdiCheck}
+                    size="small"
+                    shape="round"
+                    variant="ghost"
+                    aria-label="Save the name"
+                    onmousedown={(e) => e.preventDefault()}
+                    onclick={() => saveLabel(m)}
+                  />
+                  <IconButton
+                    icon={mdiClose}
+                    size="small"
+                    shape="round"
+                    variant="ghost"
+                    color="secondary"
+                    aria-label="Keep the old name"
+                    onmousedown={(e) => e.preventDefault()}
+                    onclick={() => (editLabel = null)}
+                  />
                 {:else}
                   <p class="truncate text-sm font-medium" title={m.label ? m.filename : undefined}>
                     {m.label || m.filename}
@@ -175,32 +196,26 @@
                   Differs: {m.drift.join(', ')}
                 </p>
               {/if}
-            </div>
-            <ContextMenuButton aria-label="Actions for {m.label || m.filename}" items={menu(m)} disabled={!!busy} />
-          </li>
-        {/each}
-      </ul>
-    {/if}
+        </ListRow>
+      {/each}
+    </ListCard>
+  {/if}
 
-    {#if suggestions.length}
-      <p class="mt-5 mb-1 px-1 text-xs font-medium text-gray-600 dark:text-gray-400">Suggestions</p>
-      <ul class="flex flex-col">
-        {#each suggestions as sg (sg.asset_id)}
-          {@const why = blocker(sg)}
-          <li class="hover:bg-light-100 flex items-center gap-3 rounded-xl px-3 py-1.5">
-            <button type="button" class="shrink-0 cursor-zoom-in" title="View larger" onclick={() => onView(sg)}>
-              <img src={sg.thumb} alt="" class="size-10 rounded-lg object-cover" />
-            </button>
-            <div class="min-w-0 flex-1">
-              <p class="truncate text-sm">{sg.title || sg.filename}</p>
-              <p class="truncate text-xs text-gray-600 dark:text-gray-400">{why || sg.why}</p>
-            </div>
-            <Button size="tiny" variant="outline" color="secondary" disabled={!!busy || !!why} onclick={() => onAdd(sg)}>
+  {#if suggestions.length}
+    <Text size="small" color="muted" class="mt-1">Suggestions</Text>
+    <ListCard>
+      {#each suggestions as sg (sg.asset_id)}
+        {@const why = blocker(sg)}
+        <ListRow thumb={sg.thumb} onView={() => onView(sg)}>
+          {#snippet trailing()}
+            <Button size="small" variant="outline" color="secondary" disabled={!!busy || !!why} onclick={() => onAdd(sg)}>
               Add
             </Button>
-          </li>
-        {/each}
-      </ul>
-    {/if}
-  </div>
+          {/snippet}
+          <p class="truncate text-sm font-medium">{sg.title || sg.filename}</p>
+          <p class="truncate text-xs text-gray-600 dark:text-gray-400">{why || sg.why}</p>
+        </ListRow>
+      {/each}
+    </ListCard>
+  {/if}
 </div>

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import re
 from typing import AsyncIterator
 
@@ -12,9 +11,7 @@ import httpx
 from ..core.clients import GrampsClient
 from ..core.events import SyncEvent
 
-log = logging.getLogger("bifrost.places")
 OSM_REF_RE = re.compile(r"openstreetmap\.org/(relation|way)/(\d+)")
-OSM_ID_RE = re.compile(r"^(relation|way)/(\d+)$")
 
 NOMINATIM_BASE = "https://nominatim.openstreetmap.org"
 NOMINATIM_PAUSE_S = 1.1
@@ -36,15 +33,6 @@ def osm_ref(place: dict) -> tuple[str, int] | None:
         if m:
             return m.group(1), int(m.group(2))
     return None
-
-
-def parse_osm(text: str | None) -> tuple[str, int] | None:
-    """'62411', 'relation/62411', 'way/77' or an openstreetmap.org URL"""
-    raw = (text or "").strip()
-    m = OSM_REF_RE.search(raw) or OSM_ID_RE.match(raw)
-    if m:
-        return m.group(1), int(m.group(2))
-    return ("relation", int(raw)) if raw.isdigit() else None
 
 
 async def listing(gramps: GrampsClient) -> list[dict]:
@@ -153,19 +141,13 @@ def _osm(match: dict) -> str:
 
 
 def _plan(row: dict, match: dict) -> dict:
-    """What a match adds to a place; a match marked replace swaps an existing link"""
+    """What a match adds to a place"""
     plan = {}
-    if match["osm_type"] in ("relation", "way") and (not row["osm_id"] or match.get("replace")) \
-            and (row["osm_type"], row["osm_id"]) != (match["osm_type"], match["osm_id"]):
+    if not row["osm_id"] and match["osm_type"] in ("relation", "way"):
         plan["osm"] = _osm(match)
     if not row["has_coords"] and "lat" in match:
         plan["coordinates"] = f'{match["lat"]:.4f}, {match["lon"]:.4f}'
     return plan
-
-
-def _action(row: dict, plan: dict, applied: bool) -> str:
-    new_link = "osm" in plan and not row["osm_id"]
-    return ("created" if new_link else "updated") if applied else ("would_create" if new_link else "would_update")
 
 
 async def _find(row: dict) -> dict | None:
@@ -200,40 +182,14 @@ async def scan_links(gramps: GrampsClient, suggestions: dict) -> AsyncIterator[S
                 suggestions[row["handle"]] = match
                 counts["linked"] += "osm" in plan
                 counts["located"] += "coordinates" in plan
-                yield SyncEvent(**_row(row), action=_action(row, plan, False),
+                yield SyncEvent(**_row(row),
+                                action="would_create" if "osm" in plan else "would_update",
                                 data={"cols": {**plan, "match": match["display_name"]},
                                       "suggestion": match})
         if i < len(todo) - 1:
             await asyncio.sleep(NOMINATIM_PAUSE_S)
     if todo:
         yield _progress("Searching OpenStreetMap", len(todo), len(todo))
-    yield SyncEvent(kind="summary", data=counts)
-
-
-async def scan_manual(
-    gramps: GrampsClient, handle: str, osm: tuple[str, int], suggestions: dict,
-) -> AsyncIterator[SyncEvent]:
-    """Preview linking one place to the OSM object given by hand"""
-    row = next(r for r in await listing(gramps) if r["handle"] == handle)
-    yield SyncEvent(kind="started", detail=f"{row['name']} to {osm[0]} {osm[1]}")
-    counts = {"linked": 0, "located": 0, "errors": 0}
-    match = {"osm_type": osm[0], "osm_id": osm[1], "display_name": "", "replace": True}
-    try:
-        match.update(await lookup_osm(*osm) or {})
-    except Exception as exc:  # noqa: BLE001
-        log.warning("places: OpenStreetMap lookup of %s %s failed: %s", osm[0], osm[1], exc)
-    plan = _plan(row, match)
-    if not plan:
-        yield SyncEvent(**_row(row), action="skipped", detail=f"already linked to {_osm(match)}")
-    else:
-        suggestions[handle] = match
-        counts["linked"] += "osm" in plan
-        counts["located"] += "coordinates" in plan
-        cols = {**plan, **({"match": match["display_name"]} if match["display_name"] else {})}
-        if "osm" in plan and row["osm_id"]:
-            cols["replaces"] = f'{row["osm_type"]} {row["osm_id"]}'
-        yield SyncEvent(**_row(row), action=_action(row, plan, False),
-                        data={"cols": cols, "suggestion": match})
     yield SyncEvent(kind="summary", data=counts)
 
 
@@ -266,8 +222,7 @@ async def apply_links(
             await write_place(
                 gramps, row["handle"],
                 osm=(match["osm_type"], match["osm_id"]) if "osm" in plan else None,
-                coords=(match["lat"], match["lon"]) if "coordinates" in plan else None,
-                replace=bool(match.get("replace")))
+                coords=(match["lat"], match["lon"]) if "coordinates" in plan else None)
         except Exception as exc:  # noqa: BLE001
             counts["errors"] += 1
             yield SyncEvent(**_row(row), action="failed", detail=str(exc)[:200])
@@ -275,7 +230,7 @@ async def apply_links(
         suggestions.pop(row["handle"], None)
         counts["linked"] += "osm" in plan
         counts["located"] += "coordinates" in plan
-        yield SyncEvent(**_row(row), action=_action(row, plan, True),
+        yield SyncEvent(**_row(row), action="created" if "osm" in plan else "updated",
                         data={"cols": {**plan, "match": match["display_name"]}})
         if i < len(todo) - 1:
             await asyncio.sleep(1)

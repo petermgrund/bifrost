@@ -7,14 +7,19 @@ dev/bifrost-dev.sh up
 dev/bifrost-dev.sh seed
 ```
 
-Then open http://localhost:8800.
+Then open `http://<PUBLIC_HOST>:8800` from any machine on the LAN.
 
 | Service | URL | Login |
 | --- | --- | --- |
-| Bifrost | http://localhost:8800 | none |
-| Gramps Web | http://localhost:5555 | `owner` / `bifrost-dev` |
-| Paperless-ngx | http://localhost:8000 | `admin` / `bifrost-dev` |
-| Immich | http://localhost:2283 | `owner@bifrost.dev` or `partner@bifrost.dev` / `bifrost-dev` |
+| Bifrost | `http://<PUBLIC_HOST>:8800` | none |
+| Gramps Web | `http://<PUBLIC_HOST>:5555` | `owner` / `bifrost-dev` |
+| Paperless-ngx | `http://<PUBLIC_HOST>:8000` | `admin` / `bifrost-dev` |
+| Immich | `http://<PUBLIC_HOST>:2283` | `owner@bifrost.dev` or `partner@bifrost.dev` / `bifrost-dev` |
+
+| `dev/.env` | |
+| --- | --- |
+| `BIND_ADDRESS` | `0.0.0.0` listens on the LAN, `127.0.0.1` on this Mac only |
+| `PUBLIC_HOST` | the name the services link each other by; `up` fills in this Mac's Bonjour name (`localhost` when bound to `127.0.0.1`); run `seed` after changing it |
 
 ## Commands
 

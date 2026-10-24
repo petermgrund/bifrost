@@ -4,8 +4,8 @@ import './immich-sync-page.js';
 import './transcribe-page.js';
 import './reprocess-page.js';
 import './faces-backfill-page.js';
-import './places-page.js';
 import './codes-page.js';
+import './reconcile-page.js';
 
 const SECTIONS = [
   { id: 'sync', title: 'Sync',
@@ -20,11 +20,11 @@ const SECTIONS = [
   { id: 'transcribe', title: 'Transcribe', desc: 'Run OCR on Paperless docs',
     body: html`<transcribe-page></transcribe-page>` },
   { id: 'codes', title: 'Codes', desc: 'Manage PID codes',
-    body: html`<codes-page></codes-page>` },
-  { id: 'other', title: 'Other tools', desc: 'Other tools for managing your data',
-    body: html`<reprocess-page></reprocess-page>
+    body: html`<codes-page></codes-page>
       <div class="large-space"></div>
-      <places-links-page></places-links-page>` },
+      <reconcile-page></reconcile-page>` },
+  { id: 'other', title: 'Other tools', desc: 'Other tools for managing your data',
+    body: html`<reprocess-page></reprocess-page>` },
 ];
 
 class BifrostApp extends BifrostElement {

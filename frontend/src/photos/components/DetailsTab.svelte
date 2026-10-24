@@ -1,5 +1,5 @@
 <script>
-  import { Badge, Button, Field, IconButton, Input, Label, Link, Select, Text, Textarea } from '@immich/ui';
+  import { Badge, Button, Field, IconButton, Input, Label, Link, Select, Text } from '@immich/ui';
   import { mdiMapMarkerOff, mdiMapMarkerPlusOutline, mdiOpenInNew } from '@mdi/js';
   import {
     MODIFIER,
@@ -31,11 +31,10 @@
     if (!q) return form.place ? [{ id: '__none', label: 'No place', icon: mdiMapMarkerOff }] : [];
     const rank = (p) => {
       const name = p.name.toLowerCase();
-      let r = -1;
-      if (name.startsWith(q)) r = 0;
-      else if (name.includes(q) || p.gramps_id.toLowerCase().includes(q)) r = 1;
-      else if (p.hierarchy.join(', ').toLowerCase().includes(q)) r = 2;
-      return r < 0 ? r : r + (p.tagged ? 0 : 3);
+      if (name.startsWith(q)) return 0;
+      if (name.includes(q) || p.gramps_id.toLowerCase().includes(q)) return 1;
+      if (p.hierarchy.join(', ').toLowerCase().includes(q)) return 2;
+      return -1;
     };
     return (store.places || [])
       .map((p) => ({ p, r: rank(p) }))
@@ -180,8 +179,4 @@
       <Input bind:value={form.link} placeholder="https://" trailingIcon={validLink(form.link) ? openLink : undefined} />
     </Field>
   </div>
-
-  <Field label="Notes">
-    <Textarea bind:value={form.notes} rows={4} grow />
-  </Field>
 </div>

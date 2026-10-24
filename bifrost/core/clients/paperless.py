@@ -131,16 +131,6 @@ class PaperlessClient:
         mime = resp.headers.get("content-type", "application/octet-stream").split(";")[0].strip()
         return resp.content, mime
 
-    async def download_archive(self, doc_id: int) -> tuple[bytes, str]:
-        """The archived PDF, or the original when Paperless kept no archive version"""
-        resp = await self._request("GET", f"/api/documents/{doc_id}/download/")
-        mime = resp.headers.get("content-type", "application/octet-stream").split(";")[0].strip()
-        return resp.content, mime
-
-    async def thumbnail(self, doc_id: int) -> tuple[bytes, str]:
-        resp = await self._request("GET", f"/api/documents/{doc_id}/thumb/")
-        return resp.content, resp.headers.get("content-type", "image/webp").split(";")[0].strip()
-
     async def patch_content(self, doc_id: int, content: str) -> None:
         """Overwrite doc searchable text field in place"""
         await self._request(
@@ -167,9 +157,6 @@ class PaperlessClient:
         except ValueError:
             return resp.text.strip().strip('"')
 
-    async def add_note(self, doc_id: int, text: str) -> None:
-        await self._request("POST", f"/api/documents/{doc_id}/notes/", json={"note": text})
-
     async def task_status(self, task_uuid: str) -> dict | None:
         """task row from /api/tasks/"""
         resp = await self._request("GET", "/api/tasks/", params={"task_id": task_uuid})
@@ -181,8 +168,3 @@ class PaperlessClient:
         """The id of every document"""
         docs = await self._paginated("/api/documents/", params={"fields": "id", "page_size": 1000})
         return {d["id"] for d in docs}
-
-    async def list_documents(self, fields: str | None = None) -> list[dict]:
-        """Every doc paginated"""
-        params = {"fields": fields} if fields else None
-        return await self._paginated("/api/documents/", params=params)

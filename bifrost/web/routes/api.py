@@ -34,7 +34,7 @@ async def get_code(request: Request, code: str) -> dict:
     found = codes.rows(st.conn, live, _urls(st.cfg), only=[wanted], titles=titles) if wanted else []
     if not found or not api.known(found[0]):
         raise HTTPException(404, f"{wanted or code} isn't in Bifrost's ledger")
-    return api.code(found[0], api.children(st.conn))
+    return api.code(found[0])
 
 
 @router.get("/export")

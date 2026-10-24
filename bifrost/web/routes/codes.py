@@ -1,4 +1,4 @@
-"""Codes page + API: mint, claim, describe and withdraw GDA codes"""
+"""Codes page + API: mint, claim, withdraw and reconcile GDA codes"""
 
 from __future__ import annotations
 
@@ -11,7 +11,8 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 from ...core.clients.gramps import GrampsError
-from ...modules import codes
+from ...modules import codes, reconcile
+from ..runs import record_run
 
 router = APIRouter(prefix="/codes", tags=["codes"])
 log = logging.getLogger("bifrost.codes")
@@ -105,10 +106,6 @@ async def list_codes(request: Request, status: str = "", q: str = "") -> dict:
 
 
 class MintBody(BaseModel):
-    kind: str = "item"
-    note: str = ""
-    parent: str | None = None
-    location: str | None = None
     count: int = 1
 
 
@@ -116,14 +113,10 @@ class MintBody(BaseModel):
 async def mint(request: Request, body: MintBody) -> dict:
     st = _state(request)
     try:
-        codes.check_description(st.conn, kind=body.kind, note=body.note,
-                                parent=body.parent, location=body.location)
         if not 1 <= body.count <= codes.MAX_MINT:
             raise codes.CodeError(400, f"Mint between 1 and {codes.MAX_MINT} codes at a time.")
         live, paperless = await _taken(st)
-        new = codes.mint(st.conn, kind=body.kind, note=body.note, parent=body.parent,
-                         location=body.location, count=body.count, live=live,
-                         paperless=paperless)
+        new = codes.mint(st.conn, body.count, live, paperless)
     except codes.CodeError as exc:
         raise _refuse(exc)
     items = {r["code"]: r for r in codes.rows(st.conn, live, _urls(st.cfg), only=new)}
@@ -132,10 +125,6 @@ async def mint(request: Request, body: MintBody) -> dict:
 
 class ClaimBody(BaseModel):
     code: str = ""
-    kind: str = "item"
-    note: str = ""
-    parent: str | None = None
-    location: str | None = None
 
 
 @router.post("/api/claim")
@@ -144,12 +133,8 @@ async def claim(request: Request, body: ClaimBody) -> dict:
     st = _state(request)
     try:
         codes.check_new(st.conn, body.code)
-        codes.check_description(st.conn, kind=body.kind, note=body.note,
-                                parent=body.parent, location=body.location)
         live, paperless = await _taken(st)
-        code = codes.claim(st.conn, body.code, kind=body.kind, note=body.note,
-                           parent=body.parent, location=body.location, live=live,
-                           paperless=paperless)
+        code = codes.claim(st.conn, body.code, live, paperless)
     except codes.CodeError as exc:
         raise _refuse(exc)
     return {"codes": [code], "items": [_item(st, code, live)]}
@@ -177,35 +162,59 @@ async def export_csv(request: Request) -> Response:
                     headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
+class ReconcileBody(BaseModel):
+    selected: list[str] | None = None
+
+
+@router.get("/api/reconcile/config")
+async def reconcile_config(request: Request) -> dict:
+    return {"enabled": True}
+
+
+@router.post("/api/reconcile/preview")
+async def reconcile_preview(request: Request, body: ReconcileBody = ReconcileBody()) -> dict:
+    st = _state(request)
+    gen = reconcile.scan(st.gramps, st.paperless, getattr(st, "immich_accounts", []), st.conn,
+                         apply=False)
+    run_id, events = await record_run(st.conn, "codes.reconcile.preview", gen)
+    return {"run_id": run_id, "apply": False, "events": [e.__dict__ for e in events]}
+
+
+@router.post("/api/reconcile/apply")
+async def reconcile_apply(request: Request, body: ReconcileBody = ReconcileBody()) -> dict:
+    st = _state(request)
+    gen = reconcile.scan(st.gramps, st.paperless, getattr(st, "immich_accounts", []), st.conn,
+                         apply=True, selected=set(body.selected) if body.selected is not None else None)
+    run_id, events = await record_run(st.conn, "codes.reconcile", gen)
+    st.caches.clear()
+    return {"run_id": run_id, "apply": True, "events": [e.__dict__ for e in events]}
+
+
 class WithdrawBody(BaseModel):
     reason: str = ""
-    successor: str | None = None
+    superseded_by: str | None = None
 
 
 @router.post("/api/{code}/withdraw")
 async def withdraw(request: Request, code: str, body: WithdrawBody) -> dict:
     st = _state(request)
     try:
-        code = codes.withdraw(st.conn, code, body.reason, body.successor)
+        code = codes.withdraw(st.conn, code, body.reason, body.superseded_by)
     except codes.CodeError as exc:
         raise _refuse(exc)
     return {"item": _item(st, code)}
 
 
 class PatchBody(BaseModel):
-    note: str | None = None
-    notes: str | None = None
-    successor: str | None = None
-    kind: str | None = None
-    parent: str | None = None
-    location: str | None = None
+    superseded_by: str | None = None
 
 
 @router.patch("/api/{code}")
 async def patch(request: Request, code: str, body: PatchBody) -> dict:
+    """Name, change or clear the code that takes a withdrawn code's place"""
     st = _state(request)
     try:
-        code = codes.update(st.conn, code, body.model_dump(exclude_unset=True))
+        code = codes.supersede(st.conn, code, body.superseded_by)
     except codes.CodeError as exc:
         raise _refuse(exc)
     return {"item": _item(st, code)}
@@ -221,30 +230,6 @@ async def delete(request: Request, code: str) -> dict:
     except codes.CodeError as exc:
         raise _refuse(exc)
     return {"deleted": code}
-
-
-class InstanceBody(BaseModel):
-    value: str = ""
-
-
-@router.post("/api/{code}/instances")
-async def add_instance(request: Request, code: str, body: InstanceBody) -> dict:
-    st = _state(request)
-    try:
-        code = codes.add_instance(st.conn, code, body.value)
-    except codes.CodeError as exc:
-        raise _refuse(exc)
-    return {"item": _item(st, code)}
-
-
-@router.delete("/api/{code}/instances/{instance_id}")
-async def remove_instance(request: Request, code: str, instance_id: int) -> dict:
-    st = _state(request)
-    try:
-        code = codes.remove_instance(st.conn, code, instance_id)
-    except codes.CodeError as exc:
-        raise _refuse(exc)
-    return {"item": _item(st, code)}
 
 
 @router.get("/api/{code}/thumbnail")

@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
-import re
 
 import httpx
 
@@ -108,38 +106,12 @@ class GrampsClient:
         resp = await self._request("GET", "/metadata/")
         return resp.json()
 
-    async def list_people(self, extend_media: bool = False) -> list[dict]:
-        params = {"extend": "media_list"} if extend_media else {}
-        return await self._paged("/people/", **params)
+    async def list_people(self, keys: str | None = None) -> list[dict]:
+        return await self._paged("/people/", **({"keys": keys} if keys else {}))
 
-    async def get_person(self, handle: str) -> dict:
-        resp = await self._request("GET", f"/people/{handle}")
-        return resp.json()
-
-    async def find_people(self, rules: dict | None, limit: int = 20, sort: str = "name") -> list[dict]:
-        """People matching Gramps filter rules, each with its profile (name, birth, death)"""
-        params = {"pagesize": limit, "page": 1, "sort": sort, "profile": "self",
-                  "keys": "handle,gramps_id,profile,media_list"}
-        if rules:
-            params["rules"] = json.dumps(rules)
-        resp = await self._request("GET", "/people/", params=params)
-        items = resp.json()
-        return items if isinstance(items, list) else []
-
-    async def person_photo(self, handle: str, size: int = 64) -> tuple[bytes, str] | None:
-        """The person's first picture as a square thumbnail, cropped to its region"""
-        resp = await self._request("GET", f"/people/{handle}", ok_404=True,
-                                   params={"keys": "media_list"})
-        refs = [] if resp.status_code == 404 else resp.json().get("media_list") or []
-        if not refs:
-            return None
-        rect = refs[0].get("rect") or []
-        crop = "/cropped/" + "/".join(str(int(v)) for v in rect) if len(rect) == 4 and any(rect) else ""
-        img = await self._request("GET", f"/media/{refs[0]['ref']}{crop}/thumbnail/{size}",
-                                  ok_404=True, params={"square": "true"})
-        if img.status_code == 404:
-            return None
-        return img.content, img.headers.get("Content-Type", "image/jpeg")
+    async def get_person(self, handle: str, ok_404: bool = False) -> dict | None:
+        resp = await self._request("GET", f"/people/{handle}", ok_404=ok_404)
+        return None if resp.status_code == 404 else resp.json()
 
     async def update_person(self, handle: str, person_obj: dict) -> dict:
         resp = await self._request(
@@ -150,38 +122,6 @@ class GrampsClient:
 
     async def list_media(self, keys: str | None = None) -> list[dict]:
         return await self._paged("/media/", **({"keys": keys} if keys else {}))
-
-    async def recent_media(self, limit: int = 30) -> list[dict]:
-        """Media objects most recently changed in Gramps"""
-        resp = await self._request(
-            "GET", "/media/",
-            params={"sort": "-change", "pagesize": limit, "page": 1,
-                    "keys": "handle,gramps_id,desc,attribute_list,change"})
-        items = resp.json()
-        return items if isinstance(items, list) else []
-
-    async def bookmarks(self) -> dict:
-        resp = await self._request("GET", "/bookmarks/")
-        data = resp.json()
-        return data if isinstance(data, dict) else {}
-
-    async def search_media(self, query: str, limit: int = 10) -> list[dict]:
-        """Media whose title or Gramps ID matches the query, via Gramps filter rules"""
-        pattern = re.escape(query.strip())
-        rules = {"function": "or", "rules": [
-            {"name": "HasMedia", "values": [pattern, "", "", ""], "regex": True},
-            {"name": "RegExpIdOf", "values": [pattern]}]}
-        resp = await self._request(
-            "GET", "/media/",
-            params={"rules": json.dumps(rules), "pagesize": limit, "page": 1,
-                    "keys": "handle,gramps_id,desc,attribute_list,change"})
-        items = resp.json()
-        return items if isinstance(items, list) else []
-
-    async def count(self, path: str) -> int:
-        """Total objects"""
-        resp = await self._request("GET", path, params={"pagesize": 1, "page": 1})
-        return int(resp.headers.get("X-Total-Count", 0))
 
     async def list_media_gramps_ids(self) -> set[str]:
         items = await self._paged("/media/", keys="gramps_id")
@@ -248,17 +188,6 @@ class GrampsClient:
     async def list_places_full(self) -> list[dict]:
         return await self._paged("/places/")
 
-    async def list_transaction_history(self, payloads: bool = False) -> list[dict]:
-        """The tree's full transaction log"""
-        params = {"old": 1, "new": 1} if payloads else {}
-        return await self._paged("/transactions/history/", page_size=1000, **params)
-
-    async def list_events_min(self) -> list[dict]:
-        return await self._paged("/events/", keys="handle,citation_list")
-
-    async def list_handles(self, path: str) -> set[str]:
-        return {o["handle"] for o in await self._paged(path, page_size=1000, keys="handle")}
-
     async def get_media_by_gramps_id(self, gramps_id: str, backlinks: bool = False) -> dict | None:
         """One media object; with backlinks, the objects referencing it ride along under 'backlinks'"""
         params = {"gramps_id": gramps_id}
@@ -287,17 +216,9 @@ class GrampsClient:
                 raise
 
     async def create_note(self, note_obj: dict) -> dict:
-        return await self.create_object(note_obj)
-
-    async def create_object(self, obj: dict) -> dict:
-        """Create any Gramps object"""
-        return await self.create_objects([obj])
-
-    async def create_objects(self, objs: list[dict]) -> dict:
-        """Create Gramps objects in one transaction"""
         resp = await self._request(
             "POST", "/objects",
-            json=objs, headers={"Content-Type": "application/json"},
+            json=[note_obj], headers={"Content-Type": "application/json"},
         )
         return resp.json()
 
@@ -354,8 +275,6 @@ class GrampsClient:
         resp = await self._request("GET", f"/places/{handle}", params=params or None)
         return resp.json()
 
-    async def list_places(self, keys: str = "handle") -> list[dict]:
-        return await self._paged("/places/", page_size=500, keys=keys)
 
 
 def person_display_name(person: dict) -> str:

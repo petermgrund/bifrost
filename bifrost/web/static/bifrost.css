@@ -144,7 +144,6 @@ dialog.codes-dialog {
   inline-size: min(40rem, 94vw);
 }
 dialog.codes-dialog table td { block-size: auto; padding-block: 0.25rem; }
-dialog.codes-dialog td.codes-wrap { overflow-wrap: anywhere; }
 .codes-head { display: flex; gap: 1rem; align-items: flex-start; }
 .codes-head > .max { flex: 1; min-inline-size: 0; }
 .codes-thumb {

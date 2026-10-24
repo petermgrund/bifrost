@@ -52,9 +52,9 @@ services:
       GRAMPS_URL: http://grampsweb:5000
       PAPERLESS_URL: http://paperless:8000
       IMMICH_URL: http://immich-server:2283
-      GRAMPS_PUBLIC_URL: http://localhost:${GRAMPS_PORT:-5555}
-      PAPERLESS_PUBLIC_URL: http://localhost:${PAPERLESS_PORT:-8000}
-      IMMICH_PUBLIC_URL: http://localhost:${IMMICH_PORT:-2283}
+      GRAMPS_PUBLIC_URL: http://${PUBLIC_HOST:-localhost}:${GRAMPS_PORT:-5555}
+      PAPERLESS_PUBLIC_URL: http://${PUBLIC_HOST:-localhost}:${PAPERLESS_PORT:-8000}
+      IMMICH_PUBLIC_URL: http://${PUBLIC_HOST:-localhost}:${IMMICH_PORT:-2283}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
     depends_on:
       grampsweb: {condition: service_healthy}
@@ -114,7 +114,7 @@ services:
       PAPERLESS_DBUSER: paperless
       PAPERLESS_DBPASS: paperless
       PAPERLESS_SECRET_KEY: bifrost-dev-not-a-secret
-      PAPERLESS_URL: http://localhost:${PAPERLESS_PORT:-8000}
+      PAPERLESS_URL: http://${PUBLIC_HOST:-localhost}:${PAPERLESS_PORT:-8000}
       PAPERLESS_ADMIN_USER: admin
       PAPERLESS_ADMIN_PASSWORD: ${DEV_PASSWORD:-bifrost-dev}
       PAPERLESS_ADMIN_MAIL: admin@bifrost.dev

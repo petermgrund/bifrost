@@ -34,14 +34,6 @@ class GeminiClient:
     async def close(self) -> None:
         await self._client.aclose()
 
-    async def list_models(self) -> list[str]:
-        """Model ids available to this key (for confirming the configured id)."""
-        resp = await self._client.get(f"{API_BASE}/models", params={"key": self._key})
-        if resp.status_code >= 400:
-            raise GeminiError(f"{resp.status_code}: {resp.text[:300]}")
-        return [m.get("name", "").removeprefix("models/")
-                for m in resp.json().get("models", [])]
-
     async def transcribe(
         self, data: bytes, mime: str, prompt: str,
         thinking_budget: int | None = None,

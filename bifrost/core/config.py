@@ -43,15 +43,10 @@ class SyncImmichConfig:
     public_url: str = ""
     path_mappings: tuple[tuple[str, str], ...] = ()
     previews_prefix: str = ""
-    # temp legacy face-linker person_map.yaml
-    person_map_path: Path | None = None
-    place_tag_handle: str = ""
-    # parent tag for the ID/{gramps_id} write-back; empty disables it
+    # parent tag for the ID/{gramps_id} write-back
     id_tag_prefix: str = "ID"
-    place_tag_prefix: str = "Place"
-    note_sync_tag: str = "Sync/Note"
     gramps_public_url: str = ""
-    # account labels the Photos section browses; empty means every account
+    # account labels the Photos section browses
     photos_accounts: tuple[str, ...] = ()
 
 
@@ -65,6 +60,7 @@ class SyncPaperlessConfig:
     date_qualifier_field_id: int | None = None
     transcription_tag_id: int | None = None
     ocr_tag: str = ""
+    webhook_token: str = ""
 
 
 @dataclass(frozen=True)
@@ -133,6 +129,7 @@ def load_config(path: str | Path | None = None) -> Config:
         date_qualifier_field_id=int_or_none(sp_raw, "sync.paperless", "date_qualifier_field_id"),
         transcription_tag_id=int_or_none(sp_raw, "sync.paperless", "transcription_tag_id"),
         ocr_tag=sp_raw.get("ocr_tag") or "",
+        webhook_token=str(sp_raw.get("webhook_token") or "").strip(),
     )
     im_raw = raw.get("immich") or {}
     si_raw = (raw.get("sync") or {}).get("immich") or {}
@@ -155,11 +152,7 @@ def load_config(path: str | Path | None = None) -> Config:
         public_url=(si_raw.get("public_url") or "").rstrip("/"),
         path_mappings=tuple(mappings),
         previews_prefix=previews_prefix,
-        person_map_path=Path(p) if (p := si_raw.get("person_map_path")) else None,
-        place_tag_handle=(si_raw.get("place_tag_handle") or "").strip(),
         id_tag_prefix=str(si_raw.get("id_tag_prefix", "ID") or "").strip().strip("/"),
-        place_tag_prefix=str(si_raw.get("place_tag_prefix", "Place") or "").strip().strip("/"),
-        note_sync_tag=(si_raw.get("note_sync_tag") or "Sync/Note").strip(),
         gramps_public_url=(si_raw.get("gramps_public_url")
                            or sp_raw.get("gramps_public_url") or "").rstrip("/"),
         photos_accounts=tuple(

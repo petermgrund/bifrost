@@ -47,3 +47,31 @@ def test_active_cleared_when_generator_raises(tmp_path):
 
     assert not runs.ACTIVE
     assert conn.execute("SELECT status FROM runs").fetchone()["status"] == "error"
+
+
+def test_sweep_closes_the_runs_a_restart_left_running(tmp_path):
+    conn = db.connect(tmp_path / "s.db")
+    conn.execute("INSERT INTO runs (job, status, started_at) VALUES ('sync.paperless', 'running', 't')")
+    conn.execute("INSERT INTO runs (job, status, started_at) VALUES ('sync.immich', 'running', 't')")
+    conn.execute("INSERT INTO runs (job, status, started_at, finished_at) VALUES ('ocr.gemini', 'ok', 't', 't')")
+    conn.commit()
+
+    assert runs.sweep(conn) == 2
+    rows = {r["job"]: r for r in conn.execute("SELECT job, status, finished_at FROM runs")}
+    assert rows["sync.paperless"]["status"] == rows["sync.immich"]["status"] == "interrupted"
+    assert rows["sync.paperless"]["finished_at"].endswith("+00:00")
+    assert (rows["ocr.gemini"]["status"], rows["ocr.gemini"]["finished_at"]) == ("ok", "t")
+    assert runs.sweep(conn) == 0
+
+
+def test_run_timestamps_are_utc(tmp_path):
+    conn = db.connect(tmp_path / "u.db")
+
+    async def events():
+        yield SyncEvent(kind="summary", data={})
+
+    run_id, _ = asyncio.run(runs.record_run(conn, "sync.paperless", events()))
+    row = conn.execute("SELECT started_at, finished_at FROM runs WHERE id=?", (run_id,)).fetchone()
+    assert row["started_at"].endswith("+00:00") and row["finished_at"].endswith("+00:00")
+    ts = conn.execute("SELECT ts FROM run_events WHERE run_id=?", (run_id,)).fetchone()["ts"]
+    assert ts.endswith("+00:00")

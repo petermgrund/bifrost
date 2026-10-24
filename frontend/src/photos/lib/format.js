@@ -1,4 +1,4 @@
-import { mdiMapMarker, mdiMapMarkerOff, mdiMapMarkerOutline } from '@mdi/js';
+import { mdiMapMarkerOff, mdiMapMarkerOutline } from '@mdi/js';
 
 export const MODIFIER = [
   { value: 'regular', label: 'Regular' },
@@ -102,7 +102,7 @@ export function placeItem(p) {
     id: p.gramps_id,
     label: p.name || p.gramps_id,
     sub: [parents, p.gramps_id].filter(Boolean).join(' · '),
-    icon: p.known === false ? mdiMapMarkerOff : p.tagged ? mdiMapMarker : mdiMapMarkerOutline,
+    icon: p.known === false ? mdiMapMarkerOff : mdiMapMarkerOutline,
   };
 }
 

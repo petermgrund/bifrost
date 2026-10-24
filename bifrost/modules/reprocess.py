@@ -7,7 +7,7 @@ from typing import AsyncIterator
 from pypdf import PdfReader, PdfWriter
 
 from ..core.clients import PaperlessClient
-from ..core.events import SyncEvent
+from ..core.events import SyncEvent, progress
 
 MODE_WIDEST = "widest"
 MODE_NARROWEST = "narrowest"
@@ -234,12 +234,6 @@ async def scan_mixed_widths(paperless: PaperlessClient, tag_name: str) -> dict:
             "rows": rows, "errors": errors}
 
 
-def _progress(label: str, done: int, total: int) -> SyncEvent:
-    return SyncEvent(kind="progress", detail=label,
-                     data={"done": done, "total": total,
-                           "percent": round(100 * done / total) if total else 100})
-
-
 async def scan(paperless: PaperlessClient, tag_name: str) -> AsyncIterator[SyncEvent]:
     counts = {"mixed": 0, "errors": 0}
     tag_id = await paperless.resolve_tag_id(tag_name)
@@ -256,10 +250,10 @@ async def scan(paperless: PaperlessClient, tag_name: str) -> AsyncIterator[SyncE
     pending = [asyncio.ensure_future(_measure(paperless, d, sem)) for d in candidates]
     measured: list[dict | None] = []
     for i, fut in enumerate(asyncio.as_completed(pending)):
-        yield _progress("Measuring page widths", i, len(candidates))
+        yield progress("Measuring page widths", i, len(candidates))
         measured.append(await fut)
     if candidates:
-        yield _progress("Measuring page widths", len(candidates), len(candidates))
+        yield progress("Measuring page widths", len(candidates), len(candidates))
     for m in sorted((m for m in measured if m), key=lambda r: r["doc_id"], reverse=True):
         if "error" in m:
             counts["errors"] += 1
@@ -281,7 +275,7 @@ async def run_batch(
     totals = {"pages_scaled": 0, "skipped": 0, "uploaded": 0, "errors": 0}
     label = "Rebuilding documents"
     for i, doc_id in enumerate(doc_ids):
-        yield _progress(label, i, len(doc_ids))
+        yield progress(label, i, len(doc_ids))
         async for ev in run(paperless, doc_id, mode, apply=True, wait_consume=False):
             if ev.kind == "summary":
                 for key, n in (ev.data or {}).items():
@@ -293,5 +287,5 @@ async def run_batch(
             elif ev.kind != "started" and ev.entity != "page":
                 yield ev
     if doc_ids:
-        yield _progress(label, len(doc_ids), len(doc_ids))
+        yield progress(label, len(doc_ids), len(doc_ids))
     yield SyncEvent(kind="summary", data=totals)

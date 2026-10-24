@@ -27,6 +27,7 @@ GENERATED = DEV / "data" / "samples"
 URLS = {
     "gramps": os.environ.get("GRAMPS_URL", "http://grampsweb:5000"),
     "paperless": os.environ.get("PAPERLESS_URL", "http://paperless:8000"),
+    "bifrost": os.environ.get("BIFROST_URL", "http://bifrost:8800"),
     "immich": os.environ.get("IMMICH_URL", "http://immich-server:2283"),
 }
 PUBLIC = {
@@ -40,11 +41,11 @@ PAPERLESS_USER = "admin"
 IMMICH_OWNER = ("owner@bifrost.dev", "Dev Owner")
 IMMICH_PARTNER = ("partner@bifrost.dev", "Dev Partner")
 
-PLACE_TAG = "Bifrost Place"
 SKIP_TITLE_TAG = "skip-title-sync"
-IMMICH_TAGS = ["Sync/Gramps", "Sync/Date", "Sync/Location", "Sync/Description",
-               "Sync/ManualFaces", "Date/Approximate", "Date/Before", "Date/After",
-               "Date/Estimated", "Date/Calculated", "Date/Year", "Date/Month", "ID"]
+WEBHOOK_TOKEN = os.environ.get("WEBHOOK_TOKEN", "bifrost-dev-webhook")
+WORKFLOW_NAME = "Bifrost sync"
+IMMICH_TAGS = ["Sync/Gramps", "ID"]
+PERSON_ATTR = "Immich Person ID"
 PAPERLESS_TAGS = ["doc", "img", "transcription", "Gemini OCR"]
 DATE_QUALIFIERS = ["Exact", "Circa", "Before", "After", "Year only", "Decade only"]
 DATE_MEANINGS = ["Event", "Creation", "Issuance", "Publication", "Scan"]
@@ -102,11 +103,10 @@ ABOUT = 3
 class Tree:
     """Builds the object list for one POST /api/objects/ call"""
 
-    def __init__(self, place_tag: str) -> None:
+    def __init__(self) -> None:
         self.objects: list[dict] = []
         self.counters: dict[str, int] = {}
         self.places: dict[str, str] = {}
-        self.place_tag = place_tag
 
     def gid(self, prefix: str) -> str:
         n = self.counters.get(prefix, 9000) + 1
@@ -120,8 +120,7 @@ class Tree:
         return obj["handle"]
 
     def place(self, name: str, ptype: str, parent: str | None = None,
-              coords: tuple[float, float] | None = None, title: str | None = None,
-              osm_relation: int | None = None) -> str:
+              coords: tuple[float, float] | None = None, title: str | None = None) -> str:
         h = handle()
         obj = {"_class": "Place", "handle": h, "gramps_id": self.gid("P"),
                "name": {"_class": "PlaceName", "value": name}, "place_type": ptype,
@@ -129,11 +128,7 @@ class Tree:
                "placeref_list": [{"_class": "PlaceRef", "ref": parent}] if parent else [],
                "lat": f"{coords[0]:.6f}" if coords else "",
                "long": f"{coords[1]:.6f}" if coords else "",
-               "tag_list": [self.place_tag] if coords else []}
-        if osm_relation:
-            obj["urls"] = [{"_class": "Url", "type": "OSM URL", "desc": "",
-                            "path": f"https://www.openstreetmap.org/relation/{osm_relation}",
-                            "private": False}]
+               "tag_list": []}
         self.places[name] = h
         return self.add(obj)
 
@@ -200,8 +195,8 @@ class Tree:
                          "type": ntype, "format": 0})
 
 
-def build_tree(place_tag: str) -> Tree:
-    t = Tree(place_tag)
+def build_tree() -> Tree:
+    t = Tree()
     P = samples.PLACES
     sweden = t.place("Sweden", "Country")
     kalmar = t.place("Kalmar län", "County", sweden, title="Kalmar län, Sweden")
@@ -213,7 +208,7 @@ def build_tree(place_tag: str) -> Tree:
     farm = t.place("Lindqvist farm", "Farm", chisago, P["Lindqvist farm"], "Lindqvist farm, Chisago County, Minnesota")
     hennepin = t.place("Hennepin County", "County", minnesota, title="Hennepin County, Minnesota")
     minneapolis = t.place("Minneapolis", "City", hennepin, P["Minneapolis"],
-                          "Minneapolis, Hennepin County, Minnesota", osm_relation=136712)
+                          "Minneapolis, Hennepin County, Minnesota")
     t.place("Foshay Tower", "Building", minneapolis, P["Foshay Tower"], "Foshay Tower, Minneapolis, Minnesota")
     new_york = t.place("New York", "State", usa, title="New York, United States")
     ellis = t.place("Ellis Island", "Locality", new_york, P["Ellis Island"], "Ellis Island, New York")
@@ -334,6 +329,9 @@ class Gramps:
         r = self._req("GET", path, ok_404=True, params=params)
         return [] if r.status_code == 404 else r.json()
 
+    def put(self, path: str, obj: dict) -> None:
+        self._req("PUT", path, json=obj)
+
     def count(self, path: str) -> int:
         r = self._req("GET", path, params={"pagesize": 1, "page": 1})
         return int(r.headers.get("X-Total-Count", 0))
@@ -376,20 +374,15 @@ def seed_gramps(args) -> dict:
     log(f"gramps: tree '{(meta.get('database') or {}).get('name')}', "
         f"web API v{(meta.get('gramps_webapi') or {}).get('version')}")
 
-    place_tag = g.tag_handle(PLACE_TAG)
-    if place_tag is None:
-        tags = [{"_class": "Tag", "handle": handle(), "name": PLACE_TAG, "color": "#4a5bae",
-                 "priority": 0, "change": NOW},
-                {"_class": "Tag", "handle": handle(), "name": SKIP_TITLE_TAG, "color": "#b06a3b",
-                 "priority": 1, "change": NOW}]
-        g.create_objects(tags)
-        place_tag = g.tag_handle(PLACE_TAG)
-        log(f"gramps: created tags '{PLACE_TAG}' and '{SKIP_TITLE_TAG}'")
+    if g.tag_handle(SKIP_TITLE_TAG) is None:
+        g.create_objects([{"_class": "Tag", "handle": handle(), "name": SKIP_TITLE_TAG, "color": "#b06a3b",
+                           "priority": 1, "change": NOW}])
+        log(f"gramps: created tag '{SKIP_TITLE_TAG}'")
 
     if g.find("/people/", gramps_id="I9001"):
         log("gramps: sample tree already present")
     else:
-        tree = build_tree(place_tag)
+        tree = build_tree()
         g.create_objects(tree.objects)
         log(f"gramps: created sample tree ({len(tree.objects)} objects: Lindqvist and Peterson families)")
 
@@ -403,7 +396,7 @@ def seed_gramps(args) -> dict:
             log("gramps: importing example.gramps (a couple of minutes)...")
             g.import_file(example)
             log(f"gramps: example tree imported, {g.count('/people/')} people now")
-    return {"place_tag_handle": place_tag}
+    return {}
 
 
 # ---------------------------------------------------------------- Paperless
@@ -458,10 +451,29 @@ class Paperless:
         log(f"paperless: created {path.strip('/').split('/')[-1][:-1].replace('_', ' ')} '{name}'")
         return r.json()["id"]
 
-    def find_document(self, title: str) -> int | None:
-        results = self._req("GET", "/api/documents/",
-                            params={"title__iexact": title, "fields": "id,title"}).json()["results"]
-        return results[0]["id"] if results else None
+    def ensure_workflow(self, name: str, url: str, token: str, tag_ids: list[int]) -> None:
+        """A document with any of tag_ids added or updated -> Bifrost's webhook with its id; replaced on every seed"""
+        for w in self._req("GET", "/api/workflows/", params={"page_size": 100}).json()["results"]:
+            if w["name"] == name:
+                self._req("DELETE", f"/api/workflows/{w['id']}/")
+        sources = [1, 2, 3, 4]
+        self._req("POST", "/api/workflows/", json={
+            "name": name, "order": 0, "enabled": True,
+            "triggers": [{"type": kind, "sources": sources, "filter_has_tags": tag_ids} for kind in (2, 3)],
+            "actions": [{"type": 4, "webhook": {
+                "url": url, "use_params": True, "as_json": False,
+                "params": {"doc_id": "{{doc_id}}"}, "headers": {"X-Bifrost-Token": token},
+                "include_document": False}}],
+        })
+        log(f"paperless: workflow '{name}' posts added and updated documents tagged {tag_ids} to {url}")
+
+    def find_document(self, title: str, filename: str) -> int | None:
+        """A sample already uploaded, by its title or, once renamed, by its file name"""
+        for params in ({"title__iexact": title}, {"original_filename__iexact": filename}):
+            results = self._req("GET", "/api/documents/", params={**params, "fields": "id"}).json()["results"]
+            if results:
+                return results[0]["id"]
+        return None
 
     def post_document(self, path: Path, title: str, created: str, tag_ids: list[int]) -> str:
         mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
@@ -496,6 +508,8 @@ def seed_paperless(docs: list[dict]) -> dict:
     p.login()
     log(f"paperless: authenticated as '{PAPERLESS_USER}'")
     tags = {name: p.get_or_create_tag(name) for name in PAPERLESS_TAGS}
+    p.ensure_workflow(WORKFLOW_NAME, f"{URLS['bifrost']}/sync/api/paperless/webhook", WEBHOOK_TOKEN,
+                      [tags["doc"], tags["img"], tags["transcription"]])
     fields = {
         "Gramps ID": p.get_or_create_field("Gramps ID", "string"),
         "Gramps URL": p.get_or_create_field("Gramps URL", "url"),
@@ -514,7 +528,7 @@ def seed_paperless(docs: list[dict]) -> dict:
 
     pending: list[tuple[str, dict]] = []
     for spec in docs:
-        doc_id = p.find_document(spec["title"])
+        doc_id = p.find_document(spec["title"], spec["path"].name)
         if doc_id:
             spec["id"] = doc_id
             continue
@@ -735,9 +749,7 @@ def seed_immich(photos: list[dict], photos_dir: Path) -> dict:
         asset_id = existing["id"] if existing else im.upload(client, path, when)
         if not existing:
             log(f"immich: uploaded {path.name} (owner)")
-        values = ["Sync/Gramps"] + (["Sync/Date", "Date/Year"] if m else [])
-        for value in values:
-            im.tag_assets(client, tags["owner"][value.lower()], [asset_id])
+        im.tag_assets(client, tags["owner"]["sync/gramps"], [asset_id])
         if first_owner_asset is None:
             first_owner_asset = asset_id
     if real:
@@ -758,7 +770,7 @@ def seed_immich(photos: list[dict], photos_dir: Path) -> dict:
             if filename in uploaded:
                 im.ensure_face(clients[account], uploaded[filename], pid, box)
     log("immich: people Anders, Maria (owner) and Elsa (partner) with manually tagged faces")
-    link_people(people, {"owner": owner_id, "partner": partner_id})
+    link_people(people)
 
     prefix = "/data/upload/"
     if first_owner_asset:
@@ -772,24 +784,23 @@ def seed_immich(photos: list[dict], photos_dir: Path) -> dict:
     return {"keys": keys, "immich_prefix": prefix}
 
 
-def link_people(people: dict[str, tuple[str, str]], user_ids: dict[str, str]) -> None:
-    """Link Immich people to Gramps persons"""
-    from bifrost.core import db
-    from bifrost.modules import faces
+def link_people(people: dict[str, tuple[str, str]]) -> None:
+    """Put each Immich person's id on its Gramps person as an Immich Person ID attribute"""
     gramps_ids = {"Anders Lindqvist": "I9001", "Maria Lindqvist": "I9002", "Elsa Peterson": "I9004"}
     g = Gramps(URLS["gramps"], GRAMPS_USER, PASSWORD)
-    conn = db.connect(DEV / "data" / "bifrost" / "bifrost.db")
-    try:
-        for name, (account, person_id) in people.items():
-            found = g.find("/people/", gramps_id=gramps_ids[name])
-            if not found:
-                log(f"bifrost: no Gramps person {gramps_ids[name]} for {name}; link skipped")
-                continue
-            faces.set_link(conn, found[0]["handle"], person_id, "",
-                           owner_user_id=user_ids[account])
-    finally:
-        conn.close()
-    log(f"bifrost: {len(people)} Immich people linked to Gramps persons (Faces section)")
+    for name, (_account, person_id) in people.items():
+        found = g.find("/people/", gramps_id=gramps_ids[name])
+        if not found:
+            log(f"gramps: no person {gramps_ids[name]} for {name}; link skipped")
+            continue
+        person = g.get(f"/people/{found[0]['handle']}")
+        attrs = person.setdefault("attribute_list", [])
+        if any(a.get("type") == PERSON_ATTR and a.get("value") == person_id for a in attrs):
+            continue
+        attrs.append({"_class": "Attribute", "type": PERSON_ATTR, "value": person_id,
+                      "private": False, "citation_list": [], "note_list": []})
+        g.put(f"/people/{person['handle']}", person)
+    log(f"gramps: {len(people)} Immich people linked to Gramps persons (Faces section)")
 
 
 # ------------------------------------------------------------------- config
@@ -804,7 +815,6 @@ def write_config(gramps: dict, paperless: dict | None, immich: dict | None) -> N
             "immich": {
                 "enabled": bool(immich),
                 "sync_tag": "Sync/Gramps",
-                "place_tag_handle": gramps["place_tag_handle"],
                 "id_tag_prefix": "ID",
                 "public_url": PUBLIC["immich"],
                 "path_mappings": [{"immich_prefix": immich["immich_prefix"] if immich else "/data/upload/",
@@ -820,6 +830,7 @@ def write_config(gramps: dict, paperless: dict | None, immich: dict | None) -> N
                 "date_qualifier_field_id": paperless["fields"]["Date qualifier"] if paperless else None,
                 "transcription_tag_id": paperless["tags"]["transcription"] if paperless else None,
                 "ocr_tag": "Gemini OCR",
+                "webhook_token": WEBHOOK_TOKEN,
             },
         },
         "gemini": {"api_key": os.environ.get("GEMINI_API_KEY") or "REPLACE_ME",

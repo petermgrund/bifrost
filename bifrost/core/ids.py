@@ -9,10 +9,6 @@ CHARSET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 
 MANUAL_ID_RE = re.compile(rf"^[{CHARSET}]{{6}}$")
 
-# pre-scheme 4-char codes (archivesspace/registry/ids.txt), closed list. Migration 15
-# seeds withdrawn_codes with them; from then on that table is the authority
-LEGACY_IDS = frozenset({"C8T5", "J82D", "JYMZ", "6H2P", "G8NQ"})
-
 # an undotted location mark (B2C3F4 = box 2, compartment 3, folder 1; S1 = shelf 1).
 # Anchored: real ids that merely start with B or S and a digit, like B36Z55, pass
 LOCATION_SHAPE_RE = re.compile(r"^[BS][1-9][0-9]*(C[1-9][0-9]*)?(F[1-9][0-9]*)?$")
@@ -62,56 +58,34 @@ def all_ids_ever_seen(
     *,
     open_reservations: bool = True,
 ) -> set[str]:
-    """Every id that must never be handed out again
-
-    live Gramps media ids, every reservation in any state, every register row
-    (also when its media is gone from Gramps), scan-register object ids,
-    described objects, Paperless gramps_id field values and withdrawn codes.
-    open_reservations=False leaves out reservations not minted (or withdrawn)
-    yet, even when a scan or a description already points at them, so a
-    manual id can claim its own reservation
-    """
-    queries = (
-        "SELECT gramps_id FROM minted_media",
-        "SELECT object_id FROM scan_register WHERE object_id IS NOT NULL",
-        "SELECT gramps_id FROM reserved_ids",
-        "SELECT object_id FROM objects",
-        "SELECT code FROM withdrawn_codes",
-    )
-    stored = {r[0] for q in queries for r in conn.execute(q)}
+    """Every id that must never be handed out again: the whole ledger (reserved, minted,
+    withdrawn, media gone from Gramps or not), live Gramps media ids and the Paperless
+    gramps_id field. open_reservations=False leaves out reserved codes nothing has taken,
+    so a manual id can claim its own reservation"""
+    query = "SELECT gramps_id FROM minted_media"
     if not open_reservations:
-        stored -= {r[0] for r in conn.execute(
-            "SELECT gramps_id FROM reserved_ids WHERE minted_at IS NULL "
-            "AND gramps_id NOT IN (SELECT gramps_id FROM minted_media) "
-            "AND gramps_id NOT IN (SELECT code FROM withdrawn_codes)")}
+        query += " WHERE source_system IS NOT NULL OR withdrawn_at IS NOT NULL"
+    stored = {r[0] for r in conn.execute(query)}
     return {str(v).strip().upper() for v in (*stored, *live, *paperless)
             if v and str(v).strip()}
 
 
 def register_minted(conn: sqlite3.Connection, gramps_id: str, source_system: str,
-                    source_id: str, title: str | None, when: str) -> None:
-    """Record a minted id, never overwriting an existing row"""
-    try:
+                    source_id: str, when: str) -> None:
+    """Record the media a code now stands for: a new row, or its reservation taken;
+    a code that already has a media or was withdrawn is never overwritten"""
+    row = conn.execute(
+        "SELECT source_system, source_id, withdrawn_at FROM minted_media WHERE gramps_id=?",
+        (gramps_id,)).fetchone()
+    if row is None:
         conn.execute(
-            "INSERT INTO minted_media (gramps_id, source_system, source_id, title, minted_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (gramps_id, source_system, source_id, title, when),
-        )
-    except sqlite3.IntegrityError:
-        row = conn.execute(
-            "SELECT source_system, source_id FROM minted_media WHERE gramps_id=?",
-            (gramps_id,),
-        ).fetchone()
-        if row is None:
-            raise
-        raise IdReused(
-            f"{gramps_id} is already registered to {row[0]} {row[1]}, not overwritten"
-        ) from None
-
-
-def mark_minted(conn: sqlite3.Connection, gramps_id: str, when: str) -> None:
-    """Flip a reservation to minted"""
+            "INSERT INTO minted_media (gramps_id, source_system, source_id, created_at, minted_at) "
+            "VALUES (?, ?, ?, ?, ?)", (gramps_id, source_system, source_id, when, when))
+        return
+    if row[0] is not None:
+        raise IdReused(f"{gramps_id} is already registered to {row[0]} {row[1]}, not overwritten")
+    if row[2]:
+        raise IdReused(f"{gramps_id} was withdrawn on {row[2][:10]} and is never used again")
     conn.execute(
-        "UPDATE reserved_ids SET minted_at=? WHERE gramps_id=? AND minted_at IS NULL",
-        (when, gramps_id),
-    )
+        "UPDATE minted_media SET source_system=?, source_id=?, minted_at=? WHERE gramps_id=?",
+        (source_system, source_id, when, gramps_id))

@@ -32,3 +32,10 @@ class SyncEvent:
     @classmethod
     def from_json(cls, raw: str) -> "SyncEvent":
         return cls(**json.loads(raw))
+
+
+def progress(label: str, done: int, total: int) -> SyncEvent:
+    """One running count over everything a scan touches"""
+    return SyncEvent(kind="progress", detail=label,
+                     data={"done": done, "total": total,
+                           "percent": round(100 * done / total) if total else 100})

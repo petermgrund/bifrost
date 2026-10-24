@@ -100,3 +100,13 @@ sync:
 def test_previews_prefix_defaults_empty(tmp_path):
     cfg = _load(tmp_path, 'immich: {base_url: "http://i", api_key: k}\n')
     assert cfg.sync_immich.previews_prefix == ""
+
+
+def test_paperless_webhook_token(tmp_path):
+    cfg = _load(tmp_path, 'sync: {paperless: {webhook_token: " s3cret "}}\n')
+    assert cfg.sync_paperless.webhook_token == "s3cret"
+
+
+def test_paperless_webhook_token_defaults_off(tmp_path):
+    assert _load(tmp_path, "").sync_paperless.webhook_token == ""
+    assert _load(tmp_path, "sync: {paperless: {webhook_token: null}}\n").sync_paperless.webhook_token == ""

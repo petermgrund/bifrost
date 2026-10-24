@@ -3,9 +3,11 @@ import asyncio
 import pytest
 
 from bifrost.core import db
+from bifrost.core.clients.gramps import GrampsError
 from bifrost.core.clients.immich import ImmichError
 from bifrost.modules import faces
-from test_sync_immich import FakeGramps, FakeImmich, asset
+
+from test_sync_immich import FakeGramps, FakeImmich, asset, linked, mint
 
 
 @pytest.fixture
@@ -15,124 +17,141 @@ def conn(tmp_path):
     c.close()
 
 
-class TestLinkCrud:
-    def test_set_list_delete(self, conn):
-        faces.set_link(conn, "h1", "uuid-1", "Ed")
-        faces.set_link(conn, "h2", "uuid-2")
-        links = faces.list_links(conn)
-        assert [(l["gramps_handle"], l["immich_person_id"], l["label"])
-                for l in links] == [("h2", "uuid-2", ""), ("h1", "uuid-1", "Ed")]
-        assert faces.delete_link(conn, "h1") is True
-        assert faces.delete_link(conn, "h1") is False
-        assert len(faces.list_links(conn)) == 1
-
-    def test_relink_replaces_both_sides(self, conn):
-        faces.set_link(conn, "h1", "uuid-1", "Ed")
-        faces.set_link(conn, "h1", "uuid-2", "Ed again")
-        links = faces.list_links(conn)
-        assert len(links) == 1 and links[0]["immich_person_id"] == "uuid-2"
-        faces.set_link(conn, "h9", "uuid-2", "Stolen")
-        links = faces.list_links(conn)
-        assert len(links) == 1 and links[0]["gramps_handle"] == "h9"
-
-    def test_owner_column_round_trips(self, conn):
-        faces.set_link(conn, "H1", "P1", "Ed", owner_user_id="acct-a")
-        row = faces.list_links(conn)[0]
-        assert row["owner_user_id"] == "acct-a"
-
-    def test_two_links_per_person_across_accounts(self, conn):
-        faces.set_link(conn, "H1", "P1", owner_user_id="acct-a")
-        faces.set_link(conn, "H1", "P2", owner_user_id="acct-b")
-        rows = faces.list_links(conn)
-        assert {r["immich_person_id"] for r in rows} == {"P1", "P2"}
-
-    def test_same_account_relink_replaces(self, conn):
-        faces.set_link(conn, "H1", "P1", owner_user_id="acct-a")
-        faces.set_link(conn, "H1", "P3", owner_user_id="acct-a")
-        rows = faces.list_links(conn)
-        assert [r["immich_person_id"] for r in rows] == ["P3"]
-
-    def test_immich_person_unique_across_gramps_people(self, conn):
-        faces.set_link(conn, "H1", "P1", owner_user_id="acct-a")
-        faces.set_link(conn, "H2", "P1", owner_user_id="acct-a")
-        rows = faces.list_links(conn)
-        assert len(rows) == 1 and rows[0]["gramps_handle"] == "H2"
-
-    def test_no_owner_keeps_legacy_replace_semantics(self, conn):
-        faces.set_link(conn, "H1", "P1", owner_user_id="acct-a")
-        faces.set_link(conn, "H1", "P2")
-        rows = faces.list_links(conn)
-        assert [r["immich_person_id"] for r in rows] == ["P2"]
-
-    def test_owned_relink_also_replaces_null_owner_rows(self, conn):
-        # a legacy row of unknown account must not survive a definite relink
-        faces.set_link(conn, "H1", "P1")
-        faces.set_link(conn, "H1", "P2", owner_user_id="acct-a")
-        rows = faces.list_links(conn)
-        assert [r["immich_person_id"] for r in rows] == ["P2"]
+def run(coro):
+    return asyncio.run(coro)
 
 
-class TestYamlImport:
-    def test_imports_once(self, conn, tmp_path):
-        p = tmp_path / "person_map.yaml"
-        p.write_text(
-            "people:\n"
-            "- gramps_handle: h1\n"
-            "  immich_person_id: uuid-1\n"
-            "  label: Ed\n"
-            "- gramps_handle: h2\n"
-            "  immich_person_id: uuid-2\n"
-            "- immich_person_id: no-handle-skipped\n")
-        assert faces.import_person_map_yaml(conn, p) == 2
-        # table now non-empty: a second import is a no-op
-        assert faces.import_person_map_yaml(conn, p) == 0
-        assert len(faces.list_links(conn)) == 2
-
-    def test_missing_file(self, conn, tmp_path):
-        assert faces.import_person_map_yaml(conn, tmp_path / "nope.yaml") == 0
-        assert faces.import_person_map_yaml(conn, None) == 0
+def named(handle, first, surname, *person_ids, gramps_id="I0001", media_list=()):
+    """A linked Gramps person with a display name"""
+    return {**linked(handle, *person_ids, media_list=media_list), "gramps_id": gramps_id,
+            "primary_name": {"first_name": first, "surname_list": [{"surname": surname}]}}
 
 
-class BackfillImmich(FakeImmich):
-    async def get_assets_many(self, asset_ids, concurrency=8):
-        return {i: self.assets.get(i) for i in asset_ids}
+def table_exists(conn, name):
+    return bool(conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone())
 
 
-class BackfillGramps(FakeGramps):
-    async def list_media(self):
-        return list(self.media.values())
+class TestPeopleIndex:
+    def test_person_ids_reads_the_attribute(self):
+        person = linked("h1", "p1", " p2 ", "  ")
+        person["attribute_list"].append({"type": "Nickname", "value": "Ed"})
+        assert faces.person_ids(person) == ["p1", "p2"]
+        assert faces.person_ids({"handle": "h2"}) == []
+
+    def test_rows_sorted_by_name_with_counts(self):
+        ed = named("h-ed", "Ed", "Grund", "p1", "p2", gramps_id="I0002",
+                   media_list=[{"ref": "m1", "rect": [1, 2, 3, 4]}, {"ref": "m2", "rect": []}])
+        astrid = named("h-as", "Astrid", "Berg", gramps_id="I0001")
+        rows = faces.people_index([ed, astrid, {"handle": "h-x"}])
+        assert [r["name"] for r in rows] == ["(unknown)", "Astrid Berg", "Ed Grund"]
+        assert rows[2] == {"handle": "h-ed", "name": "Ed Grund", "gramps_id": "I0002",
+                           "media_count": 2, "rect_count": 1, "immich_ids": ["p1", "p2"]}
+        assert rows[0] == {"handle": "h-x", "name": "(unknown)", "gramps_id": "",
+                           "media_count": 0, "rect_count": 0, "immich_ids": []}
 
 
-def _mint(conn, gid, aid):
-    conn.execute(
-        "INSERT INTO minted_media (gramps_id, source_system, source_id, title, minted_at) "
-        "VALUES (?, 'immich', ?, 't', 't')", (gid, aid))
-    conn.commit()
+class TestLinks:
+    def test_set_link_adds_the_attribute_once(self):
+        gr = FakeGramps(people={"h1": {"handle": "h1"}})
+        run(faces.set_link(gr, {}, "h1", "p1"))
+        assert faces.person_ids(gr.people["h1"]) == ["p1"]
+        assert gr.people["h1"]["attribute_list"][0]["_class"] == "Attribute"
+        assert len(gr.updated_people) == 1
+        run(faces.set_link(gr, {"p1": "h1"}, "h1", "p1"))
+        assert faces.person_ids(gr.people["h1"]) == ["p1"]
+        assert len(gr.updated_people) == 1
+
+    def test_a_second_immich_person_joins_the_first(self):
+        gr = FakeGramps(people={"h1": linked("h1", "p1")})
+        run(faces.set_link(gr, {"p1": "h1"}, "h1", "p2"))
+        assert faces.person_ids(gr.people["h1"]) == ["p1", "p2"]
+
+    def test_set_link_moves_a_person_off_another_gramps_person(self):
+        gr = FakeGramps(people={"h1": linked("h1", "p1", "p9"), "h2": linked("h2")})
+        run(faces.set_link(gr, {"p1": "h1", "p9": "h1"}, "h2", "p1"))
+        assert faces.person_ids(gr.people["h1"]) == ["p9"]
+        assert faces.person_ids(gr.people["h2"]) == ["p1"]
+        assert [p["handle"] for p in gr.updated_people] == ["h1", "h2"]
+
+    def test_a_stale_map_entry_for_a_gone_person_is_harmless(self):
+        gr = FakeGramps(people={"h2": linked("h2")})
+        run(faces.set_link(gr, {"p1": "h-gone"}, "h2", "p1"))
+        assert faces.person_ids(gr.people["h2"]) == ["p1"]
+
+    def test_set_link_on_a_missing_person_raises(self):
+        with pytest.raises(GrampsError):
+            run(faces.set_link(FakeGramps(), {}, "h-gone", "p1"))
+
+    def test_delete_link_removes_every_immich_person(self):
+        person = linked("h1", "p1", "p2")
+        person["attribute_list"].append({"type": "Nickname", "value": "Ed"})
+        gr = FakeGramps(people={"h1": person})
+        assert run(faces.delete_link(gr, "h1")) is True
+        assert gr.people["h1"]["attribute_list"] == [{"type": "Nickname", "value": "Ed"}]
+        assert len(gr.updated_people) == 1
+
+    def test_delete_link_returns_false_when_nothing_to_remove(self):
+        gr = FakeGramps(people={"h1": linked("h1")})
+        assert run(faces.delete_link(gr, "h1")) is False
+        assert run(faces.delete_link(gr, "h-gone")) is False
+        assert gr.updated_people == []
 
 
-def _run(gramps, immich, conn, apply, selected=None):
-    async def collect():
-        return [e async for e in faces.apply_links(
-            gramps, [immich], conn, apply=apply, selected=selected)]
-    return asyncio.run(collect())
+class TestAdoptPersonLinks:
+    def _seed(self, conn, *rows):
+        with conn:
+            conn.executemany(
+                "INSERT INTO person_links (gramps_handle, immich_person_id, label, created_at) "
+                "VALUES (?, ?, ?, '2026-01-01')", rows)
+
+    def test_moves_rows_onto_the_people_and_drops_the_table(self, conn):
+        self._seed(conn, ("h1", "p1", "Ed"), ("h1", "p2", "Ed"), ("h2", "p3", None))
+        gr = FakeGramps(people={"h1": linked("h1"), "h2": linked("h2", "p3")})
+        assert run(faces.adopt_person_links(conn, gr)) == 2
+        assert faces.person_ids(gr.people["h1"]) == ["p1", "p2"]
+        assert faces.person_ids(gr.people["h2"]) == ["p3"]
+        assert [p["handle"] for p in gr.updated_people] == ["h1", "h1"]
+        assert not table_exists(conn, "person_links")
+
+    def test_without_the_table_nothing_is_asked_of_gramps(self, conn):
+        with conn:
+            conn.execute("DROP TABLE person_links")
+        gr = FakeGramps(people={"h1": linked("h1")})
+        assert run(faces.adopt_person_links(conn, gr)) == 0
+        assert gr.updated_people == []
+
+    def test_a_missing_person_is_skipped(self, conn):
+        self._seed(conn, ("h-gone", "p1", "Ghost"), ("h1", "p2", "Ed"))
+        gr = FakeGramps(people={"h1": linked("h1")})
+        assert run(faces.adopt_person_links(conn, gr)) == 1
+        assert faces.person_ids(gr.people["h1"]) == ["p2"]
+        assert not table_exists(conn, "person_links")
+
+    def test_a_raising_gramps_leaves_the_table(self, conn):
+        class Down(FakeGramps):
+            async def get_person(self, handle, ok_404=False):
+                raise GrampsError("GET /people → 502")
+
+        self._seed(conn, ("h1", "p1", "Ed"))
+        with pytest.raises(GrampsError):
+            run(faces.adopt_person_links(conn, Down()))
+        assert table_exists(conn, "person_links")
+        assert conn.execute("SELECT COUNT(*) FROM person_links").fetchone()[0] == 1
 
 
-def _items(events):
-    return [e for e in events if e.kind == "item"]
-
-
-class ResolvingImmich(BackfillImmich):
+class ResolvingImmich(FakeImmich):
     """Adds the listing and person endpoints resolution needs"""
 
     def __init__(self, me_id, label, people=None, listed=None, **kw):
         super().__init__(me_id=me_id, **kw)
         self.label = label
-        self._people = people or {}      # id -> name (direct GET universe)
+        self._people = people or {}
         self._listed = listed if listed is not None else list(self._people)
         self.thumb_requests = []
 
     async def list_people(self, with_hidden=True):
-        return [{"id": pid, "name": self._people[pid], "isHidden": False}
+        return [{"id": pid, "name": self._people[pid], "isHidden": pid.startswith("hidden")}
                 for pid in self._listed]
 
     async def get_person(self, person_id):
@@ -147,203 +166,253 @@ class ResolvingImmich(BackfillImmich):
         raise ImmichError(404, "no thumbnail")
 
 
+class DownImmich(ResolvingImmich):
+    async def get_me(self):
+        raise ImmichError(500, "down")
+
+    async def list_people(self, with_hidden=True):
+        raise ImmichError(500, "down")
+
+
+def rows_for(*people):
+    return faces.people_index(list(people))
+
+
 class TestResolution:
-    def test_merged_people_carries_account(self, conn):
-        a = ResolvingImmich("ua", "fh", people={"p1": "Astrid"})
-        b = ResolvingImmich("ub", "peter", people={"p2": "Ed"})
-        people = asyncio.run(faces.merged_people([a, b]))
-        assert {(p["id"], p["account_label"]) for p in people} == {
-            ("p1", "fh"), ("p2", "peter")}
-
-    def test_padded_immich_names_are_trimmed(self, conn):
-        faces.set_link(conn, "H1", "p2", "")
-        a = ResolvingImmich("ua", "fh", people={"p1": " Ada Berg "})
+    def test_merged_people_carries_account_and_puts_named_people_first(self):
+        a = ResolvingImmich("ua", "fh", people={"p1": " Ada Berg ", "hidden-1": ""})
         b = ResolvingImmich("ub", "peter", people={"p2": "Bo Lindqvist "})
-        people = asyncio.run(faces.merged_people([a, b]))
-        assert sorted(p["name"] for p in people) == ["Ada Berg", "Bo Lindqvist"]
-        rows = asyncio.run(faces.enrich_links([a, b], conn))
-        assert rows[0]["person_name"] == "Bo Lindqvist"
-        assert asyncio.run(faces.resolve_person([a, b], "p1"))["name"] == "Ada Berg"
+        people = run(faces.merged_people([a, b]))
+        assert [(p["id"], p["name"], p["account_label"], p["owner_user_id"], p["is_hidden"]) for p in people] == [
+            ("p1", "Ada Berg", "fh", "ua", False), ("p2", "Bo Lindqvist", "peter", "ub", False),
+            ("hidden-1", "", "fh", "ua", True)]
 
-    def test_enrich_resolves_via_listing_and_backfills_owner(self, conn):
-        faces.set_link(conn, "H1", "p2", "Ed")   # legacy row, no owner
-        a = ResolvingImmich("ua", "fh", people={"p1": "Astrid"})
-        b = ResolvingImmich("ub", "peter", people={"p2": "Ed"})
-        rows = asyncio.run(faces.enrich_links([a, b], conn))
-        assert rows[0]["person_name"] == "Ed"
-        assert rows[0]["account_label"] == "peter"
-        assert faces.list_links(conn)[0]["owner_user_id"] == "ub"
-
-    def test_enrich_falls_back_to_direct_get_when_listing_omits(self, conn):
-        faces.set_link(conn, "H1", "p9", "Hidden")
-        b = ResolvingImmich("ub", "peter", people={"p9": "Eleraine"}, listed=[])
-        rows = asyncio.run(faces.enrich_links([b], conn))
-        assert rows[0]["person_name"] == "Eleraine"
-        assert rows[0]["resolved"] is True
-        assert faces.list_links(conn)[0]["owner_user_id"] == "ub"
-
-    def test_enrich_marks_unresolvable(self, conn):
-        faces.set_link(conn, "H1", "gone", "Ghost")
-        b = ResolvingImmich("ub", "peter", people={})
-        rows = asyncio.run(faces.enrich_links([b], conn))
-        assert rows[0]["resolved"] is False
-        assert faces.list_links(conn)[0]["owner_user_id"] is None
-
-    def test_grouped_links_one_row_per_gramps_person(self, conn):
-        faces.set_link(conn, "H1", "p1", "Ed", owner_user_id="ua")
-        faces.set_link(conn, "H1", "p2", "Ed", owner_user_id="ub")
-        faces.set_link(conn, "H2", "p3", "Astrid", owner_user_id="ua")
-        a = ResolvingImmich("ua", "fh", people={"p1": "Ed G", "p3": "Astrid B"})
+    def test_merged_people_skips_an_account_that_is_down(self):
+        down = DownImmich("ua", "fh", people={"p1": "Astrid"})
         b = ResolvingImmich("ub", "peter", people={"p2": "Ed Grund"})
-        groups = asyncio.run(faces.grouped_links([a, b], conn))
-        assert [g["gramps_handle"] for g in groups] == ["H2", "H1"]
-        h1 = next(g for g in groups if g["gramps_handle"] == "H1")
-        assert h1["label"] == "Ed"
-        assert [(l["person_name"], l["account_label"]) for l in h1["links"]] == [
-            ("Ed G", "fh"), ("Ed Grund", "peter")]
+        assert [(p["id"], p["account_label"]) for p in run(faces.merged_people([down, b]))] == [("p2", "peter")]
 
-    def test_grouped_links_label_falls_back_to_person_name(self, conn):
-        faces.set_link(conn, "H1", "p2", "", owner_user_id="ub")
-        b = ResolvingImmich("ub", "peter", people={"p2": "Ed Grund"})
-        groups = asyncio.run(faces.grouped_links([b], conn))
-        assert groups[0]["label"] == "Ed Grund"
+    def test_resolve_person_probes_accounts_in_order(self):
+        a = ResolvingImmich("ua", "fh", people={})
+        b = ResolvingImmich("ub", "peter", people={"p2": " Ed "}, listed=[])
+        assert run(faces.resolve_person([a, b], "p2")) == {
+            "name": "Ed", "owner_user_id": "ub", "account_label": "peter"}
+        assert run(faces.resolve_person([a], "p2")) is None
 
-    def test_listing_degrades_when_one_account_is_down(self, conn):
-        class DownImmich(ResolvingImmich):
-            async def get_me(self):
-                raise ImmichError(500, "down")
-
-            async def list_people(self, with_hidden=True):
-                raise ImmichError(500, "down")
-
-        faces.set_link(conn, "H1", "p2", "Ed")
-        down = DownImmich("ua", "fh")
-        b = ResolvingImmich("ub", "peter", people={"p2": "Ed Grund"})
-        people = asyncio.run(faces.merged_people([down, b]))
-        assert [(p["id"], p["account_label"]) for p in people] == [("p2", "peter")]
-        rows = asyncio.run(faces.enrich_links([down, b], conn))
-        assert rows[0]["person_name"] == "Ed Grund" and rows[0]["resolved"]
-
-    def test_resolve_person_survives_broken_get_me_without_backfill(self, conn):
+    def test_resolve_person_survives_a_broken_get_me(self):
         class NoMe(ResolvingImmich):
             async def get_me(self):
                 raise ImmichError(500, "down")
 
-        faces.set_link(conn, "H1", "p2", "Ed")
-        b = NoMe("ub", "peter", people={"p2": "Ed Grund"})
-        rows = asyncio.run(faces.enrich_links([b], conn))
-        assert rows[0]["resolved"] is True
-        # owner unknown: the legacy row must stay unannotated, not get ""
-        assert faces.list_links(conn)[0]["owner_user_id"] is None
+        info = run(faces.resolve_person([NoMe("ub", "peter", people={"p2": "Ed"})], "p2"))
+        assert info == {"name": "Ed", "owner_user_id": "", "account_label": "peter"}
 
-    def test_thumbnail_prefers_the_owning_account(self, conn):
-        faces.set_link(conn, "H1", "p2", "Ed", owner_user_id="ub")
+    def test_grouped_links_one_entry_per_linked_gramps_person(self):
+        a = ResolvingImmich("ua", "fh", people={"p1": "Ed G", "p3": "Astrid B"})
+        b = ResolvingImmich("ub", "peter", people={"p2": "Ed Grund "})
+        rows = rows_for(named("H1", "Ed", "Grund", "p1", "p2"), named("H2", "Astrid", "Berg", "p3"),
+                        named("H3", "Nobody", "Linked"))
+        groups = run(faces.grouped_links([a, b], rows))
+        assert [g["gramps_handle"] for g in groups] == ["H2", "H1"]
+        h1 = groups[1]
+        assert h1["links"] == [
+            {"gramps_handle": "H1", "immich_person_id": "p1", "person_name": "Ed G",
+             "account_label": "fh", "resolved": True},
+            {"gramps_handle": "H1", "immich_person_id": "p2", "person_name": "Ed Grund",
+             "account_label": "peter", "resolved": True}]
+
+    def test_grouped_links_fall_back_to_a_direct_get_when_the_listing_omits(self):
+        b = ResolvingImmich("ub", "peter", people={"p9": "Eleraine"}, listed=[])
+        groups = run(faces.grouped_links([b], rows_for(linked("H1", "p9"))))
+        assert groups[0]["links"][0]["person_name"] == "Eleraine"
+        assert groups[0]["links"][0]["resolved"] is True
+
+    def test_grouped_links_mark_the_unresolvable(self):
+        b = ResolvingImmich("ub", "peter", people={})
+        groups = run(faces.grouped_links([b], rows_for(linked("H1", "gone"))))
+        assert groups[0]["links"] == [{"gramps_handle": "H1", "immich_person_id": "gone", "person_name": "",
+                                       "account_label": "", "resolved": False}]
+
+    def test_grouped_links_degrade_when_one_account_is_down(self):
+        down = DownImmich("ua", "fh", people={"p1": "Astrid"})
+        b = ResolvingImmich("ub", "peter", people={"p2": "Ed Grund"})
+        groups = run(faces.grouped_links([down, b], rows_for(linked("H1", "p2"))))
+        link = groups[0]["links"][0]
+        assert (link["person_name"], link["account_label"], link["resolved"]) == ("Ed Grund", "peter", True)
+
+    def test_no_links_no_groups(self):
+        assert run(faces.grouped_links([ResolvingImmich("ua", "fh")], rows_for(linked("H1")))) == []
+
+    def test_thumbnail_comes_from_the_first_account_that_serves_it(self):
         a = ResolvingImmich("ua", "fh", people={"p2": "Shadow Ed"})
         b = ResolvingImmich("ub", "peter", people={"p2": "Ed Grund"})
-        content, mime = asyncio.run(
-            faces.person_thumbnail_bytes([a, b], conn, "p2"))
-        assert b.thumb_requests == ["p2"]
-        assert a.thumb_requests == []
+        assert run(faces.person_thumbnail_bytes([a, b], "p2")) == (b"img", "image/jpeg")
+        assert (a.thumb_requests, b.thumb_requests) == (["p2"], [])
 
-    def test_thumbnail_falls_back_across_accounts(self, conn):
+    def test_thumbnail_falls_back_across_accounts(self):
         a = ResolvingImmich("ua", "fh", people={})
         b = ResolvingImmich("ub", "peter", people={"p9": "Eleraine"})
-        content, mime = asyncio.run(
-            faces.person_thumbnail_bytes([a, b], conn, "p9"))
-        assert content == b"img" and b.thumb_requests == ["p9"]
+        content, _mime = run(faces.person_thumbnail_bytes([a, b], "p9"))
+        assert content == b"img" and a.thumb_requests == b.thumb_requests == ["p9"]
 
-    def test_thumbnail_mixed_errors_raise_the_hard_error(self, conn):
+    def test_thumbnail_mixed_errors_raise_the_hard_error(self):
         class Down(ResolvingImmich):
             async def person_thumbnail(self, person_id):
                 raise ImmichError(0, "request failed")
 
-        a = ResolvingImmich("ua", "fh", people={})
-        down = Down("ub", "peter")
         with pytest.raises(ImmichError) as exc:
-            asyncio.run(faces.person_thumbnail_bytes([a, down], conn, "p9"))
-        assert exc.value.status not in (400, 404)
+            run(faces.person_thumbnail_bytes([ResolvingImmich("ua", "fh"), Down("ub", "peter")], "p9"))
+        assert exc.value.status == 0
 
-    def test_resolve_person_probes_accounts_in_order(self, conn):
-        a = ResolvingImmich("ua", "fh", people={})
-        b = ResolvingImmich("ub", "peter", people={"p2": "Ed"}, listed=[])
-        info = asyncio.run(faces.resolve_person([a, b], "p2"))
-        assert info == {"name": "Ed", "owner_user_id": "ub",
-                        "account_label": "peter"}
-        assert asyncio.run(faces.resolve_person([a], "p2")) is None
+    def test_thumbnail_nobody_has_is_a_404(self):
+        with pytest.raises(ImmichError) as exc:
+            run(faces.person_thumbnail_bytes([ResolvingImmich("ua", "fh"), ResolvingImmich("ub", "peter")], "p9"))
+        assert exc.value.status == 404
+        with pytest.raises(ImmichError) as exc:
+            run(faces.person_thumbnail_bytes([], "p9"))
+        assert exc.value.status == 404
 
 
-class TestBackfill:
+def apply_links(gramps, immich, conn, apply, selected=None):
+    async def collect():
+        return [e async for e in faces.apply_links(gramps, [immich], conn, apply=apply, selected=selected)]
+    return run(collect())
+
+
+def items(events):
+    return [e for e in events if e.kind == "item"]
+
+
+def face_of(pid, name):
+    return {"person": {"id": pid, "name": name}}
+
+
+class TestApplyLinks:
     def _world(self, conn):
-        faces.set_link(conn, "h-ed", "uuid-ed", "Ed")
-        _mint(conn, "K1", "a1")
-        im = BackfillImmich(
-            assets={"a1": asset("a1")},
-            faces={"a1": [{"person": {"id": "uuid-ed", "name": "Ed"}}]})
-        gr = BackfillGramps(
-            media={"K1": {"gramps_id": "K1", "handle": "mh1"}},
-            people={"h-ed": {"handle": "h-ed", "media_list": []}})
+        mint(conn, "K1", "a1")
+        im = FakeImmich(assets={"a1": asset("a1")}, faces={"a1": [face_of("uuid-ed", "Ed")]})
+        gr = FakeGramps(media={"K1": {"gramps_id": "K1", "handle": "mh1"}},
+                        people={"h-ed": linked("h-ed", "uuid-ed")})
         return im, gr
 
     def test_preview_writes_nothing(self, conn):
         im, gr = self._world(conn)
-        events = _run(gr, im, conn, apply=False)
-        rows = _items(events)
+        events = apply_links(gr, im, conn, apply=False)
+        rows = items(events)
         assert len(rows) == 1
-        assert rows[0].action == "would_create" and rows[0].entity == "face"
-        assert rows[0].source_id == "a1" and rows[0].gramps_id == "K1"
-        assert rows[0].title and rows[0].title != "Ed"
+        assert (rows[0].action, rows[0].entity, rows[0].source_id, rows[0].gramps_id) == (
+            "would_create", "face", "a1", "K1")
+        assert rows[0].title == "img.jpg"
         assert rows[0].data == {"cols": {"Ed": "link"}}
-        assert gr.updated_people == []
-        summary = events[-1]
-        assert summary.kind == "summary" and summary.data["faces_linked"] == 1
+        assert gr.updated_people == [] and gr.people["h-ed"]["media_list"] == []
+        assert events[-1].kind == "summary"
+        assert events[-1].data == {"faces_linked": 1, "boxes_added": 0, "unreadable": 0, "errors": 0}
+
+    def test_links_are_read_from_gramps_once(self, conn):
+        im, gr = self._world(conn)
+        apply_links(gr, im, conn, apply=False)
+        assert gr.list_people_calls == 1
 
     def test_row_title_is_the_gramps_media_desc(self, conn):
         im, gr = self._world(conn)
         gr.media["K1"]["desc"] = "Ed at the lake"
-        rows = _items(_run(gr, im, conn, apply=False))
-        assert rows[0].title == "Ed at the lake"
+        assert items(apply_links(gr, im, conn, apply=False))[0].title == "Ed at the lake"
 
     def test_progress_events_bracket_the_scan(self, conn):
         im, gr = self._world(conn)
-        events = _run(gr, im, conn, apply=False)
-        progress = [e for e in events if e.kind == "progress"]
+        progress = [e for e in apply_links(gr, im, conn, apply=False) if e.kind == "progress"]
         assert progress and progress[0].data["done"] == 0
         assert progress[-1].data["done"] == progress[-1].data["total"] == 1
 
+    def test_apply_links_the_face_and_a_second_run_is_quiet(self, conn):
+        im, gr = self._world(conn)
+        events = apply_links(gr, im, conn, apply=True)
+        assert [e.action for e in items(events)] == ["created"]
+        assert gr.updated_people[0]["media_list"][0]["ref"] == "mh1"
+        assert gr.people["h-ed"]["media_list"][0]["ref"] == "mh1"
+        gr.updated_people.clear()
+        events = apply_links(gr, im, conn, apply=True)
+        assert items(events) == [] and gr.updated_people == []
+        assert events[-1].data["faces_linked"] == 0
+
+    def test_a_face_box_is_added_to_an_existing_ref(self, conn):
+        im, gr = self._world(conn)
+        im.faces["a1"] = [{**face_of("uuid-ed", "Ed"), "imageWidth": 100, "imageHeight": 100,
+                           "boundingBoxX1": 10, "boundingBoxY1": 10, "boundingBoxX2": 30, "boundingBoxY2": 30}]
+        gr.people["h-ed"]["media_list"] = [{"ref": "mh1", "rect": []}]
+        events = apply_links(gr, im, conn, apply=True)
+        assert [e.action for e in items(events)] == ["updated"]
+        assert items(events)[0].data == {"cols": {"Ed": "face box"}}
+        assert gr.people["h-ed"]["media_list"][0]["rect"] == [7, 7, 33, 33]
+        assert events[-1].data["boxes_added"] == 1
+
     def test_selected_limits_an_apply(self, conn):
         im, gr = self._world(conn)
-        _mint(conn, "K2", "a2")
+        mint(conn, "K2", "a2")
         im.assets["a2"] = asset("a2")
-        im.faces["a2"] = [{"person": {"id": "uuid-ed", "name": "Ed"}}]
+        im.faces["a2"] = [face_of("uuid-ed", "Ed")]
         gr.media["K2"] = {"gramps_id": "K2", "handle": "mh2"}
-        events = _run(gr, im, conn, apply=True, selected={"face:a2"})
-        assert [e.source_id for e in _items(events)] == ["a2"]
+        events = apply_links(gr, im, conn, apply=True, selected={"face:a2"})
+        assert [e.source_id for e in items(events)] == ["a2"]
         assert [p["media_list"][0]["ref"] for p in gr.updated_people] == ["mh2"]
         assert im.faces_requested == ["a2"]
 
-    def test_apply_links_face(self, conn):
+    def test_unknown_people_and_other_persons_do_not_link(self, conn):
         im, gr = self._world(conn)
-        events = _run(gr, im, conn, apply=True)
-        assert [e for e in events if e.action == "created"]
-        assert gr.updated_people[0]["media_list"][0]["ref"] == "mh1"
-        # second run ref exists, rect-less face box has no rect to add
-        gr.updated_people.clear()
-        events = _run(gr, im, conn, apply=True)
-        assert not [e for e in events if e.action == "created"]
-        assert gr.updated_people == []
+        im.faces["a1"] = [face_of("uuid-stranger", "Stranger"), {"person": None}]
+        events = apply_links(gr, im, conn, apply=True)
+        assert items(events) == [] and gr.updated_people == []
 
     def test_no_links_errors(self, conn):
         im, gr = self._world(conn)
-        conn.execute("DELETE FROM person_links")
-        conn.commit()
-        events = _run(gr, im, conn, apply=True)
-        assert events[0].kind == "error"
-        assert events[-1].kind == "summary"
+        gr.people["h-ed"] = linked("h-ed")
+        events = apply_links(gr, im, conn, apply=True)
+        assert events[0].kind == "error" and events[0].detail == "no person links yet"
+        assert events[-1].kind == "summary" and len(events) == 2
+
+    def test_withdrawn_and_paperless_rows_are_not_scanned(self, conn):
+        im, gr = self._world(conn)
+        mint(conn, "K2", "a2")
+        mint(conn, "K3", "7", system="paperless")
+        with conn:
+            conn.execute("UPDATE minted_media SET withdrawn_at='2026-02-01' WHERE gramps_id='K2'")
+        events = apply_links(gr, im, conn, apply=False)
+        assert events[0].detail == "1 synced media to scan against 1 link(s)"
+        assert [e.source_id for e in items(events)] == ["a1"]
+
+    def test_no_rows_ends_after_the_start(self, conn):
+        im, gr = self._world(conn)
+        events = apply_links(gr, im, conn, apply=True, selected=set())
+        assert [e.kind for e in events] == ["started", "summary"]
+        assert im.faces_requested == []
 
     def test_unreadable_asset_counted(self, conn):
         im, gr = self._world(conn)
-        _mint(conn, "K2", "a2")  # asset a2 unknown to Immich
-        events = _run(gr, im, conn, apply=True)
-        summary = events[-1]
-        assert summary.data["unreadable"] == 1
-        assert summary.data["faces_linked"] == 1
+        mint(conn, "K2", "a2")
+        events = apply_links(gr, im, conn, apply=True)
+        failed = [e for e in items(events) if e.action == "failed"]
+        assert [(e.source_id, e.gramps_id, e.title, e.detail) for e in failed] == [
+            ("a2", "K2", "a2", "asset detail unreadable")]
+        assert events[-1].data["unreadable"] == 1
+        assert events[-1].data["faces_linked"] == 1
+
+    def test_missing_gramps_media_counted(self, conn):
+        im, gr = self._world(conn)
+        del gr.media["K1"]
+        events = apply_links(gr, im, conn, apply=True)
+        assert items(events)[0].detail == "no Gramps media with this id"
+        assert items(events)[0].title == "img.jpg"
+        assert events[-1].data["unreadable"] == 1 and gr.updated_people == []
+
+    def test_a_failing_person_write_is_an_error_row(self, conn):
+        class Failing(FakeGramps):
+            async def update_person(self, handle, person_obj):
+                raise GrampsError("PUT /people → 500")
+
+        im, _ = self._world(conn)
+        gr = Failing(media={"K1": {"gramps_id": "K1", "handle": "mh1"}},
+                     people={"h-ed": linked("h-ed", "uuid-ed")})
+        events = apply_links(gr, im, conn, apply=True)
+        failed = items(events)[0]
+        assert failed.action == "failed" and failed.detail.startswith("Ed: ")
+        assert events[-1].data["errors"] == 1

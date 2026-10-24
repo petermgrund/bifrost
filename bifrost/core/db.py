@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 MIGRATIONS: list[str] = [
@@ -406,6 +407,53 @@ MIGRATIONS: list[str] = [
     DROP TABLE doc_options;
     DROP TABLE code_pencilings;
     """,
+    # 32 one ledger table: reserved and withdrawn codes join the register; the
+    # tables of the dropped features and the duplicates of facts kept elsewhere go
+    """
+    CREATE TABLE codes_new (
+        gramps_id        TEXT PRIMARY KEY,
+        source_system    TEXT CHECK (source_system IN ('immich','paperless')),
+        source_id        TEXT,
+        created_at       TEXT NOT NULL,
+        minted_at        TEXT,
+        withdrawn_at     TEXT,
+        withdrawn_reason TEXT,
+        superseded_by    TEXT,
+        CHECK ((source_system IS NULL) = (source_id IS NULL))
+    );
+    INSERT INTO codes_new (gramps_id, source_system, source_id, created_at, minted_at)
+        SELECT gramps_id, source_system, source_id, minted_at, minted_at FROM minted_media;
+    UPDATE codes_new SET created_at = (SELECT r.created_at FROM reserved_ids r WHERE r.gramps_id = codes_new.gramps_id)
+        WHERE gramps_id IN (SELECT gramps_id FROM reserved_ids WHERE created_at IS NOT NULL);
+    INSERT INTO codes_new (gramps_id, created_at)
+        SELECT gramps_id, created_at FROM reserved_ids
+        WHERE gramps_id NOT IN (SELECT gramps_id FROM codes_new);
+    INSERT INTO codes_new (gramps_id, created_at)
+        SELECT DISTINCT object_id, strftime('%Y-%m-%dT%H:%M:%S', 'now') FROM scan_register
+        WHERE object_id IS NOT NULL AND object_id NOT IN (SELECT gramps_id FROM codes_new);
+    INSERT INTO codes_new (gramps_id, created_at, withdrawn_at, withdrawn_reason, superseded_by)
+        SELECT code, withdrawn_at, withdrawn_at, reason, successor FROM withdrawn_codes
+        WHERE code NOT IN (SELECT gramps_id FROM codes_new);
+    UPDATE codes_new SET
+        withdrawn_at = (SELECT w.withdrawn_at FROM withdrawn_codes w WHERE w.code = codes_new.gramps_id),
+        withdrawn_reason = (SELECT w.reason FROM withdrawn_codes w WHERE w.code = codes_new.gramps_id),
+        superseded_by = (SELECT w.successor FROM withdrawn_codes w WHERE w.code = codes_new.gramps_id)
+        WHERE gramps_id IN (SELECT code FROM withdrawn_codes);
+    DROP TABLE minted_media;
+    ALTER TABLE codes_new RENAME TO minted_media;
+    DROP TABLE reserved_ids;
+    DROP TABLE objects;
+    DROP TABLE withdrawn_codes;
+    DROP TABLE code_descriptions;
+    DROP TABLE code_notes;
+    DROP TABLE code_instances;
+    DROP TABLE scan_register;
+    DROP TABLE face_pads;
+    DROP TABLE immich_versions;
+    DROP TABLE immich_version_members;
+    DROP TABLE dated_photos;
+    DROP TABLE version_labels;
+    """,
 ]
 
 
@@ -426,3 +474,8 @@ def connect(db_path: Path) -> sqlite3.Connection:
                 conn.executescript(script)
                 conn.execute("INSERT INTO schema_version (version) VALUES (?)", (number,))
     return conn
+
+
+def now() -> str:
+    """The one timestamp format the ledger writes: UTC to the second"""
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")

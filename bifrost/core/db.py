@@ -398,6 +398,14 @@ MIGRATIONS: list[str] = [
         UNIQUE (asset_id, url)
     );
     """,
+    # 31 Tables, page notes and code pencilings are gone, with their tables
+    """
+    DROP TABLE doc_tables;
+    DROP TABLE page_notes;
+    DROP TABLE note_counters;
+    DROP TABLE doc_options;
+    DROP TABLE code_pencilings;
+    """,
 ]
 
 

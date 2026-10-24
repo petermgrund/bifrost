@@ -1,7 +1,17 @@
-import { html, nothing, api, post, btn, field, spinner, statusLine, searchMenu } from './core.js';
+import { html, api, btn, field, progressLine, searchMenu } from './core.js';
 import { SyncPage } from './sync-page.js';
 
 class PlacesLinksPage extends SyncPage {
+  get apiBase() { return '/places/api/links'; }
+  get jobName() { return 'places.links'; }
+  get itemColLabel() { return 'Gramps place'; }
+  get lastColLabel() { return 'Place object'; }
+  get scanHeading() { return 'Scan Gramps places for missing OpenStreetMap links or coordinates'; }
+  get primaryEntity() { return 'place'; }
+}
+customElements.define('places-links-page', PlacesLinksPage);
+
+class PlacesManualPage extends SyncPage {
   static properties = {
     placeList: { state: true },
     placeQ: { state: true },
@@ -9,8 +19,6 @@ class PlacesLinksPage extends SyncPage {
     hiP: { state: true },
     menuOpen: { state: true },
     linkRef: { state: true },
-    linking: { state: true },
-    linkError: { state: true },
   };
 
   constructor() {
@@ -21,16 +29,15 @@ class PlacesLinksPage extends SyncPage {
     this.hiP = -1;
     this.menuOpen = false;
     this.linkRef = '';
-    this.linking = false;
-    this.linkError = '';
   }
 
-  get apiBase() { return '/places/api/links'; }
-  get jobName() { return 'places.links'; }
+  get apiBase() { return '/places/api/manual'; }
+  get jobName() { return 'places.manual'; }
   get itemColLabel() { return 'Gramps place'; }
   get lastColLabel() { return 'Place object'; }
-  get scanHeading() { return 'Scan Gramps places for missing OpenStreetMap links or coordinates'; }
+  get scanHeading() { return 'Link places manually'; }
   get primaryEntity() { return 'place'; }
+  previewBody() { return { gramps_id: this.placePick?.id, relation: this.linkRef.trim() }; }
 
   connectedCallback() {
     super.connectedCallback();
@@ -45,8 +52,10 @@ class PlacesLinksPage extends SyncPage {
     }
   }
 
-  async apply() {
-    await super.apply();
+  runAnother() {
+    super.runAnother();
+    this.placePick = null;
+    this.linkRef = '';
     this.loadPlaces();
   }
 
@@ -65,7 +74,7 @@ class PlacesLinksPage extends SyncPage {
       .filter((x) => x.r >= 0)
       .sort((a, b) => a.r - b.r)
       .slice(0, 3)
-      .map(({ p }) => ({ id: p.gramps_id, label: p.hierarchy.join(', ') || p.name,
+      .map(({ p }) => ({ id: p.gramps_id, name: p.name, label: p.hierarchy.join(', ') || p.name,
         sub: p.gramps_id, mono: true }));
   }
 
@@ -74,47 +83,17 @@ class PlacesLinksPage extends SyncPage {
     this.placeQ = '';
     this.hiP = -1;
     this.menuOpen = false;
-    this.linkError = '';
   }
 
-  async link() {
-    const gramps_id = this.placePick?.id;
-    const relation = this.linkRef.trim();
-    if (!gramps_id || !relation || this.linking) return;
-    this.linking = true;
-    this.linkError = '';
-    try {
-      const r = await post('/places/api/set-relation', { gramps_id, relation });
-      if (r.boundary_error) {
-        this.linkError = `${r.name} (${r.gramps_id}) is linked but its boundary map file wasn't added: `
-          + `${r.boundary_error}. Retry later.`;
-      }
-      this.placePick = null;
-      this.linkRef = '';
-      this.loadPlaces();
-    } catch (e) {
-      this.linkError = e.message;
-    } finally {
-      this.linking = false;
-    }
-  }
-
-  render() {
+  renderEmpty() {
     const items = this.placeMatches();
+    const ready = !!this.placePick && !!this.linkRef.trim();
     return html`
-      ${super.render()}
-      <div class="medium-space"></div>
-      <h6 class="small">Link a place by hand</h6>
-      <div class="chosen-media">
-        ${this.placePick ? html`
-          <div>
-            <div>${this.placePick.label}</div>
-            <div class="small-text secondary-text mono">${this.placePick.sub}</div>
-          </div>` : nothing}
-      </div>
+      <h6 class="small">${this.scanHeading}</h6>
       <nav class="wrap">
-        ${searchMenu({
-    label: 'Select', icon: 'add_link',
+        ${this.running ? progressLine(this.progress) : html`
+          ${searchMenu({
+    label: this.placePick ? this.placePick.name : 'Select place', icon: 'place',
     value: this.placeQ, items, active: this.hiP, open: this.menuOpen,
     onToggle: () => { this.menuOpen = !this.menuOpen; }, onClose: () => { this.menuOpen = false; },
     onInput: (e) => { this.placeQ = e.target.value; this.hiP = -1; },
@@ -123,23 +102,10 @@ class PlacesLinksPage extends SyncPage {
     onMove: (d) => { if (items.length) this.hiP = (this.hiP + d + items.length) % items.length; },
     empty: !this.placeQ.trim() ? '' : this.placeList ? 'No Gramps place matches' : 'Loading places...',
   })}
-        ${field('OSM relation or URL', this.linkRef, (e) => (this.linkRef = e.target.value),
-          { width: 'medium', onEnter: () => this.link() })}
-        ${btn(this.linking ? 'Linking...' : 'Link',
-          this.linking || !this.placePick || !this.linkRef.trim(), () => this.link())}
-        ${this.linking ? spinner : nothing}
-      </nav>
-      ${this.linkError ? html`<p>${statusLine('error', this.linkError)}</p>` : nothing}`;
+          ${field('OSM relation or URL', this.linkRef, (e) => (this.linkRef = e.target.value),
+            { width: 'medium', onEnter: () => { if (ready) this.runPreview(); } })}
+          ${btn('Scan', !ready, () => this.runPreview())}`}
+      </nav>`;
   }
 }
-customElements.define('places-links-page', PlacesLinksPage);
-
-class PlacesPage extends SyncPage {
-  get apiBase() { return '/places/api'; }
-  get jobName() { return 'places.boundaries'; }
-  get itemColLabel() { return 'Gramps place'; }
-  get lastColLabel() { return 'Place object'; }
-  get scanHeading() { return 'Scan Gramps places for missing or outdated boundary map files'; }
-  get primaryEntity() { return 'place'; }
-}
-customElements.define('places-page', PlacesPage);
+customElements.define('places-manual-page', PlacesManualPage);

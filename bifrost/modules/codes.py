@@ -18,14 +18,14 @@ LOCATION_MAX = 100
 REASON_MAX = 1000
 INSTANCE_MAX = 2000
 
-RESERVED, PENCILED, IN_USE, WITHDRAWN = "reserved", "penciled", "in use", "withdrawn"
+RESERVED, IN_USE, WITHDRAWN = "reserved", "in use", "withdrawn"
 ATTENTION = "attention"
-STATUSES = (RESERVED, PENCILED, IN_USE, WITHDRAWN)
+STATUSES = (RESERVED, IN_USE, WITHDRAWN)
 
 CSV_COLUMNS = (
     "code", "status", "needs_attention", "type", "note", "title", "in_gramps", "gramps_url",
     "paperless_docs", "paperless_urls", "immich_assets", "immich_urls", "instances", "created",
-    "penciled", "minted", "withdrawn", "withdrawn_reason",
+    "minted", "withdrawn", "withdrawn_reason",
 )
 
 _LOCATION_RE = re.compile(
@@ -86,7 +86,7 @@ def status_filter(raw: str | None) -> str | None:
     if text in STATUSES:
         return text
     raise ValueError(
-        f"unknown status {raw!r}: use reserved, penciled, in use, withdrawn or attention")
+        f"unknown status {raw!r}: use reserved, in use, withdrawn or attention")
 
 
 # ---- reading the ledger
@@ -103,7 +103,6 @@ def _load(conn: sqlite3.Connection) -> dict:
         "descriptions": {},
         "notes": {},
         "instances": {},
-        "pencilings": {},
         "predecessors": {},
     }
     for code, r in led["withdrawn"].items():
@@ -113,8 +112,6 @@ def _load(conn: sqlite3.Connection) -> dict:
         led["descriptions"].setdefault(r["code"], []).append(r)
     for r in conn.execute("SELECT * FROM code_notes ORDER BY changed_at, rowid"):
         led["notes"].setdefault(r["code"], []).append(r)
-    for r in conn.execute("SELECT * FROM code_pencilings ORDER BY id"):
-        led["pencilings"].setdefault(r["code"], []).append(r)
     for r in conn.execute("SELECT * FROM code_instances ORDER BY id"):
         led["instances"].setdefault(r["code"], []).append(r)
     for r in conn.execute(
@@ -135,10 +132,6 @@ def _in_ledger(led: dict, code: str) -> bool:
     return any(code in led[k] for k in ("reserved", "minted", "objects", "withdrawn", "scans"))
 
 
-def _penciled(led: dict, code: str) -> bool:
-    return any(not p["crossed_at"] for p in led["pencilings"].get(code, []))
-
-
 def _status(led: dict, code: str, live: set[str] | None) -> str:
     res = led["reserved"].get(code)
     if code in led["withdrawn"]:
@@ -146,8 +139,6 @@ def _status(led: dict, code: str, live: set[str] | None) -> str:
     if code in led["minted"] or (res is not None and res["minted_at"]) \
             or (live is not None and code in live):
         return IN_USE
-    if _penciled(led, code):
-        return PENCILED
     return RESERVED
 
 
@@ -188,10 +179,6 @@ def _history(led: dict, code: str) -> list[dict]:
     events += [(i["added_at"], "Instance added", i["value"]) for i in instances]
     events += [(i["removed_at"], "Instance removed", i["value"])
                for i in instances if i["removed_at"]]
-    pencilings = list(enumerate(led["pencilings"].get(code, []), start=1))
-    events += [(p["penciled_at"], f"Penciled #{n}", None) for n, p in pencilings]
-    events += [(p["crossed_at"], f"Penciling #{n} crossed out", None)
-               for n, p in pencilings if p["crossed_at"]]
     if minted_at:
         events.append((minted_at, f"Minted from {_record(led, code)}" if minted else "Minted", None))
     if gone is not None:
@@ -232,12 +219,11 @@ def _instances(led: dict, code: str, row: dict) -> list[dict]:
 
 
 def _deletable(led: dict, code: str, live: set[str] | None) -> bool:
-    """Only reserved: never penciled, minted, scanned, withdrawn or in Gramps"""
+    """Only reserved: never minted, scanned, withdrawn or in Gramps"""
     res = led["reserved"].get(code)
     return (res is not None and not res["minted_at"] and code not in led["minted"]
             and code not in led["withdrawn"] and code not in led["scans"]
-            and code not in led["versions"] and not led["pencilings"].get(code)
-            and code not in (live or ()))
+            and code not in led["versions"] and code not in (live or ()))
 
 
 def _row(led: dict, code: str, live: set[str] | None, urls: Urls,
@@ -246,7 +232,6 @@ def _row(led: dict, code: str, live: set[str] | None, urls: Urls,
     minted = led["minted"].get(code)
     obj = led["objects"].get(code)
     gone = led["withdrawn"].get(code)
-    pencilings = led["pencilings"].get(code, [])
     status = _status(led, code, live)
     in_gramps = None if live is None else code in live
     history = _history(led, code)
@@ -293,10 +278,6 @@ def _row(led: dict, code: str, live: set[str] | None, urls: Urls,
                    for a in immich],
         "scans": led["scans"].get(code, []),
         "created": res["created_at"] if res is not None else None,
-        "penciled": next((p["penciled_at"] for p in reversed(pencilings)
-                          if not p["crossed_at"]), None),
-        "pencilings": [{"id": p["id"], "n": n, "at": p["penciled_at"], "crossed": p["crossed_at"]}
-                       for n, p in enumerate(pencilings, start=1)],
         "minted": (minted["minted_at"] if minted else None) or (res["minted_at"] if res else None),
         "withdrawn": gone["withdrawn_at"] if gone is not None else None,
         "withdrawn_reason": gone["reason"] if gone is not None else None,
@@ -440,8 +421,7 @@ def _where_seen(led: dict, code: str, live: set[str],
                 f"on {(minted['minted_at'] or '')[:10]}.")
     res = led["reserved"].get(code)
     if res is not None:
-        state = "penciled" if _penciled(led, code) else "reserved"
-        return f"{code} is already in the ledger: {state} since {(res['created_at'] or '')[:10]}."
+        return f"{code} is already in the ledger: reserved since {(res['created_at'] or '')[:10]}."
     if code in led["objects"]:
         return f"{code} is already in the ledger."
     if code in led["scans"]:
@@ -520,36 +500,6 @@ def claim(conn: sqlite3.Connection, raw: str | None, *, kind: str | None, note: 
     desc = _description(_load(conn), kind=kind, note=note, parent=parent, location=location,
                         code=code)
     _insert(conn, [code], desc)
-    return code
-
-
-def mark_penciled(conn: sqlite3.Connection, raw: str | None) -> str:
-    """Record one more penciling of the code on its item"""
-    led = _load(conn)
-    code = normalize(raw)
-    _require_known(led, code)
-    if code in led["withdrawn"]:
-        raise CodeError(409, f"{code} is withdrawn, so it is not marked penciled.")
-    if _type(led, code) == "document":
-        raise CodeError(409, f"{code} is a document, and documents are not penciled.")
-    with conn:
-        conn.execute("INSERT INTO code_pencilings (code, penciled_at) VALUES (?, ?)",
-                     (code, _now()))
-    return code
-
-
-def cross_out_penciling(conn: sqlite3.Connection, raw: str | None, penciling_id: int) -> str:
-    """Cross out one penciling, erased or written wrong; the others stand"""
-    led = _load(conn)
-    code = normalize(raw)
-    _require_known(led, code)
-    p = next((p for p in led["pencilings"].get(code, []) if p["id"] == penciling_id), None)
-    if p is None:
-        raise CodeError(404, f"{code} has no such penciling.")
-    if p["crossed_at"]:
-        raise CodeError(409, f"That penciling of {code} is already crossed out.")
-    with conn:
-        conn.execute("UPDATE code_pencilings SET crossed_at=? WHERE id=?", (_now(), penciling_id))
     return code
 
 
@@ -683,11 +633,9 @@ def update(conn: sqlite3.Connection, raw: str | None, changes: Mapping) -> str:
 
 
 def open_codes(conn: sqlite3.Connection, live: set[str]) -> list[dict]:
-    """Reserved and penciled codes an Immich asset can take, penciled first"""
-    items = [r for r in rows(conn, live) if r["status"] in (RESERVED, PENCILED) and r["created"]]
-    items.sort(key=lambda r: r["status"] != PENCILED)
-    return [{k: r[k] for k in ("code", "status", "note", "notes", "penciled", "created")}
-            for r in items]
+    """Reserved codes an Immich asset can take"""
+    return [{k: r[k] for k in ("code", "status", "note", "notes", "created")}
+            for r in rows(conn, live) if r["status"] == RESERVED and r["created"]]
 
 
 def add_instance(conn: sqlite3.Connection, raw: str | None, value: str | None) -> str:
@@ -742,7 +690,6 @@ def to_csv(items: list[dict]) -> str:
             " ".join(a["id"] for a in r["immich"]),
             " ".join(a["url"] for a in r["immich"] if a["url"]),
             " | ".join(i["text"] for i in r["instances"] if i["id"]),
-            r["created"] or "", " ".join(p["at"] for p in r["pencilings"] if not p["crossed"]),
-            r["minted"] or "", r["withdrawn"] or "", r["withdrawn_reason"] or "",
+            r["created"] or "", r["minted"] or "", r["withdrawn"] or "", r["withdrawn_reason"] or "",
         ])
     return "\ufeff" + buf.getvalue()

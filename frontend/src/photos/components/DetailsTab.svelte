@@ -1,14 +1,26 @@
 <script>
-  import { Badge, Button, Field, Input, Label, Link, Select, Text, Textarea } from '@immich/ui';
-  import { mdiMapMarkerOff, mdiMapMarkerPlusOutline } from '@mdi/js';
-  import { MODIFIER, MONTH_OPTIONS, QUALITY, RANGES, dateOf, dateProblem, grampsDate, placeItem } from '../lib/format.js';
+  import { Badge, Button, Field, IconButton, Input, Label, Link, Select, Text, Textarea } from '@immich/ui';
+  import { mdiClose, mdiLinkPlus, mdiMapMarkerOff, mdiMapMarkerPlusOutline } from '@mdi/js';
+  import {
+    LINK_RE,
+    MODIFIER,
+    MONTH_OPTIONS,
+    QUALITY,
+    RANGES,
+    dateOf,
+    dateProblem,
+    grampsDate,
+    placeItem,
+    shortLink,
+  } from '../lib/format.js';
   import { store } from '../lib/store.svelte.js';
   import PickerPopover from './PickerPopover.svelte';
   import Segmented from './Segmented.svelte';
 
-  let { rec, form = $bindable() } = $props();
+  let { rec, form = $bindable(), busy, onError } = $props();
 
   let placeQ = $state('');
+  let url = $state('');
 
   const problem = $derived(dateProblem(form.date));
   const date = $derived(dateOf(form.date));
@@ -52,6 +64,26 @@
     form.date.year = '';
     form.date.month = '0';
     form.date.day = '';
+  }
+
+  function addLink(e) {
+    e.preventDefault();
+    const value = url.trim();
+    if (!value || busy) return;
+    if (!LINK_RE.test(value)) {
+      onError('That is not a link starting with http:// or https://.');
+      return;
+    }
+    if (form.links.includes(value)) {
+      onError('This photo already has that link.');
+      return;
+    }
+    form.links = [...form.links, value];
+    url = '';
+  }
+
+  function removeLink(value) {
+    form.links = form.links.filter((l) => l !== value);
   }
 </script>
 
@@ -150,4 +182,35 @@
   <Field label="Notes">
     <Textarea bind:value={form.notes} rows={1} grow />
   </Field>
+
+  <div class="flex flex-col gap-1.5">
+    <Label label="Links" size="small" />
+    {#if form.links.length}
+      <ul class="flex flex-col gap-0.5">
+        {#each form.links as l (l)}
+          <li class="flex items-center gap-1">
+            <Link href={l} title={l} class="text-sm">{shortLink(l)}</Link>
+            <IconButton
+              icon={mdiClose}
+              size="tiny"
+              shape="round"
+              variant="ghost"
+              color="secondary"
+              aria-label="Remove {l}"
+              disabled={!!busy}
+              onclick={() => removeLink(l)}
+            />
+          </li>
+        {/each}
+      </ul>
+    {/if}
+    <form class="flex items-center gap-2" onsubmit={addLink}>
+      <div class="min-w-0 grow">
+        <Input bind:value={url} placeholder="https://" aria-label="Link" disabled={!!busy} />
+      </div>
+      <Button type="submit" variant="outline" color="secondary" leadingIcon={mdiLinkPlus} disabled={!url.trim() || !!busy}>
+        Add
+      </Button>
+    </form>
+  </div>
 </div>

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-import json
 
 import httpx
 
@@ -49,20 +48,6 @@ class GeminiClient:
     ) -> str:
         """Transcribe a document file (image or PDF) to plain text."""
         return await self._generate([(data, mime)], prompt, {}, thinking_budget)
-
-    async def generate_json(
-        self, files: list[tuple[bytes, str]], prompt: str, schema: dict,
-        thinking_budget: int | None = None,
-    ) -> dict:
-        """Answer about the files as JSON shaped by an OpenAPI-style schema"""
-        text = await self._generate(
-            files, prompt,
-            {"responseMimeType": "application/json", "responseSchema": schema},
-            thinking_budget)
-        try:
-            return json.loads(text)
-        except ValueError as exc:
-            raise GeminiError(f"response is not JSON: {text[:200]}") from exc
 
     async def _generate(
         self, files: list[tuple[bytes, str]], prompt: str, extra_cfg: dict,

@@ -12,6 +12,7 @@
     TooltipProvider,
   } from '@immich/ui';
   import {
+    mdiAccountOutline,
     mdiArrowLeft,
     mdiBookmarkMultiple,
     mdiBookmarkMultipleOutline,
@@ -24,8 +25,6 @@
     mdiFaceManOutline,
     mdiMagnify,
     mdiMenu,
-    mdiTag,
-    mdiTagOutline,
     mdiWeatherNight,
     mdiWeatherSunny,
   } from '@mdi/js';
@@ -35,13 +34,13 @@
   import FacesView from './components/FacesView.svelte';
   import PhotoBrowser from './components/PhotoBrowser.svelte';
   import PhotoEditor from './components/PhotoEditor.svelte';
+  import PickerPopover from './components/PickerPopover.svelte';
   import { activity } from './lib/api.svelte.js';
   import { route } from './lib/route.svelte.js';
   import { init, store } from './lib/store.svelte.js';
 
   const NAV = [
     { id: 'recent', title: 'Recent', icon: mdiClockOutline, activeIcon: mdiClockTimeFour },
-    { id: 'tagged', title: 'Tagged for sync', icon: mdiTagOutline, activeIcon: mdiTag },
     { id: 'synced', title: 'In Gramps', icon: mdiCheckCircleOutline, activeIcon: mdiCheckCircle },
   ];
   const wide = window.matchMedia('(min-width: 768px)');
@@ -51,6 +50,7 @@
   let q = $state('');
   let qDraft = $state('');
   let person = $state(null);
+  let personQ = $state('');
   let editorId = $state(null);
   let dark = $state(document.documentElement.classList.contains('dark'));
 
@@ -63,6 +63,14 @@
     })),
   );
 
+  const personItems = $derived.by(() => {
+    const needle = personQ.trim().toLowerCase();
+    return (store.people || [])
+      .filter((p) => !needle || p.name.toLowerCase().includes(needle))
+      .slice(0, 8)
+      .map((p) => ({ id: p.id, label: p.name, sub: p.account_label, thumb: p.thumb, round: true }));
+  });
+
   init();
 
   window.addEventListener('hashchange', () => {
@@ -70,9 +78,18 @@
     if (!wide.matches) sidebarOpen = false;
   });
 
+  function browse() {
+    if (!NAV.some((n) => n.id === route.view)) window.location.hash = '#/recent';
+  }
+
   function search() {
     q = qDraft.trim();
-    if (!NAV.some((n) => n.id === route.view)) window.location.hash = '#/recent';
+    browse();
+  }
+
+  function setPerson(p) {
+    person = p;
+    if (p) browse();
   }
 
   function clearSearch() {
@@ -117,19 +134,44 @@
         </a>
         <span class="hidden text-xl text-gray-400 sm:inline">/</span>
         <span class="shrink-0 text-xl font-semibold tracking-tight">Photos</span>
-        <div class="mx-auto w-full max-w-xl px-2">
-          <Input
-            bind:value={qDraft}
+        <div class="mx-auto flex w-full max-w-2xl items-center gap-2 px-2">
+          <div class="min-w-0 grow">
+            <Input
+              bind:value={qDraft}
+              shape="round"
+              leadingIcon={mdiMagnify}
+              trailingIcon={qDraft ? clearButton : undefined}
+              placeholder="Search titles and file names"
+              aria-label="Search titles and file names"
+              onkeydown={(e) => {
+                if (e.key === 'Enter') search();
+                else if (e.key === 'Escape') clearSearch();
+              }}
+            />
+          </div>
+          <PickerPopover
+            label={person ? person.label : 'Person'}
+            icon={person ? mdiFaceMan : mdiAccountOutline}
             shape="round"
-            leadingIcon={mdiMagnify}
-            trailingIcon={qDraft ? clearButton : undefined}
-            placeholder="Search titles and file names"
-            aria-label="Search titles and file names"
-            onkeydown={(e) => {
-              if (e.key === 'Enter') search();
-              else if (e.key === 'Escape') clearSearch();
-            }}
+            compact
+            items={personItems}
+            bind:query={personQ}
+            placeholder="Search people"
+            empty={store.people === null ? 'Loading people…' : 'No named person matches'}
+            align="end"
+            onPick={setPerson}
           />
+          {#if person}
+            <IconButton
+              icon={mdiClose}
+              size="small"
+              shape="round"
+              variant="ghost"
+              color="secondary"
+              aria-label="Clear person"
+              onclick={() => setPerson(null)}
+            />
+          {/if}
         </div>
         <Button href="/#photos" size="small" shape="round" leadingIcon={mdiArrowLeft} class="hidden shrink-0 sm:inline-flex">
           Back to Bifrost
@@ -190,14 +232,7 @@
         <CollectionsList />
       {/if}
     {:else}
-      <PhotoBrowser
-        mode={route.view}
-        {q}
-        {person}
-        onPerson={(p) => (person = p)}
-        onClearQuery={clearSearch}
-        onOpenPhoto={(id) => (editorId = id)}
-      />
+      <PhotoBrowser mode={route.view} {q} {person} onClearQuery={clearSearch} onOpenPhoto={(id) => (editorId = id)} />
     {/if}
   </AppShell>
 

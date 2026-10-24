@@ -63,7 +63,6 @@ class SyncPaperlessConfig:
     gramps_id_field_id: int = 0
     gramps_url_field_id: int = 0
     date_qualifier_field_id: int | None = None
-    source_url_field_id: int | None = None
     transcription_tag_id: int | None = None
     ocr_tag: str = ""
 
@@ -132,7 +131,6 @@ def load_config(path: str | Path | None = None) -> Config:
         gramps_id_field_id=int_or_none(sp_raw, "sync.paperless", "gramps_id_field_id") or 0,
         gramps_url_field_id=int_or_none(sp_raw, "sync.paperless", "gramps_url_field_id") or 0,
         date_qualifier_field_id=int_or_none(sp_raw, "sync.paperless", "date_qualifier_field_id"),
-        source_url_field_id=int_or_none(sp_raw, "sync.paperless", "source_url_field_id"),
         transcription_tag_id=int_or_none(sp_raw, "sync.paperless", "transcription_tag_id"),
         ocr_tag=sp_raw.get("ocr_tag") or "",
     )

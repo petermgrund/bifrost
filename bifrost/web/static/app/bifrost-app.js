@@ -2,11 +2,9 @@ import { BifrostElement, html, nothing } from './core.js';
 import './paperless-sync-page.js';
 import './immich-sync-page.js';
 import './transcribe-page.js';
-import './tables-page.js';
 import './reprocess-page.js';
 import './faces-backfill-page.js';
 import './places-page.js';
-import './ancestry-links-page.js';
 import './codes-page.js';
 
 const SECTIONS = [
@@ -16,23 +14,19 @@ const SECTIONS = [
       <div class="large-space"></div>
       <immich-sync-page></immich-sync-page>
       <div class="large-space"></div>
-      <faces-backfill-page></faces-backfill-page>
-      <div class="large-space"></div>
-      <ancestry-links-page></ancestry-links-page>` },
+      <faces-backfill-page></faces-backfill-page>` },
   { id: 'photos', title: 'Photos', desc: 'Curate Immich photos for Gramps',
     body: html`<a class="button" href="/photos"><span>Open Photos</span></a>` },
-  { id: 'transcribe', title: 'Transcribe', desc: 'Manage OCR for Paperless docs',
+  { id: 'transcribe', title: 'Transcribe', desc: 'Run OCR on Paperless docs',
     body: html`<transcribe-page></transcribe-page>` },
-  { id: 'tables', title: 'Tables', desc: 'Index census pages and other tables',
-    body: html`<tables-page></tables-page>` },
-  { id: 'reprocess', title: 'Reprocess', desc: 'Rebuild a Paperless doc so all pages are the same width',
-    body: html`<reprocess-page></reprocess-page>` },
-  { id: 'places', title: 'Places', desc: 'Link Gramps places to OpenStreetMap and draw their boundaries on the map',
-    body: html`<places-links-page></places-links-page>
-      <div class="large-space"></div>
-      <places-page></places-page>` },
   { id: 'codes', title: 'Codes', desc: 'Manage PID codes',
     body: html`<codes-page></codes-page>` },
+  { id: 'other', title: 'Other tools', desc: 'Other tools for managing your data',
+    body: html`<reprocess-page></reprocess-page>
+      <div class="large-space"></div>
+      <places-links-page></places-links-page>
+      <div class="large-space"></div>
+      <places-manual-page></places-manual-page>` },
 ];
 
 class BifrostApp extends BifrostElement {

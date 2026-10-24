@@ -34,8 +34,6 @@ def seed(conn):
         "INSERT INTO reserved_ids (gramps_id, created_at, note) VALUES (?, ?, ?)",
         [("RSVD22", "2026-03-01T10:00:00", "Reserved, not written yet"),
          ("PENCHD", "2026-03-02T10:00:00", "Penciled print")])
-    conn.execute("INSERT INTO code_pencilings (code, penciled_at) "
-                 "VALUES ('PENCHD', '2026-03-03T10:00:00')")
     conn.execute("INSERT INTO scan_register (scan_no, object_id) VALUES ('a000277', 'SCAN22')")
     conn.execute(
         "INSERT INTO doc_versions (paperless_id, checksum, gramps_id, updated_at) "
@@ -194,7 +192,7 @@ def test_claim_normalizes_and_registers(conn):
     (GONE, 409, "minted from Paperless document 101"),
     (MNTD22, 409, "minted from Immich asset asset-1"),
     ("rsvd22", 409, "reserved since 2026-03-01"),
-    ("PENCHD", 409, "penciled since"),
+    ("PENCHD", 409, "reserved since 2026-03-02"),
     ("SCAN22", 409, "scan register (a000277)"),
     ("GRMP22", 409, "Gramps media"),
     ("PPR222", 409, "Paperless document 7"),
@@ -214,7 +212,7 @@ def test_status_derivation(conn):
                  "VALUES ('MARKED', '2026-04-01T10:00:00', '2026-04-02T10:00:00')")
     rows = by_code(conn, live={MNTD22, "GRMP22", "O0001"})
     assert rows["RSVD22"]["status"] == "reserved"
-    assert rows["PENCHD"]["status"] == "penciled"
+    assert rows["PENCHD"]["status"] == "reserved"
     assert rows["SCAN22"]["status"] == "reserved"
     assert rows[MNTD22]["status"] == "in use" and rows[MNTD22]["attention"] is None
     assert rows["MARKED"]["status"] == "in use"
@@ -268,8 +266,7 @@ def test_rows_sort_newest_first_and_counts(conn):
     assert [r["code"] for r in items] == [
         "PENCHD", "RSVD22", MNTD22, GONE, "6H2P", "C8T5", "G8NQ", "J82D", "JYMZ", "SCAN22"]
     c = codes.counts(items)
-    assert c == {"all": 10, "reserved": 2, "penciled": 1, "in use": 2, "withdrawn": 5,
-                 "attention": 1}
+    assert c == {"all": 10, "reserved": 3, "in use": 2, "withdrawn": 5, "attention": 1}
     assert [r["code"] for r in codes.search(items, "communion")] == [MNTD22]
     assert [r["code"] for r in codes.search(items, "xj4-dbt")] == [GONE]
     assert [r["code"] for r in codes.search(items, "a000277")] == ["SCAN22"]
@@ -287,88 +284,7 @@ def test_status_filter_rejects_garbage():
         codes.status_filter("lost")
 
 
-# ---- penciled, withdraw
-
-def test_penciling_again_adds_an_entry(conn):
-    codes.mark_penciled(conn, "rsvd22")
-    conn.execute("UPDATE code_pencilings SET penciled_at='2026-05-01T00:00:00' WHERE code='RSVD22'")
-    codes.mark_penciled(conn, "RSVD22")
-    row = by_code(conn)["RSVD22"]
-    assert row["status"] == "penciled"
-    assert [(p["n"], p["crossed"]) for p in row["pencilings"]] == [(1, None), (2, None)]
-    assert row["pencilings"][0]["at"] == "2026-05-01T00:00:00"
-    assert row["penciled"] == row["pencilings"][1]["at"]
-
-
-def test_penciling_a_code_minted_straight_from_sync(conn):
-    codes.mark_penciled(conn, MNTD22)
-    assert conn.execute("SELECT 1 FROM reserved_ids WHERE gramps_id=?", (MNTD22,)).fetchone() is None
-    row = by_code(conn)[MNTD22]
-    assert row["status"] == "in use" and row["penciled"] == row["pencilings"][0]["at"]
-
-
-def test_crossing_out_one_penciling_leaves_the_others(conn):
-    codes.mark_penciled(conn, "RSVD22")
-    codes.mark_penciled(conn, "RSVD22")
-    first, second = by_code(conn)["RSVD22"]["pencilings"]
-    codes.cross_out_penciling(conn, "rsvd22", first["id"])
-    row = by_code(conn)["RSVD22"]
-    assert row["status"] == "penciled" and row["pencilings"][0]["crossed"]
-    assert row["pencilings"][1]["crossed"] is None and row["penciled"] == second["at"]
-    assert [e["what"] for e in row["history"]][-3:] == [
-        "Penciled #1", "Penciled #2", "Penciling #1 crossed out"]
-    codes.cross_out_penciling(conn, "RSVD22", second["id"])
-    row = by_code(conn)["RSVD22"]
-    assert row["status"] == "reserved" and row["penciled"] is None
-    assert conn.execute("SELECT COUNT(*) FROM code_pencilings WHERE code='RSVD22'").fetchone()[0] == 2
-
-
-def test_cross_out_refusals(conn):
-    [p] = by_code(conn)["PENCHD"]["pencilings"]
-    for code, pid, status in [("RSVD22", p["id"], 404), ("PENCHD", 999, 404),
-                              ("NOPE22", p["id"], 404)]:
-        with pytest.raises(codes.CodeError) as exc:
-            codes.cross_out_penciling(conn, code, pid)
-        assert exc.value.status == status
-    codes.withdraw(conn, "PENCHD", "wrong print")
-    codes.cross_out_penciling(conn, "PENCHD", p["id"])
-    with pytest.raises(codes.CodeError, match="already crossed out") as exc:
-        codes.cross_out_penciling(conn, "PENCHD", p["id"])
-    assert exc.value.status == 409
-
-
-def test_migration_18_moves_pencilings(tmp_path):
-    path = tmp_path / "v17.db"
-    old = sqlite3.connect(path)
-    old.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)")
-    for number, script in enumerate(db.MIGRATIONS[:17], start=1):
-        old.executescript(script)
-        old.execute("INSERT INTO schema_version (version) VALUES (?)", (number,))
-    old.executemany("INSERT INTO reserved_ids (gramps_id, created_at, assigned_at) VALUES (?, ?, ?)",
-                    [("PNCL22", "2026-09-01T10:00:00", "2026-09-02T10:00:00"),
-                     ("RSVD22", "2026-09-01T10:00:00", None)])
-    old.commit()
-    old.close()
-    conn = db.connect(path)
-    assert [tuple(r) for r in conn.execute(
-        "SELECT code, penciled_at, crossed_at FROM code_pencilings")] == [
-        ("PNCL22", "2026-09-02T10:00:00", None)]
-    assert by_code(conn)["PNCL22"]["status"] == "penciled"
-    conn.close()
-
-
-def test_penciled_refusals(conn):
-    with pytest.raises(codes.CodeError) as exc:
-        codes.mark_penciled(conn, "NOPE22")
-    assert exc.value.status == 404
-    with pytest.raises(codes.CodeError) as exc:
-        codes.mark_penciled(conn, "JYMZ")
-    assert exc.value.status == 409
-    with pytest.raises(codes.CodeError, match="is a document") as exc:
-        codes.mark_penciled(conn, GONE)
-    assert exc.value.status == 409
-    codes.mark_penciled(conn, MNTD22)
-
+# ---- withdraw
 
 def test_withdraw_blocks_reuse_and_deletes_nothing(conn, script_ids):
     codes.withdraw(conn, "rsvd22", "  penciled on the wrong print ")
@@ -444,16 +360,15 @@ def test_history_is_chronological(conn):
     codes.withdraw(conn, "PENCHD", "wrong print")
     row = by_code(conn)["PENCHD"]
     assert [(e["what"], e["detail"]) for e in row["history"]] == [
-        ("Created", "Penciled print"), ("Penciled #1", None),
-        ("Description changed", "Penciled print, Gillio box"), ("Withdrawn", "wrong print")]
+        ("Created", "Penciled print"), ("Description changed", "Penciled print, Gillio box"),
+        ("Withdrawn", "wrong print")]
     assert row["history"][0]["at"] == "2026-03-02T10:00:00"
     assert row["updated"] == row["history"][-1]["at"]
 
 
 def test_history_of_codes_minted_by_sync(conn):
-    codes.mark_penciled(conn, MNTD22)
     rows = by_code(conn)
-    assert [e["what"] for e in rows[MNTD22]["history"]] == ["Minted from Immich", "Penciled #1"]
+    assert [e["what"] for e in rows[MNTD22]["history"]] == ["Minted from Immich"]
     assert [e["what"] for e in rows[GONE]["history"]] == ["Minted from Paperless document 101"]
     assert rows["SCAN22"]["history"] == [] and rows["SCAN22"]["updated"] is None
 
@@ -718,20 +633,17 @@ def test_api_claim(conn, code, status, msg):
         assert r.json()["codes"] == ["FRSH22"] and r.json()["items"][0]["status"] == "reserved"
 
 
-def test_api_penciled_patch_withdraw(conn):
+def test_api_patch_withdraw(conn):
     app = make_app(conn)
     g = group(conn)
-    r = call(app, "POST", "/codes/api/rsvd22/penciled")
-    assert r.status_code == 200 and r.json()["item"]["status"] == "penciled"
-    assert call(app, "POST", "/codes/api/RSVD22/penciled").status_code == 200
-    r = call(app, "PATCH", "/codes/api/RSVD22", json={"parent": g, "location": "b3.c1"})
+    r = call(app, "PATCH", "/codes/api/rsvd22", json={"parent": g, "location": "b3.c1"})
     assert r.status_code == 200, r.text
     assert (r.json()["item"]["parent"], r.json()["item"]["location"]) == (g, "B3.C1")
     assert call(app, "PATCH", "/codes/api/RSVD22", json={"parent": "RSVD22"}).status_code == 400
     assert call(app, "POST", "/codes/api/RSVD22/withdraw", json={"reason": ""}).status_code == 400
     r = call(app, "POST", "/codes/api/RSVD22/withdraw", json={"reason": "wrong print"})
     assert r.status_code == 200 and r.json()["item"]["status"] == "withdrawn"
-    assert call(app, "POST", "/codes/api/NOPE22/penciled").status_code == 404
+    assert call(app, "PATCH", "/codes/api/NOPE22", json={"location": "B1"}).status_code == 404
 
 
 def test_api_list_and_patch_follow_the_digital_record(conn):
@@ -743,19 +655,6 @@ def test_api_list_and_patch_follow_the_digital_record(conn):
     assert r.status_code == 409 and "Immich" in r.json()["detail"]
     r = call(app, "PATCH", "/codes/api/RSVD22", json={"note": "Loose print"})
     assert r.status_code == 200 and r.json()["item"]["history"][-1]["detail"] == "Loose print"
-
-
-def test_api_pencil_twice_and_cross_out(conn):
-    app = make_app(conn)
-    call(app, "POST", "/codes/api/RSVD22/penciled")
-    first, second = call(app, "POST", "/codes/api/RSVD22/penciled").json()["item"]["pencilings"]
-    url = f"/codes/api/rsvd22/pencilings/{first['id']}/cross-out"
-    r = call(app, "POST", url)
-    assert r.status_code == 200, r.text
-    assert r.json()["item"]["status"] == "penciled"
-    assert [p["crossed"] is None for p in r.json()["item"]["pencilings"]] == [False, True]
-    assert call(app, "POST", url).status_code == 409
-    assert call(app, "POST", "/codes/api/RSVD22/pencilings/999/cross-out").status_code == 404
 
 
 def test_api_instances_and_thumbnail(conn):
@@ -898,7 +797,7 @@ def test_codes_with_a_record_keep_no_notes(conn):
 def test_open_codes_are_the_ones_a_photo_can_take(conn):
     codes.update(conn, "RSVD22", {"notes": "Blue album"})
     assert [(c["code"], c["status"], c["notes"]) for c in codes.open_codes(conn, {MNTD22})] == [
-        ("PENCHD", "penciled", ""), ("RSVD22", "reserved", "Blue album")]
+        ("PENCHD", "reserved", ""), ("RSVD22", "reserved", "Blue album")]
     codes.withdraw(conn, "PENCHD", "wrong print")
     assert codes.open_codes(conn, {MNTD22, "RSVD22"}) == []
 
@@ -975,12 +874,9 @@ def test_deleting_an_unused_reservation(conn, script_ids):
 
 
 def test_used_codes_are_not_deletable(conn):
-    codes.mark_penciled(conn, "RSVD22")
-    first = by_code(conn)["RSVD22"]["pencilings"][0]["id"]
-    codes.cross_out_penciling(conn, "RSVD22", first)
     rows = by_code(conn, live={MNTD22, "GRMP22"})
-    assert [c for c, r in rows.items() if r["deletable"]] == []
-    for code in ("RSVD22", "PENCHD", MNTD22, GONE, "JYMZ", "SCAN22"):
+    assert sorted(c for c, r in rows.items() if r["deletable"]) == ["PENCHD", "RSVD22"]
+    for code in (MNTD22, GONE, "JYMZ", "SCAN22"):
         with pytest.raises(codes.CodeError) as exc:
             codes.delete(conn, code, live={MNTD22}, paperless={})
         assert exc.value.status == 409

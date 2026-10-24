@@ -11,7 +11,6 @@
   import CollectionsTab from './CollectionsTab.svelte';
   import DetailsTab from './DetailsTab.svelte';
   import Lightbox from './Lightbox.svelte';
-  import LinksTab from './LinksTab.svelte';
   import VersionsTab from './VersionsTab.svelte';
 
   let { assetId, onClose } = $props();
@@ -36,13 +35,11 @@
     if (!rec) return [];
     const versions = rec.versions?.members?.length || 0;
     const cols = rec.collections?.length || 0;
-    const links = form?.links.length || 0;
     return [
       { id: 'details', label: 'Details' },
       { id: 'versions', label: versions > 1 ? `Versions (${versions})` : 'Versions' },
       { id: 'people', label: rec.people.length ? `People (${rec.people.length})` : 'People' },
       { id: 'collections', label: cols ? `Collections (${cols})` : 'Collections' },
-      { id: 'links', label: links ? `Links (${links})` : 'Links' },
     ];
   });
 
@@ -376,7 +373,7 @@
                 {/each}
               </Tabs.List>
               <Tabs.Content value="details" class="immich-scrollbar -mx-1 min-h-0 flex-1 overflow-y-auto px-1 pt-4">
-                <DetailsTab {rec} bind:form />
+                <DetailsTab {rec} bind:form {busy} onError={(msg) => (status = { kind: 'error', msg })} />
               </Tabs.Content>
               <Tabs.Content value="versions" class="min-h-0 flex-1 pt-4">
                 <VersionsTab
@@ -417,9 +414,6 @@
               </Tabs.Content>
               <Tabs.Content value="collections" class="immich-scrollbar -mx-1 min-h-0 flex-1 overflow-y-auto px-1 pt-4">
                 <CollectionsTab {rec} {busy} onAdd={addToCollection} onRemove={removeFromCollection} onGo={onClose} />
-              </Tabs.Content>
-              <Tabs.Content value="links" class="immich-scrollbar -mx-1 min-h-0 flex-1 overflow-y-auto px-1 pt-4">
-                <LinksTab bind:form {busy} onError={(msg) => (status = { kind: 'error', msg })} />
               </Tabs.Content>
             </Tabs.Root>
           </div>

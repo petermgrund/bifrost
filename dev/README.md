@@ -16,8 +16,6 @@ Then open http://localhost:8800.
 | Paperless-ngx | http://localhost:8000 | `admin` / `bifrost-dev` |
 | Immich | http://localhost:2283 | `owner@bifrost.dev` or `partner@bifrost.dev` / `bifrost-dev` |
 
-Place boundaries are GeoJSON map files in each place's gallery, which Gramps Web 26.10.2 or later draws on its Map; `GRAMPSWEB_VERSION=latest` is new enough.
-
 ## Commands
 
 `dev/bifrost-dev.sh` with no arguments lists all options:

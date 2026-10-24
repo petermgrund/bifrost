@@ -1,32 +1,22 @@
 <script>
   import { Alert, Badge, Button, Heading, Icon, LoadingSpinner, Text } from '@immich/ui';
-  import { mdiAccountOutline, mdiFaceMan, mdiImageMultipleOutline, mdiMagnify } from '@mdi/js';
+  import { mdiImageMultipleOutline, mdiMagnify } from '@mdi/js';
   import { untrack } from 'svelte';
   import { get, qs } from '../lib/api.svelte.js';
   import { cardFrom, plural } from '../lib/format.js';
-  import { onRecord, store } from '../lib/store.svelte.js';
+  import { onRecord } from '../lib/store.svelte.js';
   import PhotoTile from './PhotoTile.svelte';
-  import PickerPopover from './PickerPopover.svelte';
 
-  let { mode, q, person, onPerson, onClearQuery, onOpenPhoto } = $props();
+  let { mode, q, person, onClearQuery, onOpenPhoto } = $props();
 
-  const TITLES = { recent: 'Recent', tagged: 'Tagged for sync', synced: 'In Gramps' };
+  const TITLES = { recent: 'Recent', synced: 'In Gramps' };
 
   let items = $state([]);
   let nextPage = $state(null);
   let loading = $state(false);
   let error = $state('');
-  let personQ = $state('');
   let atEnd = $state(false);
   let token = 0;
-
-  const personItems = $derived.by(() => {
-    const needle = personQ.trim().toLowerCase();
-    return (store.people || [])
-      .filter((p) => !needle || p.name.toLowerCase().includes(needle))
-      .slice(0, 8)
-      .map((p) => ({ id: p.id, label: p.name, sub: p.account_label, thumb: p.thumb, round: true }));
-  });
 
   $effect(() => {
     void [mode, q, person];
@@ -92,20 +82,6 @@
     <Heading size="medium" tag="h1" class="me-auto">{TITLES[mode]}</Heading>
     {#if q}
       <Badge color="secondary" shape="round" leadingIcon={mdiMagnify} onClose={onClearQuery}>{q}</Badge>
-    {/if}
-    {#if person}
-      <Badge color="primary" shape="round" leadingIcon={mdiFaceMan} onClose={() => onPerson(null)}>{person.label}</Badge>
-    {:else}
-      <PickerPopover
-        label="Person"
-        icon={mdiAccountOutline}
-        items={personItems}
-        bind:query={personQ}
-        placeholder="Search people"
-        empty={store.people === null ? 'Loading people…' : 'No named person matches'}
-        align="end"
-        onPick={(it) => onPerson(it)}
-      />
     {/if}
   </div>
 

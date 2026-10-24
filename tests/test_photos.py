@@ -1128,11 +1128,11 @@ class TestBrowseAccounts:
         b["ownerId"] = "u-me"
         fh = VersionsImmich(assets={"a1": a, "b1": b}, me_id="u-fh")
         fh.label = "fh"
-        rows = run(photos.search([fh], conn, CFG, mode="synced", browse=[fh]))["items"]
+        rows = run(photos.search([fh], conn, mode="synced", browse=[fh]))["items"]
         assert [i["asset_id"] for i in rows] == ["a1", "b1"]
         me = VersionsImmich(assets={"a1": a, "b1": b}, me_id="u-me")
         me.label = "me"
-        rows = run(photos.search([fh, me], conn, CFG, mode="synced", browse=[fh]))["items"]
+        rows = run(photos.search([fh, me], conn, mode="synced", browse=[fh]))["items"]
         assert [i["asset_id"] for i in rows] == ["a1"]
 
 

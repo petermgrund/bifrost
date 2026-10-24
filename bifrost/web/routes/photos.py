@@ -77,9 +77,9 @@ async def search(request: Request, q: str = "", mode: str = "recent", person: st
                  page: int = 1) -> dict:
     st = _state(request)
     accounts = _accounts_or_503(request)
-    if mode not in ("recent", "tagged", "synced"):
-        raise HTTPException(400, "mode must be recent, tagged or synced")
-    return await photos.search(accounts, st.conn, st.cfg.sync_immich, mode=mode, q=q.strip(),
+    if mode not in ("recent", "synced"):
+        raise HTTPException(400, "mode must be recent or synced")
+    return await photos.search(accounts, st.conn, mode=mode, q=q.strip(),
                                person=person.strip(), page=max(1, page), browse=_browse(request))
 
 

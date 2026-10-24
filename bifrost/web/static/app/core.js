@@ -73,31 +73,6 @@ export function field(label, value, onInput, opts = {}) {
     : box;
 }
 
-function searchKeys(opts) {
-  return (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); opts.onEnter?.(e); }
-    else if (e.key === 'Escape') e.target.blur();
-    else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-      e.preventDefault();
-      opts.onMove?.(e.key === 'ArrowDown' ? 1 : -1);
-    }
-  };
-}
-
-function searchRows({ items, active = -1, onPick, empty = 'No matches' }) {
-  const fallback = (e) => e.target.replaceWith(Object.assign(document.createElement('i'), { textContent: 'image' }));
-  if (!items.length) return empty ? html`<li class="secondary-text">${empty}</li>` : nothing;
-  return items.map((it, i) => html`<li class=${i === active ? 'active' : ''}
-      @mousedown=${(e) => { e.preventDefault(); onPick(it); e.currentTarget.closest('menu').querySelector('input')?.blur(); document.activeElement?.blur(); }}>
-      ${it.thumb ? html`<img class="circle" src=${it.thumb} alt="" @error=${fallback}>`
-        : it.icon ? html`<i>${it.icon}</i>` : nothing}
-      <div class="max">
-        <div>${it.label}</div>
-        ${it.sub ? html`<div class="small-text secondary-text ${it.mono ? 'mono' : ''}">${it.sub}</div>` : nothing}
-      </div>
-    </li>`);
-}
-
 export function selectField(label, value, options, onChange, opts = {}) {
   return html`<div class="field label suffix fill ${opts.small ? 'small no-margin' : ''} ${WIDTH[opts.width] || ''}">
     <select @change=${onChange} ?disabled=${opts.disabled || false}>${options.map((o) => {
@@ -105,46 +80,6 @@ export function selectField(label, value, options, onChange, opts = {}) {
     return html`<option value=${v} ?selected=${String(v) === String(value)}>${l}</option>`;
   })}</select>
     <label>${label}</label><i>arrow_drop_down</i></div>`;
-}
-
-export function searchField(opts) {
-  const { placeholder, value, onInput, width = '', icon = 'search' } = opts;
-  return html`<div class="field prefix fill no-margin search-field ${WIDTH[width] || ''}">
-    <i class="front">${icon}</i>
-    <input type="text" placeholder=${placeholder} .value=${value ?? ''} autocomplete="off"
-      @input=${onInput} @keydown=${searchKeys(opts)}>
-    <menu class="search-results">${searchRows(opts)}</menu>
-  </div>`;
-}
-
-export function searchMenu(opts) {
-  const { label, icon, value, onInput, open = false, onToggle, onClose,
-    placeholder = 'Search', cls = 'border', up = false } = opts;
-  const toggle = (e) => {
-    const opening = !open;
-    onToggle?.(e);
-    if (!opening) return;
-    const el = e.currentTarget.parentElement;
-    const focusInput = () => {
-      const input = el.querySelector('input');
-      if (input && document.activeElement !== input) input.focus();
-    };
-    requestAnimationFrame(focusInput);
-    for (const ms of [60, 160, 320]) setTimeout(focusInput, ms);
-  };
-  return html`<div class="search-menu">
-    <button class=${cls} @click=${toggle}><i>${icon}</i><span>${label}</span></button>
-    <menu class="search-results ${open ? 'active' : ''} ${up ? 'top' : ''}">
-      <li class="transparent">
-        <div class="field prefix small no-margin">
-          <i class="front">search</i>
-          <input type="text" placeholder=${placeholder} .value=${value ?? ''} autocomplete="off"
-            @input=${onInput} @keydown=${searchKeys(opts)} @blur=${() => onClose?.()}>
-        </div>
-      </li>
-      ${searchRows(opts)}
-    </menu>
-  </div>`;
 }
 
 export class BifrostElement extends LitElement {

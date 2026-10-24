@@ -168,12 +168,4 @@ input[type="color"].seed-input {
 .seed-input::-webkit-color-swatch { border: none; border-radius: 0.35rem; }
 .seed-input::-moz-color-swatch { border: none; border-radius: 0.35rem; }
 config-page table td { block-size: auto; padding-block: 0.25rem; }
-menu.search-results { border-radius: 0; }
-menu.search-results > li { white-space: normal; padding-block: 0.625rem; flex: none; }
-menu.search-results > li > .max > div:first-child { line-height: 1.25rem; }
-menu.search-results > li > .max > div + div { margin-block-start: 0.125rem; }
-menu.search-results > li > img.circle { inline-size: 2.5rem; block-size: 2.5rem; object-fit: cover; flex: none; }
-.search-menu { position: relative; display: inline-flex; }
-.search-menu > menu { inline-size: 26rem; }
-.search-menu > menu > li.transparent { padding: 0.25rem 0.5rem 0.5rem; }
 

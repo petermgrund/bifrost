@@ -1,8 +1,7 @@
 <script>
   import { Badge, Button, Field, IconButton, Input, Label, Link, Select, Text, Textarea } from '@immich/ui';
-  import { mdiClose, mdiLinkPlus, mdiMapMarkerOff, mdiMapMarkerPlusOutline } from '@mdi/js';
+  import { mdiMapMarkerOff, mdiMapMarkerPlusOutline, mdiOpenInNew } from '@mdi/js';
   import {
-    LINK_RE,
     MODIFIER,
     MONTH_OPTIONS,
     QUALITY,
@@ -10,17 +9,17 @@
     dateOf,
     dateProblem,
     grampsDate,
+    linkProblem,
     placeItem,
-    shortLink,
+    validLink,
   } from '../lib/format.js';
   import { store } from '../lib/store.svelte.js';
   import PickerPopover from './PickerPopover.svelte';
   import Segmented from './Segmented.svelte';
 
-  let { rec, form = $bindable(), busy, onError } = $props();
+  let { rec, form = $bindable() } = $props();
 
   let placeQ = $state('');
-  let url = $state('');
 
   const problem = $derived(dateProblem(form.date));
   const date = $derived(dateOf(form.date));
@@ -66,26 +65,21 @@
     form.date.day = '';
   }
 
-  function addLink(e) {
-    e.preventDefault();
-    const value = url.trim();
-    if (!value || busy) return;
-    if (!LINK_RE.test(value)) {
-      onError('That is not a link starting with http:// or https://.');
-      return;
-    }
-    if (form.links.includes(value)) {
-      onError('This photo already has that link.');
-      return;
-    }
-    form.links = [...form.links, value];
-    url = '';
-  }
-
-  function removeLink(value) {
-    form.links = form.links.filter((l) => l !== value);
-  }
 </script>
+
+{#snippet openLink()}
+  <IconButton
+    href={form.link.trim()}
+    target="_blank"
+    rel="noopener"
+    icon={mdiOpenInNew}
+    size="tiny"
+    shape="round"
+    variant="ghost"
+    color="secondary"
+    aria-label="Open link"
+  />
+{/snippet}
 
 <div class="flex flex-col gap-2">
   <Field label="Title">
@@ -155,62 +149,36 @@
     {/if}
   </div>
 
-  <div class="flex flex-col items-start gap-1">
-    <Label label="Place" size="small" />
-    {#if manyPlaces}
-      <div class="flex flex-wrap items-center gap-2">
-        {#each rec.places as p (p.gramps_id)}
-          <Badge color="secondary" shape="round" size="small">{p.name}</Badge>
-        {/each}
-        {#if rec.gramps?.url}
-          <Link href={rec.gramps.url} target="_blank" rel="noopener" class="text-sm">Edit in Gramps Web</Link>
-        {/if}
-      </div>
-    {:else}
-      <PickerPopover
-        label={form.place ? form.place.label : 'Choose place'}
-        icon={form.place ? form.place.icon : mdiMapMarkerPlusOutline}
-        items={placeItems}
-        bind:query={placeQ}
-        placeholder="Search Gramps places"
-        empty={!placeQ.trim() ? '' : store.places ? 'No Gramps place matches' : 'Loading places…'}
-        onPick={(it) => (form.place = it.id === '__none' ? null : it)}
-      />
-    {/if}
+  <div class="flex flex-wrap items-end gap-x-4 gap-y-2">
+    <div class="flex flex-col items-start gap-1">
+      <Label label="Place" size="small" />
+      {#if manyPlaces}
+        <div class="flex flex-wrap items-center gap-2">
+          {#each rec.places as p (p.gramps_id)}
+            <Badge color="secondary" shape="round" size="small">{p.name}</Badge>
+          {/each}
+          {#if rec.gramps?.url}
+            <Link href={rec.gramps.url} target="_blank" rel="noopener" class="text-sm">Edit in Gramps Web</Link>
+          {/if}
+        </div>
+      {:else}
+        <PickerPopover
+          label={form.place ? form.place.label : 'Choose place'}
+          icon={form.place ? form.place.icon : mdiMapMarkerPlusOutline}
+          items={placeItems}
+          bind:query={placeQ}
+          placeholder="Search Gramps places"
+          empty={!placeQ.trim() ? '' : store.places ? 'No Gramps place matches' : 'Loading places…'}
+          onPick={(it) => (form.place = it.id === '__none' ? null : it)}
+        />
+      {/if}
+    </div>
+    <Field label="Link" invalid={!!linkProblem(form.link)} class="min-w-56 grow">
+      <Input bind:value={form.link} placeholder="https://" trailingIcon={validLink(form.link) ? openLink : undefined} />
+    </Field>
   </div>
 
   <Field label="Notes">
-    <Textarea bind:value={form.notes} rows={1} grow />
+    <Textarea bind:value={form.notes} rows={4} grow />
   </Field>
-
-  <div class="flex flex-col gap-1.5">
-    <Label label="Links" size="small" />
-    {#if form.links.length}
-      <ul class="flex flex-col gap-0.5">
-        {#each form.links as l (l)}
-          <li class="flex items-center gap-1">
-            <Link href={l} title={l} class="text-sm">{shortLink(l)}</Link>
-            <IconButton
-              icon={mdiClose}
-              size="tiny"
-              shape="round"
-              variant="ghost"
-              color="secondary"
-              aria-label="Remove {l}"
-              disabled={!!busy}
-              onclick={() => removeLink(l)}
-            />
-          </li>
-        {/each}
-      </ul>
-    {/if}
-    <form class="flex items-center gap-2" onsubmit={addLink}>
-      <div class="min-w-0 grow">
-        <Input bind:value={url} placeholder="https://" aria-label="Link" disabled={!!busy} />
-      </div>
-      <Button type="submit" variant="outline" color="secondary" leadingIcon={mdiLinkPlus} disabled={!url.trim() || !!busy}>
-        Add
-      </Button>
-    </form>
-  </div>
 </div>

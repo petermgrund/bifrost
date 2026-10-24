@@ -37,14 +37,15 @@
     <nav class="bf-header">
       {% include "_mark.html" %}
       <h5 class="max bf-title">{% block nav_title %}Bifrost{% endblock %}</h5>
-      {% block nav_actions %}
+      {% block nav_actions %}{% endblock %}
+      <button class="circle transparent" onclick="toggleTheme()" aria-label="Toggle dark mode">
+        <i id="theme-icon">dark_mode</i>
+      </button>
+      {% block nav_settings %}
       <a class="button circle transparent" href="/config" aria-label="Configuration">
         <i>settings</i>
       </a>
       {% endblock %}
-      <button class="circle transparent" onclick="toggleTheme()" aria-label="Toggle dark mode">
-        <i id="theme-icon">dark_mode</i>
-      </button>
     </nav>
     <div class="medium-space"></div>
     {% endblock %}

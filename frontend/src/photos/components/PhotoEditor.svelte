@@ -4,7 +4,7 @@
   import { Dialog, Tabs } from 'bits-ui';
   import { untrack } from 'svelte';
   import { del, get, post, put, qs, upload } from '../lib/api.svelte.js';
-  import { dateProblem, filled, formFrom, formKey, payload } from '../lib/format.js';
+  import { dateProblem, filled, formFrom, formKey, linkProblem, payload } from '../lib/format.js';
   import { loadCollections, recordChanged } from '../lib/store.svelte.js';
   import AddVersionDialog from './AddVersionDialog.svelte';
   import CodeChoiceModal from './CodeChoiceModal.svelte';
@@ -28,7 +28,7 @@
   let choosing = $state(null);
 
   const edited = $derived(!!form && formKey(form) !== saved);
-  const problem = $derived(form ? dateProblem(form.date) : '');
+  const problem = $derived(form ? dateProblem(form.date) || linkProblem(form.link) : '');
   const savable = $derived(edited && !problem && !!rec && !rec.gramps_error && (!!rec.gramps || filled(form)));
 
   const tabs = $derived.by(() => {
@@ -373,7 +373,7 @@
                 {/each}
               </Tabs.List>
               <Tabs.Content value="details" class="immich-scrollbar -mx-1 min-h-0 flex-1 overflow-y-auto px-1 pt-4">
-                <DetailsTab {rec} bind:form {busy} onError={(msg) => (status = { kind: 'error', msg })} />
+                <DetailsTab {rec} bind:form />
               </Tabs.Content>
               <Tabs.Content value="versions" class="min-h-0 flex-1 pt-4">
                 <VersionsTab

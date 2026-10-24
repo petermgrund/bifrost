@@ -1,3 +1,5 @@
+"""The Codes ledger: every code Bifrost issued, claimed or withdrew, and the media it stands for"""
+
 from __future__ import annotations
 
 import csv
@@ -5,32 +7,23 @@ import io
 import re
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Iterable, Mapping
 
 from ..core import ids
+from ..core.db import now
 
-KINDS = ("item", "group")
 MAX_MINT = 20
-NOTE_MAX = 1000
-NOTES_MAX = 10000
-LOCATION_MAX = 100
 REASON_MAX = 1000
-INSTANCE_MAX = 2000
 
 RESERVED, IN_USE, WITHDRAWN = "reserved", "in use", "withdrawn"
 ATTENTION = "attention"
 STATUSES = (RESERVED, IN_USE, WITHDRAWN)
 
 CSV_COLUMNS = (
-    "code", "status", "needs_attention", "type", "note", "title", "in_gramps", "gramps_url",
-    "paperless_docs", "paperless_urls", "immich_assets", "immich_urls", "instances", "created",
-    "minted", "withdrawn", "withdrawn_reason",
+    "code", "status", "needs_attention", "type", "title", "in_gramps", "gramps_url",
+    "paperless_docs", "paperless_urls", "immich_assets", "immich_urls",
+    "created", "minted", "withdrawn", "withdrawn_reason", "superseded_by",
 )
-
-_LOCATION_RE = re.compile(
-    r"^([BS])([1-9][0-9]*)(?:\.?C([1-9][0-9]*))?(?:\.?F([1-9][0-9]*))?$", re.IGNORECASE)
-_URL_RE = re.compile(r"^https?://\S+$", re.IGNORECASE)
 
 
 class CodeError(Exception):
@@ -50,30 +43,9 @@ class Urls:
     immich: str = ""
 
 
-def _now() -> str:
-    # naive UTC, like the ledger's other rows (written in a UTC container) and
-    # migration 15's seed, so dates sort the same wherever bifrost runs
-    return datetime.now(timezone.utc).replace(tzinfo=None).isoformat(timespec="seconds")
-
-
 def normalize(raw: str | None) -> str:
     """' phkn-3d ' -> 'PHKN3D'"""
     return re.sub(r"[\s-]+", "", raw or "").upper()
-
-
-def normalize_location(raw: str | None) -> str | None:
-    """'b2c3f1' -> 'B2.C3.F1'; other text is kept as typed, whitespace tidied"""
-    text = " ".join((raw or "").split())
-    if not text:
-        return None
-    if len(text) > LOCATION_MAX:
-        raise CodeError(400, f"The location is too long (at most {LOCATION_MAX} characters).")
-    m = _LOCATION_RE.match(text.replace(" ", ""))
-    if m:
-        place, number, compartment, folder = m.groups()
-        return (f"{place.upper()}{number}" + (f".C{compartment}" if compartment else "")
-                + (f".F{folder}" if folder else ""))
-    return text
 
 
 def status_filter(raw: str | None) -> str | None:
@@ -93,202 +65,117 @@ def status_filter(raw: str | None) -> str | None:
 
 def _load(conn: sqlite3.Connection) -> dict:
     led = {
-        "reserved": {r["gramps_id"]: r for r in conn.execute("SELECT * FROM reserved_ids")},
-        "minted": {r["gramps_id"]: r for r in conn.execute("SELECT * FROM minted_media")},
-        "objects": {r["object_id"]: r for r in conn.execute("SELECT * FROM objects")},
-        "withdrawn": {r["code"]: r for r in conn.execute("SELECT * FROM withdrawn_codes")},
-        "scans": {},
+        "codes": {r["gramps_id"]: r for r in conn.execute("SELECT * FROM minted_media")},
         "versions": {},
-        "children": {},
-        "descriptions": {},
-        "notes": {},
-        "instances": {},
-        "predecessors": {},
+        "supersedes": {},
     }
-    for code, r in led["withdrawn"].items():
-        if r["successor"]:
-            led["predecessors"].setdefault(r["successor"], []).append(code)
-    for r in conn.execute("SELECT * FROM code_descriptions ORDER BY changed_at, rowid"):
-        led["descriptions"].setdefault(r["code"], []).append(r)
-    for r in conn.execute("SELECT * FROM code_notes ORDER BY changed_at, rowid"):
-        led["notes"].setdefault(r["code"], []).append(r)
-    for r in conn.execute("SELECT * FROM code_instances ORDER BY id"):
-        led["instances"].setdefault(r["code"], []).append(r)
-    for r in conn.execute(
-            "SELECT scan_no, object_id FROM scan_register "
-            "WHERE object_id IS NOT NULL ORDER BY scan_no"):
-        led["scans"].setdefault(r["object_id"], []).append(r["scan_no"])
+    for code, r in led["codes"].items():
+        if r["superseded_by"]:
+            led["supersedes"].setdefault(r["superseded_by"], []).append(code)
     for r in conn.execute(
             "SELECT paperless_id, gramps_id FROM doc_versions "
             "WHERE gramps_id IS NOT NULL ORDER BY paperless_id"):
         led["versions"].setdefault(r["gramps_id"], []).append(str(r["paperless_id"]))
-    for r in led["objects"].values():
-        if r["parent_id"]:
-            led["children"][r["parent_id"]] = led["children"].get(r["parent_id"], 0) + 1
     return led
 
 
-def _in_ledger(led: dict, code: str) -> bool:
-    return any(code in led[k] for k in ("reserved", "minted", "objects", "withdrawn", "scans"))
-
-
 def _status(led: dict, code: str, live: set[str] | None) -> str:
-    res = led["reserved"].get(code)
-    if code in led["withdrawn"]:
+    r = led["codes"].get(code)
+    if r is not None and r["withdrawn_at"]:
         return WITHDRAWN
-    if code in led["minted"] or (res is not None and res["minted_at"]) \
-            or (live is not None and code in live):
+    if (r is not None and r["source_system"]) or (live is not None and code in live):
         return IN_USE
     return RESERVED
 
 
 def _record(led: dict, code: str) -> str | None:
     """Where a code's digital record lives, like 'Immich' or 'Paperless document 16'"""
-    minted = led["minted"].get(code)
-    if minted is not None:
-        return ("Immich" if minted["source_system"] == "immich"
-                else f"Paperless document {minted['source_id']}")
+    r = led["codes"].get(code)
+    if r is not None and r["source_system"]:
+        return "Immich" if r["source_system"] == "immich" else f"Paperless document {r['source_id']}"
     docs = led["versions"].get(code)
     return f"Paperless document {docs[0]}" if docs else None
 
 
 def _type(led: dict, code: str) -> str | None:
     """'image' for a code minted from Immich, 'document' for one in Paperless"""
-    minted = led["minted"].get(code)
-    if minted is not None:
-        return "image" if minted["source_system"] == "immich" else "document"
+    r = led["codes"].get(code)
+    if r is not None and r["source_system"]:
+        return "image" if r["source_system"] == "immich" else "document"
     return "document" if led["versions"].get(code) else None
 
 
 def _history(led: dict, code: str) -> list[dict]:
     """What happened to a code, oldest first"""
-    res = led["reserved"].get(code)
-    minted = led["minted"].get(code)
-    gone = led["withdrawn"].get(code)
-    minted_at = (minted["minted_at"] if minted else None) or (res["minted_at"] if res else None)
+    r = led["codes"].get(code)
+    if r is None:
+        return []
     events = []
-    if res is not None and res["created_at"][:19] != (minted_at or "")[:19]:
-        events.append((res["created_at"], "Created", res["note"]))
-    for d in led["descriptions"].get(code, []):
-        events.append((d["changed_at"],
-                       "Description changed" if d["note"] else "Description cleared", d["note"]))
-    for n in led["notes"].get(code, []):
-        events.append((n["changed_at"], "Notes changed" if n["text"] else "Notes cleared",
-                       n["text"] or None))
-    instances = led["instances"].get(code, [])
-    events += [(i["added_at"], "Instance added", i["value"]) for i in instances]
-    events += [(i["removed_at"], "Instance removed", i["value"])
-               for i in instances if i["removed_at"]]
-    if minted_at:
-        events.append((minted_at, f"Minted from {_record(led, code)}" if minted else "Minted", None))
-    if gone is not None:
-        events.append((gone["withdrawn_at"], "Withdrawn", gone["reason"]))
+    if (r["created_at"] or "")[:19] != (r["minted_at"] or "")[:19]:
+        events.append((r["created_at"], "Created", None))
+    if r["minted_at"]:
+        events.append((r["minted_at"], f"Minted from {_record(led, code)}"
+                       if r["source_system"] else "Minted", None))
+    if r["withdrawn_at"]:
+        events.append((r["withdrawn_at"], "Withdrawn", r["withdrawn_reason"]))
     events.sort(key=lambda e: e[0][:19])
     return [{"at": at, "what": what, "detail": detail} for at, what, detail in events]
 
 
-def _notes(led: dict, code: str) -> str:
-    """A code's notes; a code with an Immich or Paperless record keeps none here"""
-    log = led["notes"].get(code)
-    return "" if _record(led, code) or not log else log[-1]["text"]
-
-
-def notes_of(conn: sqlite3.Connection, code: str) -> str:
-    """The notes written for a code in the Codes page"""
-    row = conn.execute("SELECT text FROM code_notes WHERE code=? ORDER BY changed_at DESC, "
-                       "rowid DESC LIMIT 1", (normalize(code),)).fetchone()
-    return row["text"] if row else ""
-
-
-def _instances(led: dict, code: str, row: dict) -> list[dict]:
-    """Where a code's object lives: its digital records, then links and text added by hand"""
-    out = [{"id": None, "where": "Immich", "text": f"Asset {a['id'][:8]}", "url": a["url"]}
-           for a in row["immich"]]
-    out += [{"id": None, "where": "Paperless", "text": f"Document {d['id']}", "url": d["url"]}
-            for d in row["paperless"]]
-    if row["gramps"]:
-        out.append({"id": None, "where": "Gramps", "text": f"Media {code}",
-                    "url": row["gramps_url"]})
-    out += [{"id": None, "where": "Scan", "text": s, "url": None} for s in row["scans"]]
-    for i in led["instances"].get(code, []):
-        if not i["removed_at"]:
-            url = i["kind"] == "url"
-            out.append({"id": i["id"], "where": "Link" if url else "Text", "text": i["value"],
-                        "url": i["value"] if url else None})
-    return out
-
-
 def _deletable(led: dict, code: str, live: set[str] | None) -> bool:
-    """Only reserved: never minted, scanned, withdrawn or in Gramps"""
-    res = led["reserved"].get(code)
-    return (res is not None and not res["minted_at"] and code not in led["minted"]
-            and code not in led["withdrawn"] and code not in led["scans"]
+    """Only reserved: never minted, withdrawn or in Gramps"""
+    r = led["codes"].get(code)
+    return (r is not None and not r["source_system"] and not r["withdrawn_at"]
             and code not in led["versions"] and code not in (live or ()))
 
 
 def _row(led: dict, code: str, live: set[str] | None, urls: Urls,
          titles: Mapping[str, str], documents: set[str] | None) -> dict:
-    res = led["reserved"].get(code)
-    minted = led["minted"].get(code)
-    obj = led["objects"].get(code)
-    gone = led["withdrawn"].get(code)
+    r = led["codes"].get(code)
     status = _status(led, code, live)
     in_gramps = None if live is None else code in live
     history = _history(led, code)
 
-    paperless = [minted["source_id"]] if minted and minted["source_system"] == "paperless" else []
+    paperless = [r["source_id"]] if r is not None and r["source_system"] == "paperless" else []
     paperless += [d for d in led["versions"].get(code, []) if d not in paperless]
     deleted = [] if documents is None else [d for d in paperless if d not in documents]
     paperless = [d for d in paperless if d not in deleted]
-    immich = [minted["source_id"]] if minted and minted["source_system"] == "immich" else []
+    immich = [r["source_id"]] if r is not None and r["source_system"] == "immich" else []
 
     attention = None
     if status == IN_USE:
         missing = [name for name, gone in (("Gramps", in_gramps is False), ("Paperless", deleted))
                    if gone]
-        if not _in_ledger(led, code):
+        if r is None:
             attention = "In Gramps, but not in bifrost's ledger"
         elif missing:
             attention = f"Deleted from {' and '.join(missing)}"
+    elif status == WITHDRAWN and in_gramps:
+        attention = "Withdrawn, but still in Gramps"
 
-    if obj is not None:
-        kind, note = obj["kind"], obj["note"]
-    else:
-        kind, note = "item", res["note"] if res is not None else None
-    notes = _notes(led, code)
-
-    row = {
+    return {
         "code": code,
         "status": status,
         "attention": attention,
-        "in_ledger": _in_ledger(led, code),
+        "in_ledger": r is not None,
         "type": _type(led, code),
-        "kind": kind,
-        "note": note,
-        "title": titles.get(code) or (minted["title"] if minted else None),
-        "notes": notes,
-        "parent": obj["parent_id"] if obj is not None else None,
-        "location": obj["location"] if obj is not None else None,
-        "children": led["children"].get(code, 0),
+        "title": titles.get(code),
         "gramps": in_gramps,
         "gramps_url": f"{urls.gramps}/media/{code}" if urls.gramps and in_gramps else None,
         "paperless": [{"id": d, "url": f"{urls.paperless}/documents/{d}/details"
                        if urls.paperless else None} for d in paperless],
         "immich": [{"id": a, "url": f"{urls.immich}/photos/{a}" if urls.immich else None}
                    for a in immich],
-        "scans": led["scans"].get(code, []),
-        "created": res["created_at"] if res is not None else None,
-        "minted": (minted["minted_at"] if minted else None) or (res["minted_at"] if res else None),
-        "withdrawn": gone["withdrawn_at"] if gone is not None else None,
-        "withdrawn_reason": gone["reason"] if gone is not None else None,
-        "successor": gone["successor"] if gone is not None else None,
-        "predecessors": sorted(led["predecessors"].get(code, [])),
+        "created": r["created_at"] if r is not None else None,
+        "minted": r["minted_at"] if r is not None else None,
+        "withdrawn": r["withdrawn_at"] if r is not None else None,
+        "withdrawn_reason": r["withdrawn_reason"] if r is not None else None,
+        "superseded_by": r["superseded_by"] if r is not None else None,
+        "supersedes": sorted(led["supersedes"].get(code, [])),
         "deletable": _deletable(led, code, live),
         "updated": history[-1]["at"] if history else None,
         "history": history,
     }
-    row["instances"] = _instances(led, code, row)
-    return row
 
 
 def rows(conn: sqlite3.Connection, live: set[str] | None, urls: Urls = Urls(),
@@ -300,16 +187,15 @@ def rows(conn: sqlite3.Connection, live: set[str] | None, urls: Urls = Urls(),
     documents=None likewise for Paperless"""
     titles = titles or {}
     led = _load(conn)
-    codes = set().union(*(led[k] for k in ("reserved", "minted", "objects", "withdrawn", "scans")))
+    codes = set(led["codes"])
     if live is not None:
         codes |= {c for c in live if ids.MANUAL_ID_RE.match(c)}
     if only is not None:
         codes &= {normalize(c) for c in only}
     out = [_row(led, c, live, urls, titles, documents) for c in codes]
-    # birth date (reserved or minted) newest first; codes with none, like the
-    # retired 4-character ones, go last
+    # birth date newest first; codes with none, like the retired 4-character ones, go last
     out.sort(key=lambda r: r["code"])
-    out.sort(key=lambda r: (r["created"] or r["minted"] or "")[:19], reverse=True)
+    out.sort(key=lambda r: (r["created"] or "")[:19], reverse=True)
     return out
 
 
@@ -322,9 +208,8 @@ def search(items: list[dict], q: str | None) -> list[dict]:
     def hit(r: dict) -> bool:
         if code_q and code_q in r["code"]:
             return True
-        hay = [r["note"], r["title"], r["notes"], r["location"], r["parent"], r["withdrawn_reason"],
-               *(d["id"] for d in r["paperless"]), *(a["id"] for a in r["immich"]), *r["scans"],
-               *(i["text"] for i in r["instances"] if i["id"])]
+        hay = [r["title"], r["withdrawn_reason"], r["superseded_by"],
+               *(d["id"] for d in r["paperless"]), *(a["id"] for a in r["immich"])]
         return any(text in str(v).casefold() for v in hay if v)
 
     return [r for r in items if hit(r)]
@@ -349,83 +234,24 @@ def counts(items: list[dict]) -> dict:
 
 # ---- validation
 
-def _require_known(led: dict, code: str) -> None:
+def _require_known(led: dict, code: str) -> sqlite3.Row:
     if not code:
         raise CodeError(400, "No code given.")
-    if not _in_ledger(led, code):
+    r = led["codes"].get(code)
+    if r is None:
         raise CodeError(404, f"{code} is not in the ledger.")
-
-
-def _kind(raw: str | None) -> str:
-    kind = (raw or "").strip().lower()
-    if kind not in KINDS:
-        raise CodeError(400, "The kind must be item or group.")
-    return kind
-
-
-def _note(raw: str | None) -> str | None:
-    note = " ".join((raw or "").split())
-    if len(note) > NOTE_MAX:
-        raise CodeError(400, f"The note is too long (at most {NOTE_MAX} characters).")
-    return note or None
-
-
-def _parent(led: dict, raw: str | None, code: str | None = None) -> str | None:
-    """A parent must be a code already in the ledger whose kind is group"""
-    parent = normalize(raw)
-    if not parent:
-        return None
-    if parent == code:
-        raise CodeError(400, f"{code} can't be part of itself.")
-    if not _in_ledger(led, parent):
-        raise CodeError(400, f"Part of: {parent} is not in the ledger.")
-    if parent in led["withdrawn"]:
-        raise CodeError(400, f"Part of: {parent} is withdrawn.")
-    obj = led["objects"].get(parent)
-    if obj is None or obj["kind"] != "group":
-        raise CodeError(400, f"Part of: {parent} is not a group. Edit it and make it a group first.")
-    seen = {parent}
-    up = obj["parent_id"]
-    while up and up not in seen:
-        if up == code:
-            raise CodeError(400, f"{code} can't be part of {parent}, which is already part of {code}.")
-        seen.add(up)
-        above = led["objects"].get(up)
-        up = above["parent_id"] if above is not None else None
-    return parent
-
-
-def _description(led: dict, *, kind: str | None, note: str | None, parent: str | None,
-                 location: str | None, code: str | None = None) -> dict:
-    return {
-        "kind": _kind(kind),
-        "note": _note(note),
-        "parent_id": _parent(led, parent, code),
-        "location": normalize_location(location),
-    }
-
-
-def check_description(conn: sqlite3.Connection, *, kind: str | None, note: str | None,
-                      parent: str | None = None, location: str | None = None) -> None:
-    """Validate a new code's description before anything is fetched or written"""
-    _description(_load(conn), kind=kind, note=note, parent=parent, location=location)
+    return r
 
 
 def _where_seen(led: dict, code: str, live: set[str],
                 paperless: Mapping[str, list]) -> str | None:
-    minted = led["minted"].get(code)
-    if minted is not None:
-        source = ("Paperless document" if minted["source_system"] == "paperless"
-                  else "Immich asset")
-        return (f"{code} is already in use: minted from {source} {minted['source_id']} "
-                f"on {(minted['minted_at'] or '')[:10]}.")
-    res = led["reserved"].get(code)
-    if res is not None:
-        return f"{code} is already in the ledger: reserved since {(res['created_at'] or '')[:10]}."
-    if code in led["objects"]:
-        return f"{code} is already in the ledger."
-    if code in led["scans"]:
-        return f"{code} is already in the scan register ({', '.join(led['scans'][code])})."
+    r = led["codes"].get(code)
+    if r is not None and r["source_system"]:
+        source = "Paperless document" if r["source_system"] == "paperless" else "Immich asset"
+        return (f"{code} is already in use: minted from {source} {r['source_id']} "
+                f"on {(r['minted_at'] or '')[:10]}.")
+    if r is not None:
+        return f"{code} is already in the ledger: reserved since {(r['created_at'] or '')[:10]}."
     if code in live:
         return f"{code} is already the ID of a Gramps media object."
     if code in paperless:
@@ -436,15 +262,15 @@ def _where_seen(led: dict, code: str, live: set[str],
 
 def check_new(conn: sqlite3.Connection, raw: str | None, live: Iterable[str] = (),
               paperless: Mapping[str, list] | None = None) -> str:
-    """A code Peter wrote down by hand, normalized, if it may enter the ledger"""
+    """A code written down by hand, normalized, if it may enter the ledger"""
     led = _load(conn)
     code = normalize(raw)
     if not code:
         raise CodeError(400, "Type the code as it is written.")
-    gone = led["withdrawn"].get(code)
-    if gone is not None:
-        raise CodeError(409, f"{code} was withdrawn on {gone['withdrawn_at'][:10]}: "
-                             f"{gone['reason']}. A withdrawn code is never used again.")
+    r = led["codes"].get(code)
+    if r is not None and r["withdrawn_at"]:
+        raise CodeError(409, f"{code} was withdrawn on {r['withdrawn_at'][:10]}: "
+                             f"{r['withdrawn_reason']}. A withdrawn code is never used again.")
     bad = sorted({ch for ch in code if ch not in ids.CHARSET})
     if bad:
         raise CodeError(400, f"{code} contains {', '.join(bad)}, which no code uses. "
@@ -466,60 +292,50 @@ def check_new(conn: sqlite3.Connection, raw: str | None, live: Iterable[str] = (
 
 # ---- writing the ledger
 
-def _insert(conn: sqlite3.Connection, codes: list[str], desc: dict) -> None:
-    now = _now()
+def _reserve(conn: sqlite3.Connection, codes: list[str]) -> None:
+    when = now()
     with conn:
-        for code in codes:
-            conn.execute(
-                "INSERT INTO reserved_ids (gramps_id, created_at, note) VALUES (?, ?, ?)",
-                (code, now, desc["note"]))
-            conn.execute(
-                "INSERT INTO objects (object_id, kind, parent_id, location, note, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (code, desc["kind"], desc["parent_id"], desc["location"], desc["note"], now))
+        conn.executemany("INSERT INTO minted_media (gramps_id, created_at) VALUES (?, ?)",
+                         [(code, when) for code in codes])
 
 
-def mint(conn: sqlite3.Connection, *, kind: str | None, note: str | None,
-         parent: str | None = None, location: str | None = None, count: int = 1,
-         live: Iterable[str] = (), paperless: Iterable[str] = ()) -> list[str]:
+def mint(conn: sqlite3.Connection, count: int = 1, live: Iterable[str] = (),
+         paperless: Iterable[str] = ()) -> list[str]:
     """Reserve `count` new codes, excluding every code ever seen and the guarded shapes"""
     if not isinstance(count, int) or not 1 <= count <= MAX_MINT:
         raise CodeError(400, f"Mint between 1 and {MAX_MINT} codes at a time.")
-    desc = _description(_load(conn), kind=kind, note=note, parent=parent, location=location)
     existing = ids.all_ids_ever_seen(conn, live, paperless)
     codes = [ids.generate_gramps_id(existing) for _ in range(count)]
-    _insert(conn, codes, desc)
+    _reserve(conn, codes)
     return codes
 
 
-def claim(conn: sqlite3.Connection, raw: str | None, *, kind: str | None, note: str | None,
-          parent: str | None = None, location: str | None = None,
-          live: Iterable[str] = (), paperless: Mapping[str, list] | None = None) -> str:
+def claim(conn: sqlite3.Connection, raw: str | None, live: Iterable[str] = (),
+          paperless: Mapping[str, list] | None = None) -> str:
     """Register a code that was written down before bifrost issued it"""
     code = check_new(conn, raw, live, paperless)
-    desc = _description(_load(conn), kind=kind, note=note, parent=parent, location=location,
-                        code=code)
-    _insert(conn, [code], desc)
+    _reserve(conn, [code])
     return code
 
 
-def _successor(led: dict, code: str, raw: str | None) -> str | None:
-    """An existing code, other than this one and not withdrawn, that replaces it"""
-    successor = normalize(raw)
-    if not successor:
+def _superseding(led: dict, code: str, raw: str | None) -> str | None:
+    """A code in the ledger, other than this one and not withdrawn, that takes its place"""
+    other = normalize(raw)
+    if not other:
         return None
-    if successor == code:
-        raise CodeError(400, f"{code} can't replace itself.")
-    if not _in_ledger(led, successor):
-        raise CodeError(400, f"Successor {successor} is not in the ledger.")
-    if successor in led["withdrawn"]:
-        raise CodeError(400, f"Successor {successor} is withdrawn.")
-    return successor
+    if other == code:
+        raise CodeError(400, f"{code} can't supersede itself.")
+    r = led["codes"].get(other)
+    if r is None:
+        raise CodeError(400, f"{other} is not in the ledger.")
+    if r["withdrawn_at"]:
+        raise CodeError(400, f"{other} is withdrawn.")
+    return other
 
 
 def withdraw(conn: sqlite3.Connection, raw: str | None, reason: str | None,
-             successor: str | None = None) -> str:
-    """Retire a code for good, optionally naming the code that replaces it"""
+             superseded_by: str | None = None) -> str:
+    """Retire a code for good, optionally naming the code that takes its place"""
     led = _load(conn)
     code = normalize(raw)
     text = " ".join((reason or "").split())
@@ -527,16 +343,29 @@ def withdraw(conn: sqlite3.Connection, raw: str | None, reason: str | None,
         raise CodeError(400, "Give a reason. The ledger keeps it with the code for good.")
     if len(text) > REASON_MAX:
         raise CodeError(400, f"The reason is too long (at most {REASON_MAX} characters).")
-    gone = led["withdrawn"].get(code)
-    if gone is not None:
-        raise CodeError(409, f"{code} was already withdrawn on {gone['withdrawn_at'][:10]}: "
-                             f"{gone['reason']}")
-    _require_known(led, code)
-    replaced_by = _successor(led, code, successor)
+    r = _require_known(led, code)
+    if r["withdrawn_at"]:
+        raise CodeError(409, f"{code} was already withdrawn on {r['withdrawn_at'][:10]}: "
+                             f"{r['withdrawn_reason']}")
+    other = _superseding(led, code, superseded_by)
     with conn:
         conn.execute(
-            "INSERT INTO withdrawn_codes (code, withdrawn_at, reason, successor) VALUES (?, ?, ?, ?)",
-            (code, _now(), text, replaced_by))
+            "UPDATE minted_media SET withdrawn_at=?, withdrawn_reason=?, superseded_by=? "
+            "WHERE gramps_id=?", (now(), text, other, code))
+    return code
+
+
+def supersede(conn: sqlite3.Connection, raw: str | None, superseded_by: str | None) -> str:
+    """Name, change or clear the code that takes a withdrawn code's place"""
+    led = _load(conn)
+    code = normalize(raw)
+    r = _require_known(led, code)
+    if not r["withdrawn_at"]:
+        raise CodeError(409, f"{code} is not withdrawn, so nothing supersedes it.")
+    other = _superseding(led, code, superseded_by)
+    if other != r["superseded_by"]:
+        with conn:
+            conn.execute("UPDATE minted_media SET superseded_by=? WHERE gramps_id=?", (other, code))
     return code
 
 
@@ -548,129 +377,17 @@ def delete(conn: sqlite3.Connection, raw: str | None, live: Iterable[str] = (),
     _require_known(led, code)
     if not _deletable(led, code, set(live)) or code in (paperless or {}):
         raise CodeError(409, f"{code} has been used, so it can only be withdrawn.")
-    if led["predecessors"].get(code):
-        raise CodeError(409, f"{code} replaces {', '.join(led['predecessors'][code])}.")
+    if led["supersedes"].get(code):
+        raise CodeError(409, f"{code} supersedes {', '.join(led['supersedes'][code])}.")
     with conn:
-        conn.execute("DELETE FROM reserved_ids WHERE gramps_id=?", (code,))
-        for table, column in (("objects", "object_id"), ("code_descriptions", "code"),
-                              ("code_notes", "code"), ("code_instances", "code")):
-            conn.execute(f"DELETE FROM {table} WHERE {column}=?", (code,))
-    return code
-
-
-def _notes_text(raw: str | None) -> str:
-    text = (raw or "").replace("\r\n", "\n").strip()
-    if len(text) > NOTES_MAX:
-        raise CodeError(400, f"The notes are too long (at most {NOTES_MAX} characters).")
-    return text
-
-
-def update(conn: sqlite3.Connection, raw: str | None, changes: Mapping) -> str:
-    """Change a code's description (note, kind, part of, location), notes or successor;
-    only given keys change"""
-    led = _load(conn)
-    code = normalize(raw)
-    _require_known(led, code)
-    obj = led["objects"].get(code)
-    res = led["reserved"].get(code)
-    current = {
-        "kind": obj["kind"] if obj is not None else "item",
-        "note": obj["note"] if obj is not None else (res["note"] if res is not None else None),
-        "parent_id": obj["parent_id"] if obj is not None else None,
-        "location": obj["location"] if obj is not None else None,
-    }
-    new = dict(current)
-    if "kind" in changes:
-        new["kind"] = _kind(changes["kind"])
-        children = led["children"].get(code, 0)
-        if new["kind"] != "group" and children:
-            raise CodeError(409, f"{code} has {children} code{'s' if children != 1 else ''} "
-                                 "under it. Move them to another group first.")
-    if "note" in changes:
-        new["note"] = _note(changes["note"])
-        record = _record(led, code)
-        if record and new["note"] != current["note"]:
-            raise CodeError(409, f"{code} is described in {record}. Change it there.")
-    if "parent" in changes:
-        new["parent_id"] = _parent(led, changes["parent"], code)
-    if "location" in changes:
-        new["location"] = normalize_location(changes["location"])
-    successor, new_successor = None, False
-    if "successor" in changes:
-        withdrawn = led["withdrawn"].get(code)
-        if withdrawn is None:
-            raise CodeError(409, f"{code} is not withdrawn, so it has no successor.")
-        successor = _successor(led, code, changes["successor"])
-        new_successor = successor != withdrawn["successor"]
-    notes = None
-    if "notes" in changes:
-        notes = _notes_text(changes["notes"])
-        record = _record(led, code)
-        if notes == _notes(led, code):
-            notes = None
-        elif record:
-            raise CodeError(409, f"{code} is in {record}, so its notes go there.")
-    if new == current and notes is None and not new_successor:
-        return code
-    now = _now()
-    with conn:
-        if new_successor:
-            conn.execute("UPDATE withdrawn_codes SET successor=? WHERE code=?", (successor, code))
-        if new != current:
-            conn.execute(
-                "INSERT INTO objects (object_id, kind, parent_id, location, note, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(object_id) DO UPDATE SET "
-                "kind=excluded.kind, parent_id=excluded.parent_id, location=excluded.location, "
-                "note=excluded.note, updated_at=excluded.updated_at",
-                (code, new["kind"], new["parent_id"], new["location"], new["note"], now))
-        if new["note"] != current["note"]:
-            conn.execute("INSERT INTO code_descriptions (code, changed_at, note) VALUES (?, ?, ?)",
-                         (code, now, new["note"]))
-        if notes is not None:
-            conn.execute("INSERT INTO code_notes (code, changed_at, text) VALUES (?, ?, ?)",
-                         (code, now, notes))
+        conn.execute("DELETE FROM minted_media WHERE gramps_id=?", (code,))
     return code
 
 
 def open_codes(conn: sqlite3.Connection, live: set[str]) -> list[dict]:
     """Reserved codes an Immich asset can take"""
-    return [{k: r[k] for k in ("code", "status", "note", "notes", "created")}
-            for r in rows(conn, live) if r["status"] == RESERVED and r["created"]]
-
-
-def add_instance(conn: sqlite3.Connection, raw: str | None, value: str | None) -> str:
-    """List a link to another place the code's object lives"""
-    led = _load(conn)
-    code = normalize(raw)
-    _require_known(led, code)
-    if code in led["withdrawn"]:
-        raise CodeError(409, f"{code} is withdrawn, so nothing is added to it.")
-    url = (value or "").strip()
-    if not _URL_RE.match(url):
-        raise CodeError(400, "That is not a link starting with http:// or https://.")
-    if len(url) > INSTANCE_MAX:
-        raise CodeError(400, f"That is too long (at most {INSTANCE_MAX} characters).")
-    if any(i["value"] == url and not i["removed_at"] for i in led["instances"].get(code, [])):
-        raise CodeError(409, f"{code} already lists that.")
-    with conn:
-        conn.execute(
-            "INSERT INTO code_instances (code, kind, value, added_at) VALUES (?, 'url', ?, ?)",
-            (code, url, _now()))
-    return code
-
-
-def remove_instance(conn: sqlite3.Connection, raw: str | None, instance_id: int) -> str:
-    """Take a link off a code; its history keeps it"""
-    led = _load(conn)
-    code = normalize(raw)
-    _require_known(led, code)
-    with conn:
-        cur = conn.execute(
-            "UPDATE code_instances SET removed_at=? WHERE id=? AND code=? AND removed_at IS NULL",
-            (_now(), instance_id, code))
-    if not cur.rowcount:
-        raise CodeError(404, f"{code} does not list that.")
-    return code
+    return [{k: r[k] for k in ("code", "status", "created")}
+            for r in rows(conn, live) if r["status"] == RESERVED and r["in_ledger"]]
 
 
 # ---- export
@@ -682,14 +399,13 @@ def to_csv(items: list[dict]) -> str:
     writer.writerow(CSV_COLUMNS)
     for r in items:
         writer.writerow([
-            r["code"], r["status"], r["attention"] or "", r["type"] or "",
-            r["note"] or "", r["title"] or "",
+            r["code"], r["status"], r["attention"] or "", r["type"] or "", r["title"] or "",
             {True: "yes", False: "no", None: "unknown"}[r["gramps"]], r["gramps_url"] or "",
             " ".join(d["id"] for d in r["paperless"]),
             " ".join(d["url"] for d in r["paperless"] if d["url"]),
             " ".join(a["id"] for a in r["immich"]),
             " ".join(a["url"] for a in r["immich"] if a["url"]),
-            " | ".join(i["text"] for i in r["instances"] if i["id"]),
-            r["created"] or "", r["minted"] or "", r["withdrawn"] or "", r["withdrawn_reason"] or "",
+            r["created"] or "", r["minted"] or "", r["withdrawn"] or "",
+            r["withdrawn_reason"] or "", r["superseded_by"] or "",
         ])
-    return "\ufeff" + buf.getvalue()
+    return "﻿" + buf.getvalue()

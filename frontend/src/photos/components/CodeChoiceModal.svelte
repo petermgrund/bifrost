@@ -8,11 +8,8 @@
   let q = $state('');
 
   const shown = $derived.by(() => {
-    const text = q.trim().toLowerCase();
-    if (!text) return codes;
-    const bare = text.replace(/[\s-]+/g, '').toUpperCase();
-    return codes.filter((c) => (bare && c.code.includes(bare))
-      || [c.note, c.notes].some((v) => v && v.toLowerCase().includes(text)));
+    const bare = q.replace(/[\s-]+/g, '').toUpperCase();
+    return bare ? codes.filter((c) => c.code.includes(bare)) : codes;
   });
 </script>
 
@@ -27,15 +24,12 @@
   <div class="flex flex-col gap-3">
     <ListButton selected={!picked} onclick={() => (picked = '')}>Generate a new code</ListButton>
     {#if codes.length > 6}
-      <Input bind:value={q} placeholder="Search codes, descriptions and notes" />
+      <Input bind:value={q} placeholder="Search codes" />
     {/if}
     <div class="immich-scrollbar flex max-h-80 flex-col gap-1 overflow-y-auto">
       {#each shown as c (c.code)}
         <ListButton selected={picked === c.code} onclick={() => (picked = c.code)}>
-          <div class="flex min-w-0 flex-col items-start gap-0.5 text-left">
-            <span class="font-mono">{c.code}</span>
-            {#if c.note}<span class="text-sm">{c.note}</span>{/if}
-          </div>
+          <span class="font-mono">{c.code}</span>
         </ListButton>
       {:else}
         <Text size="small" color="muted">No codes match.</Text>

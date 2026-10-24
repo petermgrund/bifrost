@@ -11,6 +11,7 @@
   import CollectionsTab from './CollectionsTab.svelte';
   import DetailsTab from './DetailsTab.svelte';
   import Lightbox from './Lightbox.svelte';
+  import NotesTab from './NotesTab.svelte';
   import PeopleTab from './PeopleTab.svelte';
   import VersionsTab from './VersionsTab.svelte';
 
@@ -38,6 +39,7 @@
     const cols = rec.collections?.length || 0;
     return [
       { id: 'details', label: 'Details' },
+      { id: 'notes', label: 'Notes' },
       { id: 'versions', label: versions > 1 ? `Versions (${versions})` : 'Versions' },
       { id: 'people', label: rec.people.length ? `People (${rec.people.length})` : 'People' },
       { id: 'collections', label: cols ? `Collections (${cols})` : 'Collections' },
@@ -375,6 +377,9 @@
               </Tabs.List>
               <Tabs.Content value="details" class="immich-scrollbar -mx-1 min-h-0 flex-1 overflow-y-auto px-1 pt-4">
                 <DetailsTab {rec} bind:form />
+              </Tabs.Content>
+              <Tabs.Content value="notes" class="immich-scrollbar -mx-1 min-h-0 flex-1 overflow-y-auto px-1 pt-4">
+                <NotesTab bind:form />
               </Tabs.Content>
               <Tabs.Content value="versions" class="immich-scrollbar -mx-1 min-h-0 flex-1 overflow-y-auto px-1 pt-4">
                 <VersionsTab

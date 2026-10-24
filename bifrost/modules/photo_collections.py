@@ -3,13 +3,10 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timezone
+
+from ..core.db import now as _now
 
 MAX_ITEMS = 500
-
-
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 def _row(r: sqlite3.Row) -> dict:

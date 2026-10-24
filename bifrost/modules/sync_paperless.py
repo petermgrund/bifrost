@@ -4,12 +4,14 @@ import hashlib
 import logging
 import mimetypes
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import AsyncIterator
 
-from ..core.clients import GrampsClient, PaperlessClient
+from ..core.clients import GrampsClient, PaperlessClient, PaperlessError
 from ..core.config import SyncPaperlessConfig
-from ..core.events import SyncEvent
+from ..core.dates import MODIFIERS, QUALITIES, dates_equal, format_gramps_date, plain_date
+from ..core.db import now
+from ..core.events import SyncEvent, progress
 from ..core.ids import (IdReused, all_ids_ever_seen, generate_gramps_id, generate_handle,
                         next_sequential_id, register_minted)
 
@@ -21,9 +23,6 @@ QUAL_BEFORE = "Before"
 QUAL_AFTER = "After"
 QUAL_YEAR = "Year only"
 QUAL_DECADE = "Decade only"
-
-MOD_REGULAR, MOD_BEFORE, MOD_AFTER, MOD_ABOUT = 0, 1, 2, 3
-QUAL_REGULAR_Q, QUAL_ESTIMATED_Q = 0, 1
 
 SKIP_TITLE_SYNC_TAG = "skip-title-sync"
 TRANSLATION_DELIMITER = "======== ENGLISH TRANSLATION ========"
@@ -39,6 +38,7 @@ BACKLINK_OBJ_TYPES = {
 
 
 def build_gramps_date(doc: dict, qualifier_label: str | None) -> dict | None:
+    """The Paperless created date as a Gramps Date, shaped by the date qualifier field"""
     if not qualifier_label:
         return None
     created = doc.get("created") or doc.get("created_date")
@@ -50,70 +50,28 @@ def build_gramps_date(doc: dict, qualifier_label: str | None) -> dict | None:
         return None
 
     day, month, year = dt.day, dt.month, dt.year
-    modifier, quality = MOD_REGULAR, QUAL_REGULAR_Q
+    modifier, quality = MODIFIERS["regular"], QUALITIES["regular"]
 
     if qualifier_label == QUAL_EXACT:
         pass
     elif qualifier_label == QUAL_CIRCA:
-        modifier = MOD_ABOUT
+        modifier = MODIFIERS["about"]
     elif qualifier_label == QUAL_BEFORE:
-        modifier = MOD_BEFORE
+        modifier = MODIFIERS["before"]
     elif qualifier_label == QUAL_AFTER:
-        modifier = MOD_AFTER
+        modifier = MODIFIERS["after"]
     elif qualifier_label == QUAL_YEAR:
         day, month = 0, 0
     elif qualifier_label == QUAL_DECADE:
         day, month = 0, 0
         year = (year // 10) * 10
-        quality = QUAL_ESTIMATED_Q
+        quality = QUALITIES["estimated"]
     else:
         log.warning("Paperless #%d unknown date qualifier %r",
                     doc.get("id", 0), qualifier_label)
         return None
 
-    return {
-        "_class": "Date",
-        "dateval": [day, month, year, False],
-        "modifier": modifier,
-        "quality": quality,
-        "text": "",
-    }
-
-
-def dates_equal(a: dict | None, b: dict | None) -> bool:
-    if not a and not b:
-        return True
-    if not a or not b:
-        return False
-    return ((a.get("dateval") or []) == (b.get("dateval") or [])
-            and a.get("modifier", 0) == b.get("modifier", 0)
-            and a.get("quality", 0) == b.get("quality", 0))
-
-
-def format_gramps_date(date_obj: dict | None) -> str:
-    if not date_obj:
-        return "(none)"
-    dv = date_obj.get("dateval") or []
-    if len(dv) < 3:
-        return "(none)"
-    day, month, year = dv[0], dv[1], dv[2]
-    if year == 0 and month == 0 and day == 0:
-        return "(none)"
-    qual = {1: "Est. ", 2: "Calc. "}.get(date_obj.get("quality", 0), "")
-    modifier = date_obj.get("modifier", 0)
-    if modifier in (4, 5) and len(dv) >= 7:
-        first, last = _ymd(day, month, year), _ymd(dv[4], dv[5], dv[6])
-        return f"{qual}Between {first} and {last}" if modifier == 4 else f"{qual}From {first} to {last}"
-    mod = {1: "Before ", 2: "After ", 3: "About "}.get(modifier, "")
-    return f"{qual}{mod}{_ymd(day, month, year)}"
-
-
-def _ymd(day: int, month: int, year: int) -> str:
-    if day == 0 and month == 0:
-        return f"{year}"
-    if day == 0:
-        return f"{year}-{month:02d}"
-    return f"{year}-{month:02d}-{day:02d}"
+    return plain_date(day, month, year, modifier, quality)
 
 
 def content_hash(content: str) -> str:
@@ -135,7 +93,7 @@ def build_note_obj(handle: str, gramps_id: str, text: str, note_type: str) -> di
         "text": {"_class": "StyledText", "string": text, "tags": []},
         "type": note_type,
         "format": 0,
-        "change": int(datetime.utcnow().timestamp()),
+        "change": int(datetime.now(timezone.utc).timestamp()),
         "tag_list": [],
         "private": False,
     }
@@ -152,7 +110,7 @@ def _set_version(conn: sqlite3.Connection, doc_id: int, checksum: str, gramps_id
         conn.execute(
             "INSERT OR REPLACE INTO doc_versions"
             " (paperless_id, checksum, gramps_id, updated_at) VALUES (?, ?, ?, ?)",
-            (doc_id, checksum, gramps_id, datetime.now().isoformat(timespec="seconds")),
+            (doc_id, checksum, gramps_id, now()),
         )
 
 
@@ -166,7 +124,7 @@ def _set_tx(conn: sqlite3.Connection, doc_id: int, **fields) -> None:
     row = _get_tx(conn, doc_id)
     current = dict(row) if row else {"paperless_id": doc_id}
     current.update(fields)
-    current["updated_at"] = datetime.now().isoformat(timespec="seconds")
+    current["updated_at"] = now()
     with conn:
         conn.execute(
             "INSERT OR REPLACE INTO transcription_state"
@@ -235,7 +193,17 @@ async def sync(
         yield SyncEvent(kind="summary", data=counts)
         return
 
-    live_ids = await gramps.list_media_gramps_ids()
+    single: dict | None = None
+    if single_doc_id is not None:
+        try:
+            single = await paperless.get_document(single_doc_id)
+        except PaperlessError as exc:
+            if exc.status != 404:
+                raise
+            yield SyncEvent(kind="error", source_id=str(single_doc_id),
+                            detail=f"Paperless document #{single_doc_id} not found")
+            yield SyncEvent(kind="summary", data=counts)
+            return
 
     q_options: dict[str, str] = {}
     q_field = cfg.date_qualifier_field_id
@@ -279,23 +247,35 @@ async def sync(
             yield SyncEvent(kind="error", detail="no sync tags found in Paperless")
             yield SyncEvent(kind="summary", data=counts)
             return
-        documents = await paperless.list_documents_by_tags(list(tag_map.values()))
-        if single_doc_id is not None:
-            documents = [d for d in documents if d["id"] == single_doc_id]
-        yield SyncEvent(kind="started",
-                        detail=f"{len(documents)} tagged document(s) in Paperless")
+        if single is not None:
+            documents = [single] if set(tag_map.values()) & set(single.get("tags") or []) else []
+            yield SyncEvent(kind="started", detail=(
+                f"document #{single_doc_id} (sync-tagged)" if documents
+                else f"document #{single_doc_id} is not sync-tagged"))
+        else:
+            documents = await paperless.list_documents_by_tags(list(tag_map.values()))
+            yield SyncEvent(kind="started",
+                            detail=f"{len(documents)} tagged document(s) in Paperless")
 
     tx_docs: list[dict] | None = None
     if cfg.transcription_tag_id and not versions_only:
-        tx_docs = await paperless.list_documents_by_tag(cfg.transcription_tag_id)
-        if single_doc_id is not None:
-            tx_docs = [d for d in tx_docs if d["id"] == single_doc_id]
-        # same dicts as `documents`, so a Gramps ID minted this run reaches the transcription pass
-        by_id = {d["id"]: d for d in documents}
-        tx_docs = [by_id.get(d["id"], d) for d in tx_docs]
-    existing_ids = all_ids_ever_seen(
-        conn, live_ids,
-        (_doc_gramps_id(d, cfg.gramps_id_field_id) for d in documents + (tx_docs or [])))
+        if single is not None:
+            tx_docs = [single] if cfg.transcription_tag_id in (single.get("tags") or []) else []
+        else:
+            tx_docs = await paperless.list_documents_by_tag(cfg.transcription_tag_id)
+            # same dicts as `documents`, so a Gramps ID minted this run reaches the transcription pass
+            by_id = {d["id"]: d for d in documents}
+            tx_docs = [by_id.get(d["id"], d) for d in tx_docs]
+    existing_ids: set[str] | None = None
+
+    async def _existing_ids() -> set[str]:
+        nonlocal existing_ids
+        if existing_ids is None:
+            existing_ids = all_ids_ever_seen(
+                conn, await gramps.list_media_gramps_ids(),
+                (_doc_gramps_id(d, cfg.gramps_id_field_id) for d in documents + (tx_docs or [])))
+        return existing_ids
+
     passes = 0 if transcriptions_only else (1 if versions_only else 3)
     total = passes * len(documents) + (len(tx_docs) if tx_docs is not None else 0)
     done = 0
@@ -304,9 +284,7 @@ async def sync(
     def _progress(step: str) -> SyncEvent:
         nonlocal label
         label = step
-        return SyncEvent(kind="progress", detail=step,
-                         data={"done": done, "total": total,
-                               "percent": round(100 * done / total) if total else 100})
+        return progress(step, done, total)
 
     for doc in (documents if not versions_only else []):
         yield _progress("Checking new documents")
@@ -336,7 +314,7 @@ async def sync(
                             data={"path": gramps_path, "cols": _prospective_cols(doc)})
             continue
 
-        gramps_id = generate_gramps_id(existing_ids)
+        gramps_id = generate_gramps_id(await _existing_ids())
         handle = generate_handle()
         media_obj = {
             "_class": "Media",
@@ -346,7 +324,7 @@ async def sync(
             "path": gramps_path,
             "mime": _media_mime(metadata, doc),
             "private": False,
-            "change": int(datetime.utcnow().timestamp()),
+            "change": int(datetime.now(timezone.utc).timestamp()),
             "attribute_list": [
                 {"_class": "Attribute", "type": "Paperless URL",
                  "value": f"{cfg.public_url}/documents/{doc_id}/details",
@@ -390,8 +368,7 @@ async def sync(
 
         try:
             with conn:
-                register_minted(conn, gramps_id, "paperless", str(doc_id), title,
-                                datetime.now().isoformat(timespec="seconds"))
+                register_minted(conn, gramps_id, "paperless", str(doc_id), now())
         except IdReused as exc:
             counts["errors"] += 1
             yield SyncEvent(kind="item", entity="doc", action="failed",
@@ -457,7 +434,7 @@ async def sync(
                 media["path"] = new_path
                 media["mime"] = new_mime
                 media["checksum"] = ""
-                media["change"] = int(datetime.utcnow().timestamp())
+                media["change"] = int(datetime.now(timezone.utc).timestamp())
                 await gramps.update_media(media["handle"], media)
         if apply:
             try:
@@ -565,7 +542,7 @@ async def sync(
 
         if media_dirty:
             try:
-                media["change"] = int(datetime.utcnow().timestamp())
+                media["change"] = int(datetime.now(timezone.utc).timestamp())
                 await gramps.update_media(media["handle"], media)
             except Exception as exc:  # noqa BLE001
                 counts["errors"] += 1

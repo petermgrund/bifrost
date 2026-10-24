@@ -1,37 +1,26 @@
-"""Read-only v1 views of what only Bifrost holds: the Codes ledger, collections, photo links, person links"""
+"""Read-only v1 views of what only Bifrost holds: the Codes ledger, collections, photo links"""
 
 from __future__ import annotations
 
 import sqlite3
 from datetime import datetime, timezone
 
-from . import faces, photo_collections
-
-
-def children(conn: sqlite3.Connection) -> dict[str, list[str]]:
-    out: dict[str, list[str]] = {}
-    for r in conn.execute("SELECT object_id, parent_id FROM objects WHERE parent_id IS NOT NULL ORDER BY object_id"):
-        out.setdefault(r["parent_id"], []).append(r["object_id"])
-    return out
+from . import photo_collections
 
 
 def known(row: dict) -> bool:
     return row["in_ledger"] or bool(row["paperless"])
 
 
-def code(row: dict, kids: dict[str, list[str]]) -> dict:
+def code(row: dict) -> dict:
     """A Codes ledger entry without the Codes page's own flags"""
     gone = row["withdrawn"]
     return {
-        "code": row["code"], "status": row["status"], "type": row["type"], "kind": row["kind"],
-        "description": row["note"], "notes": row["notes"] or None, "title": row["title"],
-        "parent": row["parent"], "location": row["location"], "children": kids.get(row["code"], []),
+        "code": row["code"], "status": row["status"], "type": row["type"], "title": row["title"],
         "created": row["created"], "minted": row["minted"],
-        "withdrawn": {"at": gone, "reason": row["withdrawn_reason"], "successor": row["successor"]}
+        "withdrawn": {"at": gone, "reason": row["withdrawn_reason"], "superseded_by": row["superseded_by"]}
         if gone else None,
-        "predecessors": row["predecessors"], "scans": row["scans"],
-        "instances": [{"where": i["where"], "text": i["text"], "url": i["url"]} for i in row["instances"]],
-        "history": row["history"],
+        "supersedes": row["supersedes"], "history": row["history"],
     }
 
 
@@ -56,12 +45,10 @@ def photo_links(conn: sqlite3.Connection) -> list[dict]:
 
 def export(conn: sqlite3.Connection, code_rows: list[dict]) -> dict:
     """Everything only Bifrost holds"""
-    kids = children(conn)
     return {
         "api": "v1",
         "exported_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "codes": [code(r, kids) for r in code_rows if known(r)],
+        "codes": [code(r) for r in code_rows if known(r)],
         "collections": collections(conn),
         "photo_links": photo_links(conn),
-        "person_links": faces.list_links(conn),
     }

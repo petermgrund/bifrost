@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 import re
 import sqlite3
 from datetime import datetime, timezone
@@ -13,129 +12,19 @@ from ..core import settings as ui_settings
 from ..core.clients import GrampsClient, ImmichClient
 from ..core.clients.immich import ImmichError
 from ..core.config import SyncImmichConfig
-from ..core.events import SyncEvent
-from . import codes
-from .sync_paperless import build_note_obj, format_gramps_date
+from ..core.db import now as _now
+from ..core.events import SyncEvent, progress
+from .sync_paperless import build_note_obj
 
-_MODIFIERS = {"regular": 0, "before": 1, "after": 2, "about": 3, "range": 4, "span": 5, "textonly": 6}
-_QUALITIES = {"regular": 0, "estimated": 1, "calculated": 2}
-
-TAG_SYNC_DATE = "sync/date"
-TAG_SYNC_LOCATION = "sync/location"
-TAG_SYNC_DESCRIPTION = "sync/description"
-TAG_SYNC_MANUAL_FACES = "sync/manualfaces"
-TAG_DATE_APPROXIMATE = "date/approximate"
-TAG_DATE_BEFORE = "date/before"
-TAG_DATE_AFTER = "date/after"
-TAG_DATE_ESTIMATED = "date/estimated"
-TAG_DATE_CALCULATED = "date/calculated"
-TAG_DATE_YEAR = "date/year"
-TAG_DATE_MONTH = "date/month"
-TAG_DATE_DECADE = "date/decade"
-TAG_DATE_SPAN = "date/span"
-_SPAN_TAG_RE = re.compile(r"^date/span/-(\d{1,3})\+(\d{1,3})$")
 METADATA_KEY = "bifrost"
 NOTE_TYPE = "Media Note"
 LINK_ATTR = "Source URL"
+PERSON_ATTR = "Immich Person ID"
 _URL_LINE_RE = re.compile(r"^https?://\S+$")
-
-EARTH_RADIUS_KM = 6371.0
-MAX_PLACE_DISTANCE_KM = 0.25
 
 
 def tag_values(asset: dict) -> set[str]:
     return {t["value"].lower() for t in asset.get("tags") or [] if t.get("value")}
-
-
-def is_span_tag(tag: str) -> bool:
-    return bool(_SPAN_TAG_RE.match(tag))
-
-
-def span_tag(minus: int, plus: int) -> str:
-    """'date/span/-10+5' for ten years before the date and five after"""
-    return f"{TAG_DATE_SPAN}/-{minus}+{plus}"
-
-
-def _tag_group(tag: str) -> str | None:
-    if tag in (TAG_DATE_APPROXIMATE, TAG_DATE_BEFORE, TAG_DATE_AFTER, TAG_DATE_DECADE) \
-            or is_span_tag(tag):
-        return "modifier"
-    if tag in (TAG_DATE_ESTIMATED, TAG_DATE_CALCULATED):
-        return "quality"
-    if tag in (TAG_DATE_YEAR, TAG_DATE_MONTH):
-        return "precision"
-    return None
-
-
-def merge_tag_values(owner_tags: set[str], other_tags: set[str]) -> set[str]:
-    """owner wins inside each date group"""
-    owned = {_tag_group(t) for t in owner_tags}
-    return set(owner_tags) | {t for t in other_tags
-                              if _tag_group(t) is None or _tag_group(t) not in owned}
-
-
-def date_modifier(tags: set[str]) -> tuple[str, tuple[int, int] | None]:
-    """The date type an asset's tags name, with a span's years before and after"""
-    for name, tag in (("about", TAG_DATE_APPROXIMATE), ("before", TAG_DATE_BEFORE),
-                      ("after", TAG_DATE_AFTER), ("decade", TAG_DATE_DECADE)):
-        if tag in tags:
-            return name, None
-    for tag in sorted(tags):
-        m = _SPAN_TAG_RE.match(tag)
-        if m:
-            return "span", (int(m.group(1)), int(m.group(2)))
-    return "regular", None
-
-
-def year_range(modifier: str, year: int, span: tuple[int, int] | None) -> tuple[int, int]:
-    """First and last year of a decade (1945 -> 1940, 1949) or a span around the year"""
-    if modifier == "decade":
-        return year - year % 10, year - year % 10 + 9
-    minus, plus = span or (0, 0)
-    return year - minus, year + plus
-
-
-def range_date(start: int, stop: int, quality: int) -> dict:
-    return {"_class": "Date", "dateval": [0, 0, start, False, 0, 0, stop, False],
-            "modifier": _MODIFIERS["range"], "quality": quality, "text": ""}
-
-
-def build_gramps_date(asset: dict) -> dict | None:
-    exif = asset.get("exifInfo") or {}
-    # wall clock never the UTC dateTimeOriginal
-    dt_str = asset.get("localDateTime") or exif.get("dateTimeOriginal")
-    if not dt_str:
-        return None
-    try:
-        dt = datetime.fromisoformat(str(dt_str).replace("Z", "+00:00"))
-    except ValueError:
-        return None
-
-    tags = tag_values(asset)
-    name, span = date_modifier(tags)
-
-    if TAG_DATE_CALCULATED in tags:
-        quality = _QUALITIES["calculated"]
-    elif TAG_DATE_ESTIMATED in tags:
-        quality = _QUALITIES["estimated"]
-    else:
-        quality = _QUALITIES["regular"]
-
-    if name in ("decade", "span"):
-        return range_date(*year_range(name, dt.year, span), quality)
-    modifier = _MODIFIERS[name]
-
-    if TAG_DATE_YEAR in tags:
-        day, month = 0, 0
-    elif TAG_DATE_MONTH in tags:
-        day, month = 0, dt.month
-    elif modifier == _MODIFIERS["about"]:
-        day, month = 0, dt.month
-    else:
-        day, month = dt.day, dt.month
-
-    return {"_class": "Date", "dateval": [day, month, dt.year, False],
-            "modifier": modifier, "quality": quality, "text": ""}
 
 
 def asset_coords(asset: dict) -> tuple[float, float] | None:
@@ -146,54 +35,6 @@ def asset_coords(asset: dict) -> tuple[float, float] | None:
     return (round(lat, 4), round(lon, 4))
 
 
-def parse_gramps_coord(value: str) -> float | None:
-    value = (value or "").strip()
-    if not value:
-        return None
-    sign = 1
-    if value[0] in "SsWw":
-        sign = -1
-        value = value[1:]
-    elif value[0] in "NnEe":
-        value = value[1:]
-    try:
-        return sign * float(value)
-    except (ValueError, TypeError):
-        return None
-
-
-def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    lat1, lon1, lat2, lon2 = (math.radians(v) for v in (lat1, lon1, lat2, lon2))
-    a = (math.sin((lat2 - lat1) / 2) ** 2
-         + math.cos(lat1) * math.cos(lat2) * math.sin((lon2 - lon1) / 2) ** 2)
-    return EARTH_RADIUS_KM * 2 * math.asin(math.sqrt(a))
-
-
-def closest_place(lat: float, lon: float, places: list[dict]) -> tuple[dict, float] | None:
-    best, best_dist = None, float("inf")
-    for place in places:
-        p_lat = parse_gramps_coord(place.get("lat", ""))
-        p_lon = parse_gramps_coord(place.get("long", ""))
-        if p_lat is None or p_lon is None:
-            continue
-        dist = haversine_km(lat, lon, round(p_lat, 4), round(p_lon, 4))
-        if dist < best_dist:
-            best, best_dist = place, dist
-    if best is None or best_dist > MAX_PLACE_DISTANCE_KM:
-        return None
-    return (best, best_dist)
-
-
-async def linkable_places(gramps: GrampsClient, cfg: SyncImmichConfig) -> list[dict]:
-    if not cfg.place_tag_handle:
-        return []
-    return [
-        p for p in await gramps.list_places_full()
-        if cfg.place_tag_handle in (p.get("tag_list") or [])
-        and p.get("lat") and p.get("long")
-    ]
-
-
 class SyncError(Exception):
     """Sync failure carrying the HTTP status the route should surface"""
 
@@ -201,10 +42,6 @@ class SyncError(Exception):
         super().__init__(detail)
         self.status = status
         self.detail = detail
-
-
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 def translate_path(original_path: str, mappings: tuple[tuple[str, str], ...]) -> str:
@@ -255,14 +92,19 @@ async def preview_of(accounts: list[ImmichClient], asset: dict,
         raise SyncError(502, f"preview lookup failed: {exc.message}")
 
 
-def person_links_map(conn: sqlite3.Connection) -> dict[str, dict]:
-    """{immich_person_id: {handle, label}} from the person_links register"""
-    rows = conn.execute(
-        "SELECT immich_person_id, gramps_handle, label FROM person_links"
-    ).fetchall()
-    return {r["immich_person_id"]: {"handle": r["gramps_handle"],
-                                    "label": r["label"] or ""}
-            for r in rows}
+def person_map(people: list[dict]) -> dict[str, str]:
+    """{Immich person id: Gramps person handle} from the people's Immich Person ID attributes"""
+    out: dict[str, str] = {}
+    for person in people:
+        for a in person.get("attribute_list") or []:
+            value = (a.get("value") or "").strip()
+            if a.get("type") == PERSON_ATTR and value and person.get("handle"):
+                out[value] = person["handle"]
+    return out
+
+
+async def load_person_map(gramps: GrampsClient) -> dict[str, str]:
+    return person_map(await gramps.list_people(keys="handle,attribute_list"))
 
 
 async def _user_id(client: ImmichClient) -> str:
@@ -286,8 +128,7 @@ def _merge_copies(copies: list[tuple[str, dict]]) -> dict:
     matched = next(((uid, c) for uid, c in copies if uid == owner), None)
     base = matched[1] if matched else copies[0][1]
     owner_tags = tag_values(base) if matched else set()
-    other_tags = set().union(*(tag_values(c) for _, c in copies)) - owner_tags
-    tags = merge_tag_values(owner_tags, other_tags)
+    tags = set().union(*(tag_values(c) for _, c in copies))
     spelling = {(t.get("value") or "").lower(): t["value"]
                 for _, c in copies for t in c.get("tags") or [] if t.get("value")}
     return {**base,
@@ -369,8 +210,8 @@ def _attr(attr_type: str, value: str) -> dict:
 _FACE_PAD = 0.15
 
 
-def _face_rect(face: dict, pad: bool = True) -> list:
-    """Immich's pixel face box as a Gramps percent rect"""
+def _face_rect(face: dict) -> list:
+    """Immich's pixel face box as a Gramps percent rect, padded on every side"""
     w, h = face.get("imageWidth") or 0, face.get("imageHeight") or 0
     coords = [face.get("boundingBoxX1"), face.get("boundingBoxY1"),
               face.get("boundingBoxX2"), face.get("boundingBoxY2")]
@@ -379,9 +220,8 @@ def _face_rect(face: dict, pad: bool = True) -> list:
     x1, y1, x2, y2 = coords
     if x2 <= x1 or y2 <= y1:
         return []
-    if pad:
-        bw, bh = (x2 - x1) * _FACE_PAD, (y2 - y1) * _FACE_PAD
-        x1, x2, y1, y2 = x1 - bw, x2 + bw, y1 - bh, y2 + bh
+    bw, bh = (x2 - x1) * _FACE_PAD, (y2 - y1) * _FACE_PAD
+    x1, x2, y1, y2 = x1 - bw, x2 + bw, y1 - bh, y2 + bh
     rect = [round(x1 / w * 100), round(y1 / h * 100),
             round(x2 / w * 100), round(y2 / h * 100)]
     return [min(100, max(0, v)) for v in rect]
@@ -430,7 +270,7 @@ async def link_asset_faces(
     asset_id: str,
     media_handle: str,
     gid: str | None,
-    person_map: dict[str, dict],
+    person_map: dict[str, str],
     results: dict,
     apply: bool = True,
 ) -> AsyncIterator[SyncEvent]:
@@ -446,19 +286,18 @@ async def link_asset_faces(
             detail=f"face lookup failed: {exc.message}",
         )
 
-    pad = TAG_SYNC_MANUAL_FACES not in tag_values(asset)
     linked_people: dict[str, tuple[str, list]] = {}
     for face in faces:
         person = face.get("person") or {}
         pid = person.get("id")
         if not pid:
             continue
-        entry = person_map.get(pid)
-        if entry:
-            label = entry["label"] or person.get("name") or pid
-            prev = linked_people.get(entry["handle"])
+        handle = person_map.get(pid)
+        if handle:
+            label = person.get("name") or pid
+            prev = linked_people.get(handle)
             if prev is None or not prev[1]:
-                linked_people[entry["handle"]] = (label, _face_rect(face, pad=pad))
+                linked_people[handle] = (label, _face_rect(face))
         else:
             name = person.get("name") or pid
             if name not in results["people_unmatched"]:
@@ -506,10 +345,11 @@ async def sync_one_asset(
     asset_id: str,
     gramps_id: str | None = None,
     update: bool = False,
-    places: dict | None = None,
     description: bool = True,
+    person_map: dict[str, str] | None = None,
+    live_ids: set[str] | None = None,
 ) -> AsyncIterator[SyncEvent]:
-    """Create the Gramps media for one Immich asset; re-runs finish links idempotently"""
+    """Create the Gramps media for one Immich asset, titled by its file name; re-runs finish links idempotently"""
     yield SyncEvent(kind="started", detail=f"immich asset {asset_id}")
 
     asset = await _merged_one(accounts, asset_id)
@@ -519,14 +359,11 @@ async def sync_one_asset(
     if stack.get("primaryAssetId") and stack["primaryAssetId"] != asset_id:
         raise SyncError(400, "this asset is a stack variant. sync the stack's main image instead")
 
-    date_obj, date_display = wanted_date(asset)
-
     row = conn.execute(
-        "SELECT gramps_id FROM minted_media WHERE source_system='immich' AND source_id=?",
-        (asset_id,),
+        "SELECT gramps_id FROM minted_media WHERE source_system='immich' AND source_id=? "
+        "AND withdrawn_at IS NULL", (asset_id,),
     ).fetchone()
     if row is None and stack.get("primaryAssetId"):
-        #  register may ride on a hidden variant
         try:
             stacks = [s for client in accounts for s in await client.list_stacks()]
         except ImmichError as exc:
@@ -539,7 +376,7 @@ async def sync_one_asset(
                 break
         if member_ids:
             rows = conn.execute(
-                "SELECT gramps_id FROM minted_media WHERE source_system='immich' "
+                "SELECT gramps_id FROM minted_media WHERE source_system='immich' AND withdrawn_at IS NULL "
                 f"AND source_id IN ({','.join('?' * len(member_ids))})",
                 member_ids,
             ).fetchall()
@@ -575,7 +412,8 @@ async def sync_one_asset(
             title = existing.get("desc") or title
             gramps_path = existing.get("path") or gramps_path
     else:
-        live_ids = await gramps.list_media_gramps_ids()
+        if live_ids is None:
+            live_ids = await gramps.list_media_gramps_ids()
         if gramps_id:
             gid = gramps_id.strip().upper()
             if not ids.MANUAL_ID_RE.match(gid):
@@ -605,17 +443,14 @@ async def sync_one_asset(
             "attribute_list": [_attr("Immich ID", asset_id)]
             + ([_attr("Immich URL", f"{cfg.public_url}/photos/{asset_id}")] if cfg.public_url else []),
         }
-        if date_obj:
-            media_obj["date"] = date_obj
 
         try:
             await gramps.create_media(media_obj)
         except Exception as exc:
             raise SyncError(502, f"Gramps create failed: {exc}")
         with conn:
-            ids.mark_minted(conn, gid, _now())
             try:
-                ids.register_minted(conn, gid, "immich", asset_id, title, _now())
+                ids.register_minted(conn, gid, "immich", asset_id, _now())
             except ids.IdReused as exc:
                 raise SyncError(409, f"media {gid} created in Gramps but not registered: {exc}")
         created = True
@@ -645,13 +480,14 @@ async def sync_one_asset(
                     kind="item", entity="tag", action="created", source_id=asset_id,
                     gramps_id=gid, title=title, detail=id_tag_path(cfg, gid))
         if created or tag_cols:
-            record_error = await write_link_record(accounts, conn, asset, gid, cfg)
+            record_error = await write_link_record(accounts, asset, gid, cfg)
             if record_error:
                 yield SyncEvent(
                     kind="item", entity="tag", action="failed", source_id=asset_id,
                     gramps_id=gid, title=title, detail=record_error)
 
-    person_map = person_links_map(conn)
+    if person_map is None:
+        person_map = await load_person_map(gramps)
     face_results = new_face_results()
     faces_client, account_err = await owner_client(accounts, asset)
     if account_err:
@@ -667,39 +503,9 @@ async def sync_one_asset(
     people_unmatched = face_results["people_unmatched"]
     people_failed = face_results["people_failed"]
 
-    place_linked = None
-    if not refreshed:
-        try:
-            found = await resolve_place(gramps, asset, cfg, places)
-        except SyncError as exc:
-            found = None
-            yield SyncEvent(kind="item", entity="place", action="failed",
-                            source_id=asset_id, detail=exc.detail)
-        except Exception as exc:
-            found = None
-            yield SyncEvent(kind="item", entity="place", action="failed",
-                            source_id=asset_id,
-                            detail=f"could not list Gramps places: {str(exc)[:180]}")
-        if found:
-            place, how = found
-            place_name = place_label(place)
-            try:
-                linked = await _link_place(gramps, place, media_handle)
-                place_linked = place_name
-                if linked:
-                    yield SyncEvent(kind="item", entity="place", action="created",
-                                    source_id=asset_id, gramps_id=place.get("gramps_id"),
-                                    title=place_name, detail=_PLACE_DETAIL[how])
-            except Exception as exc:
-                yield SyncEvent(kind="item", entity="place", action="failed",
-                                source_id=asset_id, title=place_name,
-                                detail=str(exc)[:200])
-
     note_synced = None
     if not refreshed:
         try:
-            if created and gramps_id:
-                await append_media_note(gramps, media_obj, codes.notes_of(conn, gid))
             async for ev in adopt_rows(gramps, conn, asset_id, media_obj):
                 if ev.entity == "note":
                     note_synced = ev.action
@@ -716,8 +522,6 @@ async def sync_one_asset(
             "created": created,
             "title": title,
             "path": gramps_path,
-            "date": date_display or None,
-            "place_linked": place_linked,
             "people_linked": people_linked,
             "people_unmatched": people_unmatched,
             "people_failed": people_failed,
@@ -730,12 +534,11 @@ async def sync_one_asset(
 
 _TAG_ASSET_CAP = 5000
 _DETAIL_BATCH = 40
-_PLACE_DETAIL = {"gps": "media↔place link (GPS)", "tag": "media↔place link"}
 
 
 def new_counts() -> dict:
     return {"created": 0, "descriptions_updated": 0,
-            "versions_updated": 0, "links_updated": 0, "places_linked": 0,
+            "versions_updated": 0, "links_updated": 0,
             "id_tags_written": 0, "notes_synced": 0, "skipped": 0, "errors": 0}
 
 
@@ -765,37 +568,7 @@ def wanted_description(media: dict, cfg: SyncImmichConfig, link_on: bool) -> str
 
 
 def wanted_title(asset: dict) -> str:
-    if TAG_SYNC_DESCRIPTION in tag_values(asset):
-        desc = split_description((asset.get("exifInfo") or {}).get("description") or "")[0]
-        if desc:
-            return desc
     return asset.get("originalFileName") or ""
-
-
-def wanted_update_title(asset: dict) -> str | None:
-    """None = hands off"""
-    if TAG_SYNC_DESCRIPTION in tag_values(asset):
-        return split_description((asset.get("exifInfo") or {}).get("description") or "")[0] or None
-    return None
-
-
-def wanted_date(asset: dict) -> tuple[dict | None, str]:
-    if TAG_SYNC_DATE in tag_values(asset):
-        d = build_gramps_date(asset)
-        if d:
-            return d, format_gramps_date(d)
-    return None, ""
-
-
-def dates_equal(gramps_date: dict | None, new_date: dict | None) -> bool:
-    """Only the fields bifrost writes"""
-    a, b = gramps_date or {}, new_date or {}
-    return (
-        (a.get("dateval") or []) == (b.get("dateval") or [])
-        and (a.get("modifier") or 0) == (b.get("modifier") or 0)
-        and (a.get("quality") or 0) == (b.get("quality") or 0)
-        and (a.get("text") or "") == (b.get("text") or "")
-    )
 
 
 def id_tag_path(cfg: SyncImmichConfig, gramps_id: str) -> str:
@@ -859,19 +632,15 @@ def link_record(gramps_id: str | None, cfg: SyncImmichConfig,
     return rec
 
 
-def version_label(conn: sqlite3.Connection, asset_id: str) -> str | None:
-    row = conn.execute("SELECT label FROM version_labels WHERE asset_id=?", (asset_id,)).fetchone()
-    return row["label"] if row else None
-
-
 async def write_link_record(
-    accounts: list[ImmichClient], conn: sqlite3.Connection, asset: dict,
-    gramps_id: str, cfg: SyncImmichConfig,
+    accounts: list[ImmichClient], asset: dict, gramps_id: str, cfg: SyncImmichConfig,
 ) -> str | None:
+    """Write the asset's bifrost record, keeping the version label it already carries"""
     client, _probe_error = await owner_client(accounts, asset)
     try:
+        current = (await client.get_asset_metadata(asset["id"])).get(METADATA_KEY) or {}
         await client.upsert_asset_metadata(
-            asset["id"], METADATA_KEY, link_record(gramps_id, cfg, version_label(conn, asset["id"])))
+            asset["id"], METADATA_KEY, link_record(gramps_id, cfg, current.get("version_label")))
     except ImmichError as exc:
         return f"link record write failed: {exc.message}"
     return None
@@ -967,7 +736,6 @@ def delete_leftover_rows(conn: sqlite3.Connection, asset_id: str) -> None:
     with conn:
         conn.execute("DELETE FROM photo_notes WHERE asset_id=?", (asset_id,))
         conn.execute("DELETE FROM photo_links WHERE asset_id=?", (asset_id,))
-        conn.execute("DELETE FROM dated_photos WHERE asset_id=?", (asset_id,))
 
 
 async def adopt_rows(gramps: GrampsClient, conn: sqlite3.Connection, asset_id: str,
@@ -994,55 +762,8 @@ async def adopt_rows(gramps: GrampsClient, conn: sqlite3.Connection, asset_id: s
     delete_leftover_rows(conn, asset_id)
 
 
-def place_tag_value(asset: dict, cfg: SyncImmichConfig) -> str | None:
-    """The Gramps place id named by the asset's Place/{id} tag"""
-    if not cfg.place_tag_prefix:
-        return None
-    prefix = cfg.place_tag_prefix.lower() + "/"
-    for tag in sorted((t.get("value") or "") for t in asset.get("tags") or []):
-        if tag.lower().startswith(prefix) and len(tag) > len(prefix):
-            return tag[len(prefix):]
-    return None
-
-
 def place_label(place: dict) -> str:
     return (place.get("name") or {}).get("value") or place.get("gramps_id") or "?"
-
-
-def place_index(places: list[dict], cfg: SyncImmichConfig, failed: bool = False) -> dict:
-    """Places by gramps_id plus the coordinate-bearing subset the GPS match uses"""
-    return {
-        "by_gid": {p["gramps_id"]: p for p in places if p.get("gramps_id")},
-        "with_coords": [p for p in places
-                        if cfg.place_tag_handle and cfg.place_tag_handle in (p.get("tag_list") or [])
-                        and p.get("lat") and p.get("long")],
-        "failed": failed,
-    }
-
-
-async def resolve_place(
-    gramps: GrampsClient, asset: dict, cfg: SyncImmichConfig, index: dict | None,
-) -> tuple[dict, str] | None:
-    """(place, 'tag' | 'gps') for an asset, its Place tag first"""
-    if index is not None and index.get("failed"):
-        return None
-    gid = place_tag_value(asset, cfg)
-    if gid:
-        if index is not None:
-            place = index["by_gid"].get(gid)
-        else:
-            place = await gramps.get_place_by_gramps_id(gid)
-        if place is None:
-            raise SyncError(400, f"{cfg.place_tag_prefix}/{gid} names no Gramps place")
-        return place, "tag"
-    if TAG_SYNC_LOCATION not in tag_values(asset):
-        return None
-    coords = asset_coords(asset)
-    if not coords:
-        return None
-    places = index["with_coords"] if index is not None else await linkable_places(gramps, cfg)
-    result = closest_place(coords[0], coords[1], places)
-    return (result[0], "gps") if result else None
 
 
 async def _link_place(gramps: GrampsClient, place: dict, media_handle: str) -> bool:
@@ -1215,7 +936,7 @@ async def update_synced(
         else:
             counts["id_tags_written"] += 1
             landed.update(tag_cols)
-            record_error = await write_link_record(accounts, conn, asset, gid, cfg)
+            record_error = await write_link_record(accounts, asset, gid, cfg)
             if record_error:
                 counts["errors"] += 1
                 yield SyncEvent(kind="item", entity="tag", action="failed",
@@ -1282,7 +1003,7 @@ async def sync_assets(
                 tagged.append(a)
 
     rows = conn.execute(
-        "SELECT gramps_id, source_id FROM minted_media WHERE source_system='immich'"
+        "SELECT gramps_id, source_id FROM minted_media WHERE source_system='immich' AND withdrawn_at IS NULL"
     ).fetchall()
     minted_ids = {r["source_id"] for r in rows}
     update_targets = [
@@ -1311,9 +1032,7 @@ async def sync_assets(
     done = 0
 
     def _progress(label: str) -> SyncEvent:
-        return SyncEvent(kind="progress", detail=label,
-                         data={"done": done, "total": total,
-                               "percent": round(100 * done / total) if total else 100})
+        return progress(label, done, total)
 
     detail_by_id: dict[str, dict | None] = {}
     for start in range(0, len(detail_ids), _DETAIL_BATCH):
@@ -1322,15 +1041,8 @@ async def sync_assets(
         detail_by_id.update(await _merged_details(accounts, batch))
         done += len(batch)
 
-    try:
-        places = place_index(await gramps.list_places_full(), cfg)
-    except Exception as exc:
-        places = place_index([], cfg, failed=True)
-        counts["errors"] += 1
-        yield SyncEvent(kind="item", entity="place", action="failed",
-                        detail=f"could not list Gramps places: {str(exc)[:180]}; "
-                               "place links skipped this run")
-
+    people: dict[str, str] | None = None
+    live_ids: set[str] | None = None
     create_label = "Syncing new photos" if apply else "Checking new photos"
     for asset in tagged:
         yield _progress(create_label)
@@ -1357,28 +1069,22 @@ async def sync_assets(
         asset = detail
 
         title = wanted_title(asset)
-        date_obj, date_display = wanted_date(asset)
-        cols = {"title": title, **({"date": date_display} if date_obj else {})}
-        try:
-            found = await resolve_place(gramps, asset, cfg, places)
-        except SyncError as exc:
-            found = None
-            cols["place"] = exc.detail
-        if found:
-            cols["place"] = place_label(found[0])
         if not apply:
             yield SyncEvent(kind="item", entity="media", action="would_create",
-                            source_id=asset_id, title=title, data={"cols": cols})
+                            source_id=asset_id, title=title, data={"cols": {"title": title}})
             continue
         if selected is not None and f"media:{asset_id}" not in selected:
             continue
+        if people is None:
+            people = await load_person_map(gramps)
+        if live_ids is None:
+            live_ids = await gramps.list_media_gramps_ids()
         try:
-            async for ev in sync_one_asset(gramps, accounts, conn, cfg, asset_id, places=places):
+            async for ev in sync_one_asset(gramps, accounts, conn, cfg, asset_id,
+                                           person_map=people, live_ids=live_ids):
                 if ev.kind == "item":
                     if ev.action == "failed":
                         counts["errors"] += 1
-                    elif ev.entity == "place" and ev.action == "created":
-                        counts["places_linked"] += 1
                     elif ev.entity == "tag" and ev.action == "created":
                         counts["id_tags_written"] += 1
                     elif ev.entity == "note" and ev.action in ("created", "updated"):

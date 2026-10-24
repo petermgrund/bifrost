@@ -10,8 +10,10 @@ from fastapi import FastAPI
 
 from bifrost.core import db
 from bifrost.core.config import SyncPaperlessConfig
-from bifrost.modules import codes, faces, photo_collections
+from bifrost.modules import codes, photo_collections
 from bifrost.web.routes import api as routes
+
+CODE_KEYS = {"code", "status", "type", "title", "created", "minted", "withdrawn", "supersedes", "history"}
 
 
 @pytest.fixture
@@ -59,11 +61,10 @@ def get(app, url):
 
 @pytest.fixture
 def ledger(conn):
-    album = codes.claim(conn, "R7KM3D", kind="group", note="Berg album", location="B2.C3")
-    codes.claim(conn, "W9TP4F", kind="item", note="Loose print", parent=album)
-    codes.add_instance(conn, album, "https://example.org/album")
-    with conn:
-        conn.execute("INSERT INTO scan_register (scan_no, object_id) VALUES ('a000277', 'R7KM3D')")
+    codes.claim(conn, "R7KM3D")
+    codes.claim(conn, "W9TP4F")
+    codes.claim(conn, "X2BR7N")
+    codes.withdraw(conn, "X2BR7N", "penciled on the wrong print", superseded_by="R7KM3D")
     return conn
 
 
@@ -72,27 +73,32 @@ class TestCode:
         r = get(app_for(ledger, gramps=Gramps(media={"R7KM3D": "Berg family album"})), "/api/v1/code/r7km-3d")
         assert r.status_code == 200
         body = r.json()
-        assert (body["code"], body["status"], body["kind"], body["description"]) == (
-            "R7KM3D", "in use", "group", "Berg album")
-        assert (body["title"], body["location"], body["children"], body["scans"]) == (
-            "Berg family album", "B2.C3", ["W9TP4F"], ["a000277"])
-        assert body["withdrawn"] is None
-        assert {"where": "Link", "text": "https://example.org/album", "url": "https://example.org/album"} in body["instances"]
-        assert {"attention", "deletable", "in_ledger", "pencilings"}.isdisjoint(body)
+        assert set(body) == CODE_KEYS
+        assert (body["code"], body["status"], body["title"], body["type"]) == (
+            "R7KM3D", "in use", "Berg family album", None)
+        assert body["withdrawn"] is None and body["supersedes"] == ["X2BR7N"]
+        assert [e["what"] for e in body["history"]] == ["Created"] and body["created"] and body["minted"] is None
+
+    def test_a_withdrawn_entry(self, ledger):
+        body = get(app_for(ledger), "/api/v1/code/X2BR7N").json()
+        assert body["status"] == "withdrawn" and body["supersedes"] == []
+        assert body["withdrawn"] == {"at": body["history"][-1]["at"], "reason": "penciled on the wrong print",
+                                     "superseded_by": "R7KM3D"}
 
     def test_status_rests_on_the_ledger_when_gramps_is_down(self, ledger):
         body = get(app_for(ledger, gramps=Gramps(down=True)), "/api/v1/code/W9TP4F").json()
-        assert (body["status"], body["parent"]) == ("reserved", "R7KM3D")
+        assert (body["status"], body["title"]) == ("reserved", None)
 
     def test_codes_only_in_gramps_are_not_bifrost_data(self, ledger):
         r = get(app_for(ledger, gramps=Gramps(media={"X4FG7H": "Scan"})), "/api/v1/code/X4FG7H")
         assert r.status_code == 404 and r.json()["detail"] == "X4FG7H isn't in Bifrost's ledger"
+        assert get(app_for(ledger), "/api/v1/code/-").status_code == 404
 
 
 def test_export(ledger):
     cid = photo_collections.create(ledger, "Portraits")["id"]
     photo_collections.add_items(ledger, cid, ["asset-1", "asset-2"])
-    faces.set_link(ledger, "H_ANDERS", "imm-person-1", label="Anders")
+    ledger.execute("INSERT INTO person_links (gramps_handle, immich_person_id, created_at) VALUES ('H1', 'p1', 't')")
     ledger.executemany("INSERT INTO photo_links (asset_id, url, added_at) VALUES (?, ?, 't')",
                        [("asset-2", "https://example.org/album/2"), ("asset-1", "https://example.org/album/1")])
     ledger.commit()
@@ -100,16 +106,19 @@ def test_export(ledger):
     assert r.status_code == 200
     assert r.headers["content-disposition"].startswith('attachment; filename="bifrost-export-')
     body = r.json()
+    assert set(body) == {"api", "exported_at", "codes", "collections", "photo_links"}
     assert body["api"] == "v1"
     by_code = {c["code"]: c for c in body["codes"]}
-    assert (by_code["R7KM3D"]["status"], by_code["W9TP4F"]["status"]) == ("in use", "reserved")
+    assert set(by_code) == {"R7KM3D", "W9TP4F", "X2BR7N"} | {"C8T5", "J82D", "JYMZ", "6H2P", "G8NQ"}
+    assert all(set(c) == CODE_KEYS for c in body["codes"])
+    assert (by_code["R7KM3D"]["status"], by_code["W9TP4F"]["status"], by_code["X2BR7N"]["status"]) == (
+        "in use", "reserved", "withdrawn")
+    assert by_code["X2BR7N"]["withdrawn"]["superseded_by"] == "R7KM3D"
     assert body["collections"][0]["name"] == "Portraits"
     assert [s["asset_id"] for s in body["collections"][0]["slots"]] == ["asset-1", "asset-2"]
-    assert body["person_links"][0]["immich_person_id"] == "imm-person-1"
     assert [(p["asset_id"], [x["url"] for x in p["links"]]) for p in body["photo_links"]] == [
         ("asset-1", ["https://example.org/album/1"]), ("asset-2", ["https://example.org/album/2"])]
     assert body["photo_links"][0]["links"][0]["added_at"]
-    assert set(body) == {"api", "exported_at", "codes", "collections", "photo_links", "person_links"}
 
 
 def test_export_without_gramps(ledger):

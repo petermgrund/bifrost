@@ -1,10 +1,15 @@
 import asyncio
 import copy
+import json
+from types import SimpleNamespace
 
+import httpx
 import pytest
+from fastapi import FastAPI
 
 from bifrost.core import db
 from bifrost.core.clients.gramps import GrampsClient
+from bifrost.core.clients.paperless import PaperlessError
 from bifrost.core.config import SyncPaperlessConfig
 from bifrost.modules import sync_paperless
 from bifrost.modules.sync_paperless import (
@@ -14,6 +19,7 @@ from bifrost.modules.sync_paperless import (
     format_gramps_date,
     split_transcription,
 )
+from bifrost.web.routes import sync as sync_routes
 
 
 def _doc(created="1947-03-12", doc_id=42):
@@ -222,8 +228,8 @@ class TestMinting:
             self.media[obj["gramps_id"]] = obj
             if self.conn is not None:  # another mint registers the same id meanwhile
                 self.conn.execute(
-                    "INSERT INTO minted_media (gramps_id, source_system, source_id, title, minted_at) "
-                    "VALUES (?, 'immich', 'a9', 'Racer', '2026-01-01')", (obj["gramps_id"],))
+                    "INSERT INTO minted_media (gramps_id, source_system, source_id, created_at, minted_at) "
+                    "VALUES (?, 'immich', 'a9', '2026-01-01', '2026-01-01')", (obj["gramps_id"],))
                 self.conn.commit()
 
         async def get_media_by_gramps_id(self, gid):
@@ -245,10 +251,9 @@ class TestMinting:
         c = db.connect(tmp_path / "m.db")
         # XJ4DBT: minted, then its media was deleted from Gramps
         c.execute(
-            "INSERT INTO minted_media (gramps_id, source_system, source_id, title, minted_at) "
-            "VALUES ('XJ4DBT', 'paperless', '101', 'Deleted doc', '2026-01-01')")
-        c.execute(
-            "INSERT INTO reserved_ids (gramps_id, created_at, assigned_at) VALUES ('RSVD22', 't', 't')")
+            "INSERT INTO minted_media (gramps_id, source_system, source_id, created_at, minted_at) "
+            "VALUES ('XJ4DBT', 'paperless', '101', '2026-01-01', '2026-01-01')")
+        c.execute("INSERT INTO minted_media (gramps_id, created_at) VALUES ('RSVD22', 't')")
         c.commit()
         yield c
         c.close()
@@ -432,3 +437,274 @@ class TestTranscriptionOfNewDoc:
             "SELECT gramps_media_id FROM transcription_state WHERE paperless_id=1133").fetchone()
         assert row["gramps_media_id"] == media["gramps_id"]
         conn.close()
+
+
+class TestSingleDocument:
+
+    class Paperless(TestMinting.Paperless):
+        def __init__(self, docs, missing=()):
+            super().__init__(docs)
+            self.calls = []
+            self.missing = set(missing)
+            self.metadata = {}
+            self.gate = None
+
+        async def list_documents_by_tags(self, ids):
+            self.calls.append("list")
+            return self.docs
+
+        async def list_documents_by_tag(self, tag_id):
+            self.calls.append("list_tx")
+            return [d for d in self.docs if tag_id in d.get("tags", [])]
+
+        async def get_document(self, doc_id):
+            self.calls.append(("get", doc_id))
+            if self.gate is not None:
+                await self.gate.wait()
+            if doc_id in self.missing:
+                raise PaperlessError(f"GET /api/documents/{doc_id}/ → 404", 404)
+            return next(d for d in self.docs if d["id"] == doc_id)
+
+        async def get_document_metadata(self, doc_id):
+            return self.metadata.get(doc_id) or await super().get_document_metadata(doc_id)
+
+    class Gramps(TestMinting.Gramps):
+        def __init__(self):
+            super().__init__()
+            self.listings = 0
+
+        async def list_media_gramps_ids(self):
+            self.listings += 1
+            return set(self.media)
+
+    CFG = SyncPaperlessConfig(sync_tags=("doc",), gramps_id_field_id=12, gramps_url_field_id=14,
+                              transcription_tag_id=43)
+
+    @pytest.fixture
+    def conn(self, tmp_path):
+        c = db.connect(tmp_path / "s.db")
+        yield c
+        c.close()
+
+    def _sync(self, conn, paperless, gramps, **kw):
+        async def collect():
+            return [e async for e in sync_paperless.sync(
+                paperless, gramps, conn, self.CFG, apply=True, **kw)]
+        return asyncio.run(collect())
+
+    @staticmethod
+    def synced(conn, gramps, tracked="c"):
+        gramps.media["DOC111"] = {"gramps_id": "DOC111", "handle": "h1", "desc": "Letter",
+                                  "path": "paperless/0000001.pdf", "mime": "application/pdf",
+                                  "checksum": "old-md5"}
+        conn.execute("INSERT INTO doc_versions (paperless_id, checksum, gramps_id, updated_at) "
+                     "VALUES (1, ?, 'DOC111', 't')", (tracked,))
+        conn.commit()
+        return {"id": 1, "title": "Letter", "tags": [1],
+                "custom_fields": [{"field": 12, "value": "DOC111"}]}
+
+    def test_one_document_is_fetched_and_nothing_listed(self, conn):
+        gramps = self.Gramps()
+        docs = [self.synced(conn, gramps), {"id": 2, "title": "Other", "tags": [1], "custom_fields": []}]
+        paperless = self.Paperless(docs)
+        events = self._sync(conn, paperless, gramps, single_doc_id=1)
+        assert paperless.calls == [("get", 1)] and gramps.listings == 0
+        summary = next(e for e in events if e.kind == "summary")
+        assert summary.data["created"] == 0 and summary.data["skipped"] == 1
+        assert set(gramps.media) == {"DOC111"}
+
+    def test_a_tagged_document_without_an_id_is_created(self, conn):
+        gramps = self.Gramps()
+        paperless = self.Paperless([{"id": 3, "title": "New", "tags": [1], "custom_fields": []}])
+        events = self._sync(conn, paperless, gramps, single_doc_id=3)
+        created = [e for e in events if e.kind == "item" and e.action == "created"]
+        assert [e.source_id for e in created] == ["3"]
+        assert paperless.calls == [("get", 3)] and gramps.listings == 1
+        row = conn.execute("SELECT source_id FROM minted_media WHERE gramps_id=?",
+                           (created[0].gramps_id,)).fetchone()
+        assert row["source_id"] == "3"
+
+    def test_a_document_without_a_sync_tag_is_left_alone(self, conn):
+        gramps = self.Gramps()
+        paperless = self.Paperless([{"id": 5, "title": "Receipt", "tags": [9], "custom_fields": []}])
+        events = self._sync(conn, paperless, gramps, single_doc_id=5)
+        assert [e.detail for e in events if e.kind == "started"] == [
+            "document #5 is not sync-tagged", "document #5 is not transcription-tagged"]
+        summary = next(e for e in events if e.kind == "summary")
+        assert not any(summary.data.values()) and not gramps.media and gramps.listings == 0
+
+    def test_a_missing_document_is_an_error_event(self, conn):
+        paperless = self.Paperless([], missing={7})
+        events = self._sync(conn, paperless, self.Gramps(), single_doc_id=7)
+        assert [e.kind for e in events] == ["error", "summary"]
+        assert events[0].source_id == "7" and "not found" in events[0].detail
+
+    def test_other_paperless_errors_still_raise(self, conn):
+        class Down(self.Paperless):
+            async def get_document(self, doc_id):
+                raise PaperlessError("GET /api/documents/7/ → 502", 502)
+
+        with pytest.raises(PaperlessError):
+            self._sync(conn, Down([]), self.Gramps(), single_doc_id=7)
+
+    def test_a_document_created_this_run_gets_its_transcription(self, conn):
+        doc = {"id": 1133, "title": "Death index", "custom_fields": [], "tags": [1, 43],
+               "content": "Siggerud"}
+        gramps = TestTranscriptionOfNewDoc.Gramps()
+        paperless = self.Paperless([doc])
+        events = self._sync(conn, paperless, gramps, single_doc_id=1133)
+        summary = next(e for e in events if e.kind == "summary")
+        assert summary.data["created"] == 1 and summary.data["tx_created"] == 1
+        assert paperless.calls == [("get", 1133)] and len(gramps.notes) == 1
+
+    def test_a_transcriptions_only_resync_takes_the_fast_path(self, conn):
+        gramps = TestTranscriptionOfNewDoc.Gramps()
+        doc = self.synced(conn, gramps)
+        doc.update(tags=[1, 43], content="Kära Maria")
+        paperless = self.Paperless([doc])
+        events = self._sync(conn, paperless, gramps, single_doc_id=1,
+                            transcriptions_only=True, force_transcriptions=True)
+        summary = next(e for e in events if e.kind == "summary")
+        assert summary.data["tx_created"] == 1 and len(gramps.notes) == 1
+        assert paperless.calls == [("get", 1)]
+
+
+WEBHOOK = "/sync/api/paperless/webhook"
+TOKEN = {"X-Bifrost-Token": "s3cret"}
+
+
+def make_app(conn, paperless, gramps=None, token="s3cret"):
+    app = FastAPI()
+    app.include_router(sync_routes.router)
+    app.state.conn = conn
+    app.state.paperless = paperless
+    app.state.gramps = gramps or TestSingleDocument.Gramps()
+    app.state.caches = {}
+    app.state.cfg = SimpleNamespace(sync_paperless=SyncPaperlessConfig(
+        sync_tags=("doc",), gramps_id_field_id=12, gramps_url_field_id=14, webhook_token=token))
+    return app
+
+
+def call(app, method, url, **kw):
+    async def go():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://bifrost") as client:
+            resp = await client.request(method, url, **kw)
+        await asyncio.gather(*getattr(app.state, "webhook_tasks", ()))
+        return resp
+    return asyncio.run(go())
+
+
+class TestWebhook:
+
+    @pytest.fixture
+    def conn(self, tmp_path):
+        c = db.connect(tmp_path / "w.db")
+        yield c
+        c.close()
+
+    @staticmethod
+    def runs_of(conn):
+        return conn.execute("SELECT job, status, summary FROM runs").fetchall()
+
+    def test_off_without_a_token(self, conn):
+        paperless = TestSingleDocument.Paperless([])
+        r = call(make_app(conn, paperless, token=""), "POST", WEBHOOK,
+                 headers=TOKEN, json={"doc_id": "1"})
+        assert r.status_code == 404 and paperless.calls == [] and not self.runs_of(conn)
+
+    def test_rejects_a_missing_or_wrong_token(self, conn):
+        paperless = TestSingleDocument.Paperless([])
+        app = make_app(conn, paperless)
+        assert call(app, "POST", WEBHOOK, json={"doc_id": "1"}).status_code == 403
+        assert call(app, "POST", WEBHOOK, json={"doc_id": "1"},
+                    headers={"X-Bifrost-Token": "nope"}).status_code == 403
+        assert paperless.calls == [] and not self.runs_of(conn)
+
+    @pytest.mark.parametrize("kw", [
+        {"json": {"doc_id": "1"}}, {"json": {"id": 1}},
+        {"data": {"doc_id": "1"}}, {"params": {"doc_id": "1"}}, {"params": {"id": "1"}},
+        {"data": {"doc_id": "1"}, "files": {"file": ("a.pdf", b"%PDF-1.4", "application/pdf")}},
+    ])
+    def test_queues_the_document_from_json_form_or_query(self, conn, kw):
+        gramps = TestSingleDocument.Gramps()
+        paperless = TestSingleDocument.Paperless([TestSingleDocument.synced(conn, gramps)])
+        r = call(make_app(conn, paperless, gramps), "POST", WEBHOOK, headers=TOKEN, **kw)
+        assert r.status_code == 202 and r.json() == {"doc_id": 1, "queued": True}
+        assert paperless.calls == [("get", 1)] and gramps.listings == 0
+        (run,) = self.runs_of(conn)
+        assert (run["job"], run["status"]) == ("sync.paperless.webhook", "ok")
+
+    @pytest.mark.parametrize("kw", [
+        {"json": {"doc_id": "abc"}}, {"json": {}}, {}, {"data": {"doc_id": ""}},
+        {"params": {"doc_id": "-1"}}, {"json": [1]},
+        {"content": b"not json", "headers": {"content-type": "application/json"}},
+    ])
+    def test_needs_an_integer_id(self, conn, kw):
+        paperless = TestSingleDocument.Paperless([])
+        headers = {**TOKEN, **kw.get("headers", {})}
+        kw = {k: v for k, v in kw.items() if k != "headers"}
+        r = call(make_app(conn, paperless), "POST", WEBHOOK, headers=headers, **kw)
+        assert r.status_code == 400 and paperless.calls == [] and not self.runs_of(conn)
+
+    def test_an_untagged_document_creates_nothing(self, conn):
+        gramps = TestSingleDocument.Gramps()
+        paperless = TestSingleDocument.Paperless(
+            [{"id": 5, "title": "Receipt", "tags": [9], "custom_fields": []}])
+        r = call(make_app(conn, paperless, gramps), "POST", WEBHOOK, headers=TOKEN, data={"doc_id": "5"})
+        assert r.status_code == 202
+        assert paperless.calls == [("get", 5)] and not gramps.media and gramps.listings == 0
+        (run,) = self.runs_of(conn)
+        assert run["status"] == "ok" and json.loads(run["summary"])["data"]["created"] == 0
+
+    def test_a_missing_document_records_an_error(self, conn):
+        paperless = TestSingleDocument.Paperless([], missing={7})
+        r = call(make_app(conn, paperless), "POST", WEBHOOK, headers=TOKEN, json={"doc_id": "7"})
+        assert r.status_code == 202
+        (run,) = self.runs_of(conn)
+        assert run["status"] == "error"
+        payloads = [row["payload"] for row in conn.execute("SELECT payload FROM run_events")]
+        assert any('"error"' in p and "not found" in p for p in payloads)
+
+    def test_repoints_media_at_the_version_selected_in_paperless(self, conn):
+        gramps = TestSingleDocument.Gramps()
+        paperless = TestSingleDocument.Paperless([TestSingleDocument.synced(conn, gramps, tracked="old")])
+        paperless.metadata[1] = {"media_filename": "0000001_v2.pdf", "original_checksum": "v2"}
+        r = call(make_app(conn, paperless, gramps), "POST", WEBHOOK, headers=TOKEN, data={"doc_id": "1"})
+        assert r.status_code == 202
+        media = gramps.media["DOC111"]
+        assert (media["path"], media["checksum"]) == ("paperless/0000001_v2.pdf", "md5-h1")
+        assert conn.execute("SELECT checksum FROM doc_versions WHERE paperless_id=1").fetchone()[0] == "v2"
+        (run,) = self.runs_of(conn)
+        assert json.loads(run["summary"])["data"]["versions_updated"] == 1
+        assert paperless.calls == [("get", 1)] and gramps.listings == 0
+
+    def test_answers_before_the_sync_runs_and_runs_one_at_a_time(self, conn):
+        docs = [{"id": i, "title": f"Doc {i}", "tags": [9], "custom_fields": []} for i in (1, 2)]
+        paperless = TestSingleDocument.Paperless(docs)
+        app = make_app(conn, paperless)
+
+        async def settle():
+            for _ in range(3):
+                await asyncio.sleep(0)
+
+        async def go():
+            paperless.gate = asyncio.Event()
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://bifrost") as client:
+                first = await client.post(WEBHOOK, headers=TOKEN, json={"doc_id": "1"})
+                await settle()
+                second = await client.post(WEBHOOK, headers=TOKEN, json={"doc_id": "2"})
+                await settle()
+                calls_before = list(paperless.calls)
+                paperless.gate.set()
+                await asyncio.gather(*app.state.webhook_tasks)
+                await settle()
+            return first, second, calls_before
+
+        first, second, calls_before = asyncio.run(go())
+        assert first.status_code == second.status_code == 202
+        assert calls_before == [("get", 1)]
+        assert paperless.calls == [("get", 1), ("get", 2)]
+        assert [r["job"] for r in self.runs_of(conn)] == ["sync.paperless.webhook"] * 2
+        assert not app.state.webhook_tasks

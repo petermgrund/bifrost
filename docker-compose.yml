@@ -8,6 +8,5 @@ services:
     volumes:
       - ./config.yaml:/app/config.yaml:ro
       - ./data:/app/data
-      - .:/app/repo
       - ./bifrost/web/static:/app/bifrost/web/static
       - ./bifrost/web/templates:/app/bifrost/web/templates

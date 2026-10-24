@@ -14,6 +14,7 @@ const STATUS_CHIP = {
   withdrawn: ['surface-variant', 'Withdrawn'],
 };
 const COUNTS = Array.from({ length: 20 }, (_, i) => i + 1);
+const TYPES = { image: 'Image', document: 'Document' };
 
 const pad = (n) => String(n).padStart(2, '0');
 
@@ -48,13 +49,11 @@ function why(e) {
 const chip = (label, on, onClick) => html`<button class="chip ${on ? 'fill' : ''}"
   aria-pressed=${on ? 'true' : 'false'} @click=${onClick}>${label}</button>`;
 
-function blankForm(mode = 'mint') {
-  return { mode, code: '', note: '', notes: '', count: 1, reason: '', instance: '', successor: '' };
-}
-
 const bare = (v) => v.replace(/[\s-]+/g, '').toUpperCase();
 
-const TYPES = { image: ['Image', 'Immich'], document: ['Document', 'Paperless'] };
+function blankForm(mode = 'mint') {
+  return { mode, code: '', count: 1, reason: '', superseded_by: '' };
+}
 
 class CodesPage extends BifrostElement {
   static properties = {
@@ -72,9 +71,7 @@ class CodesPage extends BifrostElement {
     saving: { state: true },
     minted: { state: true },
     copied: { state: true },
-    adding: { state: true },
     thumbGone: { state: true },
-    mintNotes: { state: true },
   };
 
   constructor() {
@@ -85,17 +82,15 @@ class CodesPage extends BifrostElement {
     this.filter = 'all';
     this.page = 0;
     this.toast = null;     // { msg, failed } for the snackbar
-    this.dlg = null;       // 'new' | 'edit' | 'withdraw'
-    this.target = null;    // the row being edited or withdrawn
+    this.dlg = null;       // 'new' | 'details' | 'withdraw' | 'delete'
+    this.target = null;    // the row the dialog is about
     this.form = blankForm();
     this.touched = false;
     this.formError = '';
     this.saving = false;
     this.minted = null;    // rows of the codes just minted or claimed
     this.copied = '';
-    this.adding = false;
     this.thumbGone = false;
-    this.mintNotes = {};
   }
 
   connectedCallback() {
@@ -130,11 +125,10 @@ class CodesPage extends BifrostElement {
 
   matchesQuery(r, q) {
     if (!q) return true;
-    const bare = q.replace(/[\s-]+/g, '').toUpperCase();
-    if (bare && r.code.includes(bare)) return true;
-    const hay = [r.note, r.title, r.notes, r.withdrawn_reason,
-      ...r.paperless.map((d) => d.id), ...r.immich.map((a) => a.id), ...r.scans,
-      ...r.instances.filter((i) => i.id).map((i) => i.text)];
+    const code = bare(q);
+    if (code && r.code.includes(code)) return true;
+    const hay = [r.title, r.withdrawn_reason, r.superseded_by,
+      ...r.paperless.map((d) => d.id), ...r.immich.map((a) => a.id)];
     return hay.some((v) => v && String(v).toLowerCase().includes(q));
   }
 
@@ -146,8 +140,6 @@ class CodesPage extends BifrostElement {
 
   setQuery(v) { this.q = v; this.page = 0; }
   setFilter(f) { this.filter = f; this.page = 0; }
-
-  // ---- row actions
 
   async copy(code) {
     let ok = false;
@@ -178,103 +170,32 @@ class CodesPage extends BifrostElement {
 
   // ---- dialogs
 
-  openNew() {
-    this.form = blankForm();
-    this.target = null;
-    this.minted = null;
-    this.mintNotes = {};
-    this.touched = false;
-    this.formError = '';
-    this.dlg = 'new';
-  }
-
-  openEdit(r) {
+  open(dlg, r = null, form = blankForm()) {
+    this.dlg = dlg;
     this.target = r;
-    this.form = { ...blankForm(), note: r.note || '', notes: r.notes || '', successor: r.successor || '' };
+    this.form = form;
+    this.minted = null;
     this.touched = false;
     this.formError = '';
     this.thumbGone = false;
-    this.dlg = 'edit';
   }
 
-  async popupCall(code, path, opts = { method: 'POST' }) {
-    if (this.adding) return false;
-    this.adding = true;
-    this.formError = '';
-    try {
-      await api(`${API}/${encodeURIComponent(code)}${path}`, opts);
-      await this.load();
-      this.target = this.items.find((r) => r.code === code) || this.target;
-      return true;
-    } catch (e) {
-      this.formError = why(e);
-      return false;
-    } finally {
-      this.adding = false;
-    }
-  }
+  openNew() { this.open('new'); }
+  openDetails(r) { this.open('details', r, { ...blankForm(), superseded_by: r.superseded_by || '' }); }
+  openWithdraw(r) { this.open('withdraw', r); }
+  openDelete(r) { this.open('delete', r); }
 
-  async addInstance(code) {
-    const value = this.form.instance.trim();
-    if (!value) return;
-    const body = JSON.stringify({ value });
-    if (await this.popupCall(code, '/instances', { method: 'POST', body })) {
-      this.form = { ...this.form, instance: '' };
-    }
-  }
-
-  removeInstance(code, id) { this.popupCall(code, `/instances/${id}`, { method: 'DELETE' }); }
-
-  openWithdraw(r) {
-    this.target = r;
-    this.form = blankForm();
-    this.touched = false;
-    this.formError = '';
-    this.dlg = 'withdraw';
+  openCode(code) {
+    const r = this.items.find((x) => x.code === code);
+    if (r) this.openDetails(r);
   }
 
   closeDialog() {
     if (this.saving) return;
-    const drafts = this.minted ? this.mintDrafts() : [];
-    if (drafts.length) {
-      this.saveMintNotes(drafts).then((failed) => {
-        if (failed.length) this.say(`Notes not saved: ${failed.join('; ')}`, true);
-      });
-    }
     this.dlg = null;
     this.target = null;
     this.minted = null;
-    this.mintNotes = {};
     this.formError = '';
-  }
-
-  mintDrafts() { return Object.entries(this.mintNotes).filter(([, text]) => text.trim()); }
-
-  async saveMintNotes(drafts = this.mintDrafts()) {
-    const failed = [];
-    for (const [code, notes] of drafts) {
-      try {
-        await api(`${API}/${encodeURIComponent(code)}`, { method: 'PATCH', body: JSON.stringify({ notes }) });
-      } catch (e) {
-        failed.push(`${code}: ${why(e)}`);
-      }
-    }
-    if (drafts.length) this.load();
-    return failed;
-  }
-
-  async finishMinted(more = false) {
-    if (this.saving) return;
-    this.saving = true;
-    const failed = await this.saveMintNotes();
-    this.saving = false;
-    if (failed.length) {
-      this.formError = `Notes not saved: ${failed.join('; ')}`;
-      return;
-    }
-    this.mintNotes = {};
-    if (more) this.openNew();
-    else this.closeDialog();
   }
 
   setForm(patch) { this.form = { ...this.form, ...patch }; this.formError = ''; }
@@ -302,11 +223,10 @@ class CodesPage extends BifrostElement {
     if ((claim && !f.code.trim()) || this.saving) return;
     this.saving = true;
     this.formError = '';
-    const body = { note: count === 1 ? f.note : '' };
     try {
       const r = claim
-        ? await post(`${API}/claim`, { ...body, code: f.code })
-        : await post(`${API}/mint`, { ...body, count });
+        ? await post(`${API}/claim`, { code: f.code })
+        : await post(`${API}/mint`, { count });
       this.minted = r.items;
       this.load();
     } catch (e) {
@@ -316,87 +236,47 @@ class CodesPage extends BifrostElement {
     }
   }
 
-  editChanges() {
-    const r = this.target;
-    const f = this.form;
-    const out = {};
-    if (!r.type) {
-      if (f.note !== (r.note || '')) out.note = f.note;
-      if (f.notes !== (r.notes || '')) out.notes = f.notes;
-    }
-    if (r.status === 'withdrawn' && bare(f.successor) !== (r.successor || '')) out.successor = f.successor;
-    return out;
-  }
-
-  async submitEdit() {
-    const code = this.target.code;
-    const changes = this.editChanges();
-    if (this.saving || !Object.keys(changes).length) return;
-    this.saving = true;
-    this.formError = '';
-    try {
-      await api(`${API}/${encodeURIComponent(code)}`, {
-        method: 'PATCH',
-        body: JSON.stringify(changes),
-      });
-      this.saving = false;
-      this.closeDialog();
-      this.say(`Saved ${code}`);
-      this.load();
-    } catch (e) {
-      this.formError = why(e);
-    } finally {
-      this.saving = false;
-    }
-  }
-
-  async submitWithdraw() {
-    const code = this.target.code;
-    this.touched = true;
-    if (!this.form.reason.trim() || this.saving) return;
-    this.saving = true;
-    this.formError = '';
-    try {
-      await post(`${API}/${encodeURIComponent(code)}/withdraw`,
-        { reason: this.form.reason, successor: this.form.successor });
-      this.saving = false;
-      this.closeDialog();
-      this.say(`${code} withdrawn`);
-      this.load();
-    } catch (e) {
-      this.formError = why(e);
-    } finally {
-      this.saving = false;
-    }
-  }
-
-  openDelete(r) {
-    this.target = r;
-    this.formError = '';
-    this.dlg = 'delete';
-  }
-
-  openCode(code) {
-    const r = this.items.find((x) => x.code === code);
-    if (r) this.openEdit(r);
-  }
-
-  async submitDelete() {
-    const code = this.target.code;
+  async change(done, request) {
     if (this.saving) return;
     this.saving = true;
     this.formError = '';
     try {
-      await api(`${API}/${encodeURIComponent(code)}`, { method: 'DELETE' });
+      await request();
       this.saving = false;
       this.closeDialog();
-      this.say(`${code} deleted`);
+      this.say(done);
       this.load();
     } catch (e) {
       this.formError = why(e);
     } finally {
       this.saving = false;
     }
+  }
+
+  get supersedeDirty() {
+    const r = this.target;
+    return r?.status === 'withdrawn' && bare(this.form.superseded_by) !== (r.superseded_by || '');
+  }
+
+  submitSupersede() {
+    const { code } = this.target;
+    if (!this.supersedeDirty) return;
+    this.change(`Saved ${code}`, () => api(`${API}/${encodeURIComponent(code)}`, {
+      method: 'PATCH', body: JSON.stringify({ superseded_by: this.form.superseded_by }),
+    }));
+  }
+
+  submitWithdraw() {
+    const { code } = this.target;
+    this.touched = true;
+    if (!this.form.reason.trim()) return;
+    this.change(`${code} withdrawn`, () => post(`${API}/${encodeURIComponent(code)}/withdraw`,
+      { reason: this.form.reason, superseded_by: this.form.superseded_by }));
+  }
+
+  submitDelete() {
+    const { code } = this.target;
+    this.change(`${code} deleted`, () => api(`${API}/${encodeURIComponent(code)}`, { method: 'DELETE' }));
   }
 
   // ---- rendering
@@ -409,7 +289,7 @@ class CodesPage extends BifrostElement {
         @cancel=${(e) => { if (this.saving) e.preventDefault(); }}
         @close=${() => { if (this.dlg) this.closeDialog(); }}>
         ${this.dlg === 'new' ? (this.minted ? this.renderMinted() : this.renderNewForm())
-          : this.dlg === 'edit' ? this.renderEditForm()
+          : this.dlg === 'details' ? this.renderDetails()
             : this.dlg === 'withdraw' ? this.renderWithdrawForm()
               : this.dlg === 'delete' ? this.renderDeleteForm() : nothing}
       </dialog>
@@ -428,7 +308,7 @@ class CodesPage extends BifrostElement {
       <nav class="wrap">
         <div class="field prefix border small no-margin max">
           <i>search</i>
-          <input type="text" placeholder="Search codes and descriptions"
+          <input type="text" placeholder="Search codes"
             aria-label="Search codes" .value=${this.q} @input=${(e) => this.setQuery(e.target.value)}>
         </div>
         <button @click=${() => this.openNew()}><i>add</i><span>New code</span></button>
@@ -492,24 +372,35 @@ class CodesPage extends BifrostElement {
         ${r.attention ? html`<i class="error-text" title=${r.attention} aria-label=${r.attention}>error</i>`
           : nothing}
       </td>
-      <td title=${r.title || r.note || nothing}>${this.whatItIs(r)}</td>
+      <td title=${r.title || nothing}>${r.title || html`<span class="secondary-text">No title</span>`}</td>
       <td class="small-text" title=${minute(r.updated) || nothing}>${day(r.updated)}</td>
       <td>${this.actions(r)}</td>
     </tr>`;
   }
 
-  whatItIs(r) {
-    const main = r.title || r.note;
-    return main ? main : html`<span class="secondary-text">No description</span>`;
+  actions(r) {
+    if (!r.in_ledger) return nothing;
+    const act = (icon, tip, name, onClick) => html`<button class="circle transparent small"
+        aria-label=${name} @click=${onClick}>
+        <i>${icon}</i><div class="tooltip left">${tip}</div></button>`;
+    return html`<div class="codes-actions">
+      ${act('info', 'Details', `Details of ${r.code}`, () => this.openDetails(r))}
+      ${r.status === 'withdrawn' ? html`<span></span>`
+        : act('block', 'Withdraw', `Withdraw ${r.code}`, () => this.openWithdraw(r))}
+    </div>`;
   }
 
-  facts(r, type) {
+  codeLink(c) {
+    return html`<a class="link mono" href="#" @click=${(e) => { e.preventDefault(); this.openCode(c); }}>${c}</a>`;
+  }
+
+  facts(r) {
     const rows = [
-      type && ['Type', type],
-      type && ['Title', r.title || r.note || 'No title'],
+      r.type && ['Type', TYPES[r.type]],
+      (r.type || r.title) && ['Title', r.title || 'No title'],
       r.withdrawn_reason && ['Withdrawn', r.withdrawn_reason],
-      r.predecessors.length && ['Replaces', r.predecessors.map((c, i) => html`${i ? ', ' : ''}<a
-        class="link mono" href="#" @click=${(e) => { e.preventDefault(); this.openCode(c); }}>${c}</a>`)],
+      r.superseded_by && ['Superseded by', this.codeLink(r.superseded_by)],
+      r.supersedes.length && ['Supersedes', r.supersedes.map((c, i) => html`${i ? ', ' : ''}${this.codeLink(c)}`)],
     ].filter(Boolean);
     return html`
       ${rows.length ? html`<table>
@@ -520,33 +411,6 @@ class CodesPage extends BifrostElement {
       ${r.attention ? html`<p>${statusLine('error', r.attention)}</p>` : nothing}`;
   }
 
-  instancesTable(r) {
-    const f = this.form;
-    const add = () => this.addInstance(r.code);
-    return html`
-      <h6 class="small">Instances</h6>
-      ${r.instances.length ? html`<table>
-        <tbody>
-          ${r.instances.map((i) => html`<tr>
-            <td class="min secondary-text">${i.where}</td>
-            <td class="codes-wrap">${i.url
-              ? html`<a class="link" href=${i.url} target="_blank" rel="noopener">${i.text}</a>` : i.text}</td>
-            <td class="min">${i.id ? html`<button class="circle transparent small"
-                aria-label="Remove ${i.text}" ?disabled=${this.adding}
-                @click=${() => this.removeInstance(r.code, i.id)}><i>close</i></button>` : nothing}</td>
-          </tr>`)}
-        </tbody>
-      </table>` : html`<p class="secondary-text">None yet</p>`}
-      ${r.status === 'withdrawn' ? nothing : html`<nav>
-        <div class="field border small no-margin max">
-          <input type="url" placeholder="Add a link" aria-label="Add a link"
-            .value=${f.instance} @input=${(e) => this.setForm({ instance: e.target.value })}
-            @keydown=${(e) => { if (e.key === 'Enter') add(); }}>
-        </div>
-        ${btn(this.adding ? 'Adding...' : 'Add', this.adding || !f.instance.trim(), add, 'border')}
-      </nav>`}`;
-  }
-
   history(r) {
     if (!r.history.length) return nothing;
     return html`
@@ -555,30 +419,10 @@ class CodesPage extends BifrostElement {
         <tbody>
           ${r.history.map((e) => html`<tr>
             <td class="min small-text secondary-text">${minute(e.at)}</td>
-            <td>${e.what}</td>
+            <td>${e.what}${e.detail ? html`<span class="secondary-text">: ${e.detail}</span>` : nothing}</td>
           </tr>`)}
         </tbody>
       </table>`;
-  }
-
-  actions(r) {
-    if (!r.in_ledger) return nothing;
-    const withdrawn = r.status === 'withdrawn';
-    const act = (icon, tip, name, onClick) => html`<button class="circle transparent small"
-        aria-label=${name} @click=${onClick}>
-        <i>${icon}</i><div class="tooltip left">${tip}</div></button>`;
-    const empty = html`<span></span>`;
-    return html`<div class="codes-actions">
-      ${r.type
-        ? act('info', 'Details', `Details of ${r.code}`, () => this.openEdit(r))
-        : act('edit', 'Edit', `Edit ${r.code}`, () => this.openEdit(r))}
-      ${!withdrawn ? act('block', 'Withdraw', `Withdraw ${r.code}`, () => this.openWithdraw(r)) : empty}
-    </div>`;
-  }
-
-  noteField(label = 'What it is') {
-    return field(label, this.form.note, (e) => this.setForm({ note: e.target.value }),
-      { placeholder: ' ' });
   }
 
   renderNewForm() {
@@ -599,7 +443,6 @@ class CodesPage extends BifrostElement {
           { mono: true, upper: true, placeholder: ' ', error: codeError, onEnter: submit })
         : selectField('How many codes', count, COUNTS,
           (e) => this.setForm({ count: Number(e.target.value) }))}
-      ${claim || count === 1 ? this.noteField('What it is (optional)') : nothing}
       ${this.formError ? html`<p>${statusLine('error', this.formError)}</p>` : nothing}
       <nav class="right-align">
         ${btn('Cancel', this.saving, () => this.closeDialog(), 'border')}
@@ -618,47 +461,40 @@ class CodesPage extends BifrostElement {
           <button class="circle transparent" aria-label="Copy ${m.code}" @click=${() => this.copy(m.code)}>
             <i>${this.copied === m.code ? 'check' : 'content_copy'}</i></button>
           ${this.copied === m.code ? html`<span class="small-text" role="status">Copied</span>` : nothing}
-        </nav>
-        ${m.note ? html`<p class="small-text secondary-text">${m.note}</p>` : nothing}
-        ${field('Notes (optional)', this.mintNotes[m.code] ?? '',
-          (e) => { this.mintNotes = { ...this.mintNotes, [m.code]: e.target.value }; }, { rows: 2 })}`)}
+        </nav>`)}
       ${this.formError ? html`<p>${statusLine('error', this.formError)}</p>` : nothing}
       <nav class="right-align">
-        ${btn('Mint more', this.saving, () => this.finishMinted(true), 'border')}
-        <button autofocus ?disabled=${this.saving} @click=${() => this.finishMinted()}>
-          ${this.saving ? 'Saving...' : 'Done'}</button>
+        ${btn('Mint more', false, () => this.openNew(), 'border')}
+        <button autofocus @click=${() => this.closeDialog()}>Done</button>
       </nav>`;
   }
 
-  renderEditForm() {
+  renderDetails() {
     const r = this.target;
-    const [type] = TYPES[r.type] || [];
-    const dirty = Object.keys(this.editChanges()).length > 0;
+    const withdrawn = r.status === 'withdrawn';
+    const dirty = this.supersedeDirty;
     return html`
       <div class="codes-head">
         <div class="max">
-          <h5 id="codes-dialog-title">${type ? nothing : 'Edit '}<span class="mono">${r.code}</span></h5>
-          ${this.facts(r, type)}
-          ${type ? nothing : html`
-            ${this.noteField()}
-            ${field('Notes', this.form.notes, (e) => this.setForm({ notes: e.target.value }), { rows: 3 })}`}
-          ${r.status === 'withdrawn' ? field('Successor', this.form.successor,
-            (e) => this.setForm({ successor: e.target.value }), { mono: true, upper: true, placeholder: ' ' })
-            : nothing}
+          <h5 id="codes-dialog-title"><span class="mono">${r.code}</span></h5>
+          ${this.facts(r)}
+          ${withdrawn ? field('Superseded by', this.form.superseded_by,
+            (e) => this.setForm({ superseded_by: e.target.value }),
+            { mono: true, upper: true, placeholder: ' ', onEnter: () => this.submitSupersede() }) : nothing}
         </div>
         ${r.gramps && !this.thumbGone ? html`<img class="codes-thumb" alt=""
           src="${API}/${encodeURIComponent(r.code)}/thumbnail"
           @error=${() => { this.thumbGone = true; }}>` : nothing}
       </div>
-      ${this.instancesTable(r)}
       ${this.history(r)}
       ${this.formError ? html`<p>${statusLine('error', this.formError)}</p>` : nothing}
       <nav>
         ${r.deletable ? btn('Delete', this.saving, () => this.openDelete(r), 'border error-text') : nothing}
         <div class="max"></div>
-        ${type && r.status !== 'withdrawn' ? html`<button autofocus @click=${() => this.closeDialog()}>Close</button>` : html`
+        ${withdrawn ? html`
           ${btn(dirty ? 'Cancel' : 'Close', this.saving, () => this.closeDialog(), 'border')}
-          ${btn(this.saving ? 'Saving...' : 'Save', this.saving || !dirty, () => this.submitEdit())}`}
+          ${btn(this.saving ? 'Saving...' : 'Save', this.saving || !dirty, () => this.submitSupersede())}`
+          : html`<button autofocus @click=${() => this.closeDialog()}>Close</button>`}
       </nav>`;
   }
 
@@ -668,7 +504,7 @@ class CodesPage extends BifrostElement {
       <h5 id="codes-dialog-title">Delete <span class="mono">${r.code}</span>?</h5>
       ${this.formError ? html`<p>${statusLine('error', this.formError)}</p>` : nothing}
       <nav class="right-align">
-        ${btn('Cancel', this.saving, () => this.openEdit(r), 'border')}
+        ${btn('Cancel', this.saving, () => this.openDetails(r), 'border')}
         ${btn(this.saving ? 'Deleting...' : 'Delete', this.saving, () => this.submitDelete(), 'error')}
       </nav>`;
   }
@@ -683,7 +519,7 @@ class CodesPage extends BifrostElement {
         'This code is in use so no changes will affect Gramps, Paperless or Immich.')}</p>` : nothing}
       ${field('Reason', this.form.reason, (e) => this.setForm({ reason: e.target.value }),
         { placeholder: ' ', error: reasonError, onEnter: submit })}
-      ${field('Successor', this.form.successor, (e) => this.setForm({ successor: e.target.value }),
+      ${field('Superseded by', this.form.superseded_by, (e) => this.setForm({ superseded_by: e.target.value }),
         { mono: true, upper: true, placeholder: ' ', onEnter: submit })}
       ${this.formError ? html`<p>${statusLine('error', this.formError)}</p>` : nothing}
       <nav class="right-align">

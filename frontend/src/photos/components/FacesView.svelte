@@ -1,5 +1,5 @@
 <script>
-  import { Alert, Button, Field, Heading, Icon, Input, LoadingSpinner, Text, toastManager } from '@immich/ui';
+  import { Alert, Button, Heading, Icon, Input, LoadingSpinner, Text, toastManager } from '@immich/ui';
   import {
     mdiAccountOutline,
     mdiAccountSearchOutline,
@@ -29,12 +29,10 @@
   let query = $state('');
   let filter = $state('all');
   let open = $state(null);
-  let labelDraft = $state('');
   let selI = $state(null);
   let selG = $state(null);
   let qI = $state('');
   let qG = $state('');
-  let label = $state('');
   let form = $state(null);
   const unloaded = new SvelteSet();
 
@@ -78,7 +76,7 @@
 
   function matches(g) {
     const p = people.get(g.gramps_handle);
-    return [nameOf(g), p?.gramps_id || '', g.label || '', ...g.links.map((l) => l.person_name || '')]
+    return [nameOf(g), p?.gramps_id || '', ...g.links.map((l) => l.person_name || '')]
       .join(' ')
       .toLowerCase()
       .includes(needle);
@@ -105,7 +103,6 @@
     return [...g.links].sort((a, b) => at(a) - at(b));
   }
 
-  const storedLabel = (g) => g.links.map((l) => l.label).find(Boolean) || '';
   const who = (l) => (l.resolved ? `${l.person_name || '(unnamed)'} (${l.account_label})` : 'deleted Immich person');
 
   function applyLinks(r) {
@@ -145,41 +142,16 @@
 
   function toggle(g) {
     open = open === g.gramps_handle ? null : g.gramps_handle;
-    if (open) labelDraft = storedLabel(g);
   }
 
   async function addLink() {
     if (!selI || !selG || busy) return;
     busy = 'link';
     try {
-      applyLinks(
-        await post('/faces/api/links', { gramps_handle: selG.id, immich_person_id: selI.id, label: label.trim() }),
-      );
+      applyLinks(await post('/faces/api/links', { gramps_handle: selG.id, immich_person_id: selI.id }));
       toastManager.primary(`Linked ${selI.label} to ${selG.label}`);
       selI = null;
       selG = null;
-      label = '';
-    } catch (e) {
-      toastManager.danger(e.message);
-    } finally {
-      busy = '';
-    }
-  }
-
-  async function saveLabel(g) {
-    const targets = ordered(g).filter((l) => l.resolved);
-    if (!targets.length || busy) return;
-    busy = 'link';
-    try {
-      let r = null;
-      for (const l of targets) {
-        r = await post('/faces/api/links', {
-          gramps_handle: g.gramps_handle,
-          immich_person_id: l.immich_person_id,
-          label: labelDraft.trim(),
-        });
-      }
-      applyLinks(r);
     } catch (e) {
       toastManager.danger(e.message);
     } finally {
@@ -271,18 +243,6 @@
         {#if live.length < ls.length}
           <Text size="small" color="danger">a link points at a deleted Immich person</Text>
         {/if}
-        <div class="flex items-end gap-2">
-          <Field label="Label" class="min-w-0 flex-1">
-            <Input bind:value={labelDraft} onkeydown={(e) => e.key === 'Enter' && saveLabel(g)} />
-          </Field>
-          <Button
-            size="small"
-            variant="outline"
-            color="secondary"
-            disabled={busy !== '' || !live.length || labelDraft.trim() === storedLabel(g)}
-            onclick={() => saveLabel(g)}>Save</Button
-          >
-        </div>
         <div class="flex items-center gap-2">
           {#if grampsUrl && p}
             <a
@@ -359,14 +319,6 @@
         disabled={busy === 'link'}
         onPick={(it) => (selG = it)}
       />
-      <div class="w-44">
-        <Input
-          bind:value={label}
-          placeholder="Label (optional)"
-          aria-label="Label"
-          onkeydown={(e) => e.key === 'Enter' && addLink()}
-        />
-      </div>
       <Button size="small" loading={busy === 'link'} disabled={!selI || !selG || busy !== ''} onclick={addLink}>
         Link
       </Button>
@@ -391,8 +343,8 @@
           bind:value={query}
           shape="round"
           leadingIcon={mdiMagnify}
-          placeholder="Search name, label or Gramps ID"
-          aria-label="Search name, label or Gramps ID"
+          placeholder="Search name or Gramps ID"
+          aria-label="Search name or Gramps ID"
           oninput={() => (open = null)}
         />
       </div>

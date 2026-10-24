@@ -21,6 +21,7 @@ from .sync import _accounts_or_503
 router = APIRouter(prefix="/photos", tags=["photos"])
 templates = Jinja2Templates(directory=Path(__file__).resolve().parents[1] / "templates")
 PLACES_KEY = "photos_places"
+PEOPLE_KEY = "person_links"
 
 
 def _state(request: Request):
@@ -41,8 +42,6 @@ def _config(st) -> dict:
         "gramps_url": cfg.gramps_public_url,
         "description_link": ui_settings.get_description_link(st.conn),
         "sync_tag": cfg.sync_tag,
-        "note_tag": cfg.note_sync_tag,
-        "place_prefix": cfg.place_tag_prefix,
         "accounts": [getattr(c, "label", "") for c in accounts],
         "browse_accounts": list(cfg.photos_accounts),
     }
@@ -109,8 +108,15 @@ async def people(request: Request) -> list[dict]:
 async def _places(request: Request, refresh: bool = False) -> list[dict]:
     st = _state(request)
     if refresh or st.caches.get(PLACES_KEY) is None:
-        st.caches[PLACES_KEY] = await photos.places(st.gramps, st.cfg.sync_immich)
+        st.caches[PLACES_KEY] = await photos.places(st.gramps)
     return st.caches[PLACES_KEY]
+
+
+async def _person_map(request: Request) -> dict[str, str]:
+    st = _state(request)
+    if st.caches.get(PEOPLE_KEY) is None:
+        st.caches[PEOPLE_KEY] = await sync_immich.load_person_map(st.gramps)
+    return st.caches[PEOPLE_KEY]
 
 
 async def _place_rows(request: Request) -> dict:
@@ -128,12 +134,12 @@ async def places(request: Request, refresh: bool = False) -> list[dict]:
 async def _load(request: Request, asset_id: str) -> dict:
     st = _state(request)
     return await photos.load(st.gramps, _accounts_or_503(request), st.conn, st.cfg.sync_immich,
-                             asset_id, await _place_rows(request))
+                             asset_id, await _place_rows(request), await _person_map(request))
 
 
 def _drop_caches(st) -> None:
     for key in list(st.caches):
-        if key != PLACES_KEY:
+        if key not in (PLACES_KEY, PEOPLE_KEY):
             st.caches.pop(key, None)
 
 
@@ -198,7 +204,7 @@ async def _run_sync(request: Request, asset_id: str) -> dict:
     if not st.cfg.sync_immich.enabled:
         raise HTTPException(503, "the Immich sync is disabled in this instance (sync.immich.enabled)")
     gen = sync_immich.sync_one_asset(st.gramps, _accounts_or_503(request), st.conn, st.cfg.sync_immich,
-                                     asset_id, update=True)
+                                     asset_id, update=True, person_map=await _person_map(request))
     result = await _recorded(request, "photos.sync", gen)
     return {**result, "photo": await _load(request, asset_id)}
 
@@ -209,7 +215,7 @@ async def pending(request: Request, asset_id: str) -> dict:
     st = _state(request)
     try:
         changes = await photos.pending_changes(st.gramps, _accounts_or_503(request), st.conn,
-                                               st.cfg.sync_immich, asset_id)
+                                               st.cfg.sync_immich, asset_id, await _person_map(request))
     except SyncError as exc:
         raise HTTPException(exc.status, exc.detail)
     except (GrampsError, ImmichError) as exc:
@@ -284,14 +290,13 @@ class LabelBody(BaseModel):
 
 @router.put("/api/photo/{asset_id}/versions/{member_id}/label")
 async def set_version_label(request: Request, asset_id: str, member_id: str, body: LabelBody) -> dict:
-    st = _state(request)
     accounts = _accounts_or_503(request)
     try:
         primary, client = await photos._primary_and_client(accounts, asset_id)
         _versions, member_ids = await photos._stack_members(client, primary)
         if member_id != asset_id and member_id not in member_ids:
             raise SyncError(404, "that asset is not a version of this photo")
-        await photos.set_version_label(accounts, st.conn, st.cfg.sync_immich, member_id, body.label)
+        await photos.set_version_label(accounts, member_id, body.label)
         return await _load(request, asset_id)
     except SyncError as exc:
         raise HTTPException(exc.status, exc.detail)

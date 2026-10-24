@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import io
 import sqlite3
-from datetime import datetime
 from typing import AsyncIterator
 
 from pypdf import PdfReader, PdfWriter
 
 from ..core.clients import GeminiClient, GeminiError, PaperlessClient
 from ..core.config import GeminiConfig, SyncPaperlessConfig
+from ..core.db import now
 from ..core.events import SyncEvent
 from .sync_paperless import _doc_gramps_id
 
@@ -94,7 +94,7 @@ def _set_ocr(conn: sqlite3.Connection, doc_id: int, model: str, chars: int) -> N
         conn.execute(
             "INSERT OR REPLACE INTO ocr_state (paperless_id, model, chars, ocr_at)"
             " VALUES (?, ?, ?, ?)",
-            (doc_id, model, chars, datetime.now().isoformat(timespec="seconds")))
+            (doc_id, model, chars, now()))
 
 
 async def pending_count(

@@ -53,6 +53,16 @@ ensure_env() {
     sed -i.bak "s#^TZ=.*#TZ=$tz#" .env && rm -f .env.bak
     echo "dev/.env: TZ=$tz (from this Mac)"
   fi
+  if [ -z "$(env_get PUBLIC_HOST '')" ]; then
+    local host=localhost
+    [ "$(env_get BIND_ADDRESS 127.0.0.1)" = 127.0.0.1 ] || host="$(scutil --get LocalHostName 2>/dev/null || hostname -s).local"
+    if grep -q '^PUBLIC_HOST=' .env; then
+      sed -i.bak "s#^PUBLIC_HOST=.*#PUBLIC_HOST=$host#" .env && rm -f .env.bak
+    else
+      printf 'PUBLIC_HOST=%s\n' "$host" >> .env
+    fi
+    echo "dev/.env: PUBLIC_HOST=$host"
+  fi
 }
 
 ensure_dirs() {
@@ -110,7 +120,7 @@ probe() { # probe URL -> http status or 000
 status() {
   docker compose ps --format 'table {{.Service}}\t{{.Status}}\t{{.Ports}}'
   local bind gp pp ip bp pw
-  bind="$(env_get BIND_ADDRESS 127.0.0.1)"; [ "$bind" = 0.0.0.0 ] && bind=localhost
+  bind="$(env_get PUBLIC_HOST localhost)"
   gp="$(env_get GRAMPS_PORT 5555)"; pp="$(env_get PAPERLESS_PORT 8000)"
   ip="$(env_get IMMICH_PORT 2283)"; bp="$(env_get BIFROST_PORT 8800)"; pw="$(env_get DEV_PASSWORD bifrost-dev)"
   echo

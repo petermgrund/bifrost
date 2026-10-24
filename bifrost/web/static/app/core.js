@@ -95,8 +95,6 @@ const ACTION_WORDS = {
   dates_updated: ['set', 'set', 'date'],
   descs_updated: ['update', 'updated', 'description'],
   links_updated: ['re-link', 're-linked', 'photo'],
-  linked: ['link', 'linked', 'place'],
-  located: ['locate', 'located', 'place'],
   tx_created: ['add', 'added', 'transcription'],
   tx_updated: ['rewrite', 'rewrote', 'transcription'],
   transcribed: ['transcribe', 'transcribed', 'doc'],
@@ -106,8 +104,11 @@ const ACTION_WORDS = {
   id_tags_written: ['write', 'wrote', 'ID tag', 'ID tags'],
   faces_linked: ['link', 'linked', 'face'],
   boxes_added: ['add', 'added', 'face box', 'face boxes'],
+  registered: ['register', 'registered', 'code'],
+  repointed: ['repoint', 'repointed', 'code'],
+  withdrawn: ['withdraw', 'withdrew', 'code'],
 };
-const QUIET = new Set(['skipped', 'tx_skipped', 'baselined', 'errors', 'unreadable', 'unmatched', 'in_place', 'unsynced']);
+const QUIET = new Set(['skipped', 'tx_skipped', 'baselined', 'errors', 'unreadable', 'attention']);
 
 export function summarize(counts, applied) {
   if (!counts) return '';

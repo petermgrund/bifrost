@@ -16,7 +16,6 @@ Your family-tree data itself always lives in Gramps, and documents/photos/videos
 * Sync documents in Paperless-ngx to Gramps Web as media objects, and keep their versions, titles, dates, and transcription text up to date.
 * Link Immich's face recognition to Gramps people by pairing each recognized face with its Gramps person once. Then, every synced photo gets face boxes in Gramps.
 * Old handwriting and faded print often defeat regular OCR. Bifrost sends the page to an AI model and writes the transcription back into Paperless and Gramps.
-* Link Gramps places to OpenStreetMap, with coordinates, by scan or by hand.
 
 Developer's comment: I am developing Bifrost to assist me in my genealogical documentation workflow. Therefore, you may not be interested in using all of the features. Feel free to pick and choose which tools you'd like to use. At a minimum, you need to configure Gramps Web and Paperless-ngx.
 
@@ -26,15 +25,14 @@ Copy `config.example.yaml` to `config.yaml` and fill it in. Make sure you create
 
 * Dev: `python -m venv venv && venv/bin/pip install -r requirements.txt`, then `venv/bin/uvicorn bifrost.web.app:app --reload --port 8800`. The `BIFROST_CONFIG` env var overrides the config path.
 * Docker: edit the host-side bind mounts in `docker-compose.yml` to match your machine. Then `docker compose up -d --build`. Create `config.yaml` before the first `compose up`.
-* Photos page: its Svelte source (built on Immich's `@immich/ui`) is in `frontend/`, and the built bundle in `bifrost/web/static/photos/` is committed, so Node is only needed after changing it: `cd frontend && npm ci && npm run build`.
-
-`python -m bifrost.cli doctor` checks the database and the Gramps/Paperless connections. `python -m bifrost.cli photos-handover` moves photo facts from Immich tags and Bifrost's own tables onto the Gramps media objects once (`--dry-run`, `--apply decisions.csv`, `--cleanup-tags`).
+* Paperless pushes changes to Bifrost through a workflow. Triggers Document added and Document updated, each filtered to documents with any of the sync tags or the transcription tag, action Webhook, URL `http://<bifrost>:8800/sync/api/paperless/webhook`, a parameter `doc_id` with value `{{doc_id}}`, and a header `X-Bifrost-Token` set to `sync.paperless.webhook_token`.
+* `python -m bifrost.cli doctor` checks the database, the Gramps/Paperless connections and whether the register agrees with Gramps. `python -m bifrost.cli reconcile` lists the differences and `reconcile --apply` repairs the register.
 
 At the moment Bifrost has no authentication. Keep it on a trusted network, bind it to localhost, or put an authenticating reverse proxy in front.
 
 # API
 
-`/api/v1/code/{code}` for a code's ledger entry and `/api/v1/export` for the ledger, collections, photo links and person links.
+`/api/v1/code/{code}` for a code's ledger entry and `/api/v1/export` for the ledger, collections and photo links.
 
 # Feature Requests
 

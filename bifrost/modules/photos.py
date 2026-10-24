@@ -5,175 +5,22 @@ from __future__ import annotations
 import asyncio
 import re
 import sqlite3
-from datetime import date, datetime, timezone
 from typing import AsyncIterator
 
+from ..core import dates
 from ..core import settings as ui_settings
 from ..core.clients import GrampsClient, ImmichClient
 from ..core.clients.immich import ImmichError
 from ..core.config import SyncImmichConfig
+from ..core.db import now as _now
 from ..core.events import SyncEvent
-from . import codes, photo_collections
+from . import photo_collections
 from . import sync_immich as si
 from .sync_immich import SyncError, compose_description
-from .sync_paperless import format_gramps_date
 
 PAGE_SIZE = 24
-PRECISIONS = ("exact", "month", "year")
-MODIFIERS = ("regular", "about", "before", "after", "decade", "span")
-RANGES = ("decade", "span")
-SPAN_MAX = 999
-QUALITIES = ("regular", "estimated", "calculated")
-MODIFIER_TAGS = {"about": si.TAG_DATE_APPROXIMATE, "before": si.TAG_DATE_BEFORE,
-                 "after": si.TAG_DATE_AFTER, "decade": si.TAG_DATE_DECADE}
-QUALITY_TAGS = {"calculated": si.TAG_DATE_CALCULATED, "estimated": si.TAG_DATE_ESTIMATED}
-PRECISION_TAGS = {"year": si.TAG_DATE_YEAR, "month": si.TAG_DATE_MONTH}
-DATE_TAGS = set(MODIFIER_TAGS.values()) | set(QUALITY_TAGS.values()) | set(PRECISION_TAGS.values())
-CANONICAL = {
-    si.TAG_SYNC_DATE: "Sync/Date", si.TAG_SYNC_DESCRIPTION: "Sync/Description",
-    si.TAG_SYNC_LOCATION: "Sync/Location", si.TAG_SYNC_MANUAL_FACES: "Sync/ManualFaces",
-    si.TAG_DATE_APPROXIMATE: "Date/Approximate", si.TAG_DATE_BEFORE: "Date/Before",
-    si.TAG_DATE_AFTER: "Date/After", si.TAG_DATE_ESTIMATED: "Date/Estimated",
-    si.TAG_DATE_CALCULATED: "Date/Calculated", si.TAG_DATE_YEAR: "Date/Year",
-    si.TAG_DATE_MONTH: "Date/Month", si.TAG_DATE_DECADE: "Date/Decade",
-}
-_DATE_RE = re.compile(r"^\s*(\d{4})(?:-(\d{1,2})(?:-(\d{1,2}))?)?\s*$")
 _LINK_RE = re.compile(r"^https?://\S+$", re.IGNORECASE)
 LINK_MAX = 2000
-EMPTY_DATE = {"_class": "Date", "dateval": [0, 0, 0, False], "modifier": 0, "quality": 0, "text": ""}
-_MODIFIER_NAMES = {v: k for k, v in si._MODIFIERS.items()}
-_QUALITY_NAMES = {v: k for k, v in si._QUALITIES.items()}
-
-
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
-
-
-def parse_date_value(text: str) -> tuple[str, str] | None:
-    """'1923', '1923-06' or '1923-06-15' -> (ISO date, implied precision)"""
-    m = _DATE_RE.match(text or "")
-    if not m:
-        return None
-    y, mo, d = m.group(1), m.group(2), m.group(3)
-    try:
-        value = date(int(y), int(mo or 1), int(d or 1)).isoformat()
-    except ValueError:
-        return None
-    return value, ("exact" if d else "month" if mo else "year")
-
-
-def effective_precision(form: dict) -> str:
-    """About dates fall back to the month, as build_gramps_date does; decades and spans are years"""
-    if form.get("modifier") in RANGES:
-        return "year"
-    precision = form.get("precision") or "exact"
-    if form.get("modifier") == "about" and precision == "exact":
-        return "month"
-    return precision
-
-
-def gramps_date(form: dict) -> dict:
-    y, m, d = (int(x) for x in form["value"].split("-"))
-    quality = si._QUALITIES[form.get("quality") or "regular"]
-    if form.get("modifier") in RANGES:
-        span = (form.get("minus") or 0, form.get("plus") or 0)
-        return si.range_date(*si.year_range(form["modifier"], y, span), quality)
-    precision = effective_precision(form)
-    if precision == "year":
-        d, m = 0, 0
-    elif precision == "month":
-        d = 0
-    return {"_class": "Date", "dateval": [d, m, y, False],
-            "modifier": si._MODIFIERS[form.get("modifier") or "regular"],
-            "quality": quality, "text": ""}
-
-
-def date_display(form: dict | None) -> str:
-    return format_gramps_date(gramps_date(form)) if form else ""
-
-
-def gramps_date_text(d: dict | None) -> str:
-    """A Gramps date as Gramps Web shows it, text-only dates included"""
-    if not d:
-        return ""
-    if d.get("modifier") == si._MODIFIERS["textonly"] or format_gramps_date(d) == "(none)":
-        return (d.get("text") or "").strip()
-    return format_gramps_date(d)
-
-
-def date_from_gramps(d: dict | None) -> tuple[dict | None, str | None]:
-    """(editor form, None) for a Gramps date the form can hold, (None, its text) for one it cannot,
-    (None, None) for no date"""
-    dv = list((d or {}).get("dateval") or [])
-    text = gramps_date_text(d)
-    if not text:
-        return None, None
-    modifier, quality = d.get("modifier") or 0, d.get("quality") or 0
-    if (len(dv) < 4 or dv[3] or d.get("calendar") or d.get("newyear") or dv[2] <= 0
-            or modifier not in (0, 1, 2, 3, 4) or quality not in _QUALITY_NAMES):
-        return None, text
-    form = {"quality": _QUALITY_NAMES[quality]}
-    if modifier == 4:
-        if len(dv) < 8 or dv[7] or any(dv[i] for i in (0, 1, 4, 5)) or not 0 <= dv[6] - dv[2] <= SPAN_MAX:
-            return None, text
-        start, stop = dv[2], dv[6]
-        form.update({"value": f"{start:04d}-01-01", "precision": "year"})
-        if start % 10 == 0 and stop == start + 9:
-            form["modifier"] = "decade"
-        else:
-            form.update({"modifier": "span", "minus": 0, "plus": stop - start})
-    else:
-        day, month, year = dv[0], dv[1], dv[2]
-        name = _MODIFIER_NAMES[modifier]
-        if name == "about" and day:
-            return None, text
-        try:
-            value = date(year, month or 1, day or 1).isoformat()
-        except ValueError:
-            return None, text
-        form.update({"value": value, "modifier": name,
-                     "precision": "exact" if day else "month" if month else "year"})
-    form["display"] = date_display(form)
-    return form, None
-
-
-def date_form(asset: dict) -> dict | None:
-    """The editor's date fields from an asset's date and tags; None until a date is curated"""
-    exif = asset.get("exifInfo") or {}
-    dt_str = asset.get("localDateTime") or exif.get("dateTimeOriginal")
-    if not dt_str:
-        return None
-    tags = si.tag_values(asset)
-    modifier, span = si.date_modifier(tags)
-    if si.TAG_SYNC_DATE not in tags and not tags & DATE_TAGS and not span:
-        return None
-    try:
-        dt = datetime.fromisoformat(str(dt_str).replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    form = {
-        "value": dt.strftime("%Y-%m-%d"),
-        "precision": next((p for p, t in PRECISION_TAGS.items() if t in tags), "exact"),
-        "modifier": modifier,
-        "quality": next((q for q, t in QUALITY_TAGS.items() if t in tags), "regular"),
-    }
-    if span:
-        form["minus"], form["plus"] = span
-    form["precision"] = effective_precision(form)
-    form["display"] = date_display(form)
-    return form
-
-
-def date_tags(form: dict) -> set[str]:
-    tags = set()
-    for table, key in ((MODIFIER_TAGS, "modifier"), (QUALITY_TAGS, "quality"),
-                       (PRECISION_TAGS, "precision")):
-        tag = table.get(form.get(key) or "")
-        if tag:
-            tags.add(tag)
-    if form.get("modifier") == "span":
-        tags.add(si.span_tag(form.get("minus") or 0, form.get("plus") or 0))
-    return tags
 
 
 def validate_link(url: str) -> str:
@@ -199,38 +46,26 @@ def validate_form(form: dict) -> dict:
     }
     d = form.get("date")
     if d:
-        parsed = parse_date_value(d.get("value") or "")
+        parsed = dates.parse_date_value(d.get("value") or "")
         if not parsed:
             raise ValueError(f"unreadable date {d.get('value')!r}")
         picked = {"precision": d.get("precision") or parsed[1],
                   "modifier": d.get("modifier") or "regular",
                   "quality": d.get("quality") or "regular"}
-        for key, allowed in (("precision", PRECISIONS), ("modifier", MODIFIERS),
-                             ("quality", QUALITIES)):
+        for key, allowed in (("precision", dates.PRECISIONS), ("modifier", dates.FORM_MODIFIERS),
+                             ("quality", tuple(dates.QUALITIES))):
             if picked[key] not in allowed:
                 raise ValueError(f"bad {key} {picked[key]!r}")
-        if picked["modifier"] in RANGES:
+        if picked["modifier"] in dates.RANGES:
             picked["precision"] = "year"
         if picked["modifier"] == "span":
             for key in ("minus", "plus"):
                 value = d.get(key) or 0
-                if not isinstance(value, int) or not 0 <= value <= SPAN_MAX:
+                if not isinstance(value, int) or not 0 <= value <= dates.SPAN_MAX:
                     raise ValueError(f"bad {key} {value!r}")
                 picked[key] = value
         out["date"] = {"value": parsed[0], **picked}
     return out
-
-
-def spelled(value: str, cfg: SyncImmichConfig) -> str:
-    """The spelling a missing tag is created with"""
-    low = value.lower()
-    if low in CANONICAL:
-        return CANONICAL[low]
-    if low == cfg.sync_tag.lower():
-        return cfg.sync_tag
-    if low == cfg.note_sync_tag.lower():
-        return cfg.note_sync_tag
-    return "/".join(seg[:1].upper() + seg[1:] for seg in value.split("/"))
 
 
 async def apply_tags(client: ImmichClient, asset_id: str, add: dict[str, str],
@@ -255,7 +90,7 @@ def registered_gid(conn: sqlite3.Connection, asset_id: str,
     wanted = [asset_id, *member_ids]
     rows = conn.execute(
         "SELECT gramps_id, source_id FROM minted_media WHERE source_system='immich' "
-        f"AND source_id IN ({','.join('?' * len(wanted))})", wanted).fetchall()
+        f"AND withdrawn_at IS NULL AND source_id IN ({','.join('?' * len(wanted))})", wanted).fetchall()
     for r in rows:
         if r["source_id"] == asset_id:
             return r["gramps_id"]
@@ -275,27 +110,21 @@ def browse_accounts(accounts: list[ImmichClient], cfg: SyncImmichConfig) -> list
     return chosen
 
 
-def labels_for(conn: sqlite3.Connection, asset_ids: list[str]) -> dict[str, str]:
-    if not asset_ids:
-        return {}
-    rows = conn.execute(
-        f"SELECT asset_id, label FROM version_labels WHERE asset_id IN ({','.join('?' * len(asset_ids))})",
-        list(asset_ids)).fetchall()
-    return {r["asset_id"]: r["label"] for r in rows}
+async def labels_for(client: ImmichClient, asset_ids: list[str]) -> dict[str, str]:
+    """The version labels the assets' Immich records carry"""
+    async def one(aid: str) -> tuple[str, str]:
+        try:
+            record = (await client.get_asset_metadata(aid)).get(si.METADATA_KEY) or {}
+        except ImmichError:
+            record = {}
+        return aid, (record.get("version_label") or "").strip()
+    found = await asyncio.gather(*(one(aid) for aid in dict.fromkeys(asset_ids)))
+    return {aid: label for aid, label in found if label}
 
 
-async def set_version_label(accounts: list[ImmichClient], conn: sqlite3.Connection,
-                            cfg: SyncImmichConfig, asset_id: str, label: str) -> None:
-    """Keep a version's note in Bifrost and mirror it into its Immich record"""
+async def set_version_label(accounts: list[ImmichClient], asset_id: str, label: str) -> None:
+    """Keep a version's name in its Immich record"""
     label = (label or "").strip()
-    with conn:
-        if label:
-            conn.execute(
-                "INSERT INTO version_labels (asset_id, label, updated_at) VALUES (?, ?, ?) "
-                "ON CONFLICT(asset_id) DO UPDATE SET label=excluded.label, updated_at=excluded.updated_at",
-                (asset_id, label, _now()))
-        else:
-            conn.execute("DELETE FROM version_labels WHERE asset_id=?", (asset_id,))
     asset = await si._merged_one(accounts, asset_id)
     client, _err = await si.owner_client(accounts, asset)
     record = dict((await client.get_asset_metadata(asset_id)).get(si.METADATA_KEY) or {})
@@ -412,7 +241,7 @@ async def copy_faces(client: ImmichClient, source: dict, target: dict) -> int:
 
 
 async def match_version(client: ImmichClient, cfg: SyncImmichConfig, source: dict,
-                        target: dict, conn: sqlite3.Connection | None = None) -> list[str]:
+                        target: dict) -> list[str]:
     """Copy the shared metadata from source to target; returns what changed"""
     before = drift(version_fields(source, cfg), version_fields(target, cfg))
     src, dst = version_fields(source, cfg), version_fields(target, cfg)
@@ -422,8 +251,8 @@ async def match_version(client: ImmichClient, cfg: SyncImmichConfig, source: dic
     remove = {k for k in dst["tags"] if k not in src["tags"]}
     await apply_tags(client, target["id"], add, remove)
     record = dict((await client.get_asset_metadata(source["id"])).get(si.METADATA_KEY) or {})
+    own_label = (await client.get_asset_metadata(target["id"])).get(si.METADATA_KEY, {}).get("version_label")
     record.pop("version_label", None)
-    own_label = si.version_label(conn, target["id"]) if conn is not None else None
     if own_label:
         record["version_label"] = own_label
     if record:
@@ -468,7 +297,7 @@ async def add_version(gramps: GrampsClient, accounts: list[ImmichClient], conn: 
     else:
         await client.create_stack([asset_id] + others + [new_id])
         main_id = asset_id
-    await match_all(accounts, client, cfg, conn, main_id, [asset_id, *others, new_id])
+    await match_all(accounts, client, cfg, main_id, [asset_id, *others, new_id])
     return await load(gramps, accounts, conn, cfg, main_id, place_rows)
 
 
@@ -499,7 +328,7 @@ async def match_member(gramps: GrampsClient, accounts: list[ImmichClient], conn:
     if member_id not in member_ids or member_id == asset_id:
         raise SyncError(404, "that asset is not a version of this photo")
     member = await si._merged_one(accounts, member_id)
-    await match_version(client, cfg, primary, member, conn)
+    await match_version(client, cfg, primary, member)
     return await load(gramps, accounts, conn, cfg, asset_id, place_rows)
 
 
@@ -550,7 +379,7 @@ async def promote(accounts: list[ImmichClient], conn: sqlite3.Connection, cfg: S
     if member_id not in member_ids or member_id == asset_id:
         raise SyncError(404, "that asset is not a version of this photo")
     member = await si._merged_one(accounts, member_id)
-    await match_version(client, cfg, primary, member, conn)
+    await match_version(client, cfg, primary, member)
     await client.update_stack(primary["stack"]["id"], member_id)
     photo_collections.move_items(conn, asset_id, member_id)
     gid = registered_gid(conn, asset_id, member_ids)
@@ -609,7 +438,7 @@ def _place_info(gid: str, place_rows: dict | None, place: dict | None = None) ->
     known = (place_rows or {}).get(gid)
     name = known["name"] if known else si.place_label(place) if place else gid
     return {"gramps_id": gid, "name": name, "hierarchy": known["hierarchy"] if known else [],
-            "tagged": bool(known and known.get("tagged")), "known": bool(known)}
+            "known": bool(known)}
 
 
 async def _gramps_side(gramps: GrampsClient, gid: str) -> tuple[dict | None, list[dict], list[dict], str | None]:
@@ -627,7 +456,8 @@ async def _gramps_side(gramps: GrampsClient, gid: str) -> tuple[dict | None, lis
 
 
 async def load(gramps: GrampsClient, accounts: list[ImmichClient], conn: sqlite3.Connection,
-               cfg: SyncImmichConfig, asset_id: str, place_rows: dict[str, dict] | None = None) -> dict:
+               cfg: SyncImmichConfig, asset_id: str, place_rows: dict[str, dict] | None = None,
+               person_map: dict[str, str] | None = None) -> dict:
     """The editor's record for one asset, its facts from the Gramps media object once it has one;
     a stack variant opens as its main image"""
     asset = await si._merged_one(accounts, asset_id)
@@ -643,7 +473,7 @@ async def load(gramps: GrampsClient, accounts: list[ImmichClient], conn: sqlite3
         if member != asset_id:
             photo_collections.move_items(conn, member, asset_id)
     gid = registered_gid(conn, asset_id, member_ids)
-    labels = labels_for(conn, [asset_id, *member_ids])
+    labels = await labels_for(client, [asset_id, *member_ids])
     if versions is not None:
         details = await client.get_assets_many([m for m in member_ids if m != asset_id])
         mine = version_fields(asset, cfg)
@@ -667,19 +497,17 @@ async def load(gramps: GrampsClient, accounts: list[ImmichClient], conn: sqlite3
         media, notes, holders, gramps_error = await _gramps_side(gramps, gid)
     if media is not None:
         title = media.get("desc") or ""
-        date_form_, date_readonly = date_from_gramps(media.get("date"))
+        date_form_, date_readonly = dates.date_from_gramps(media.get("date"))
         notes_text = si.note_text(si.first_media_note(notes)).strip()
         links = si.media_links(media)
         places = [_place_info(h.get("gramps_id") or "", place_rows, h) for h in holders if h.get("gramps_id")]
         change = media.get("change")
     else:
-        date_form_ = None if gramps_error else date_form(asset)
+        date_form_ = None
         notes_text, links = ("", []) if gramps_error else si.leftover_rows(conn, asset_id)
-        place_gid = None if gramps_error else si.place_tag_value(asset, cfg)
-        if place_gid:
-            places = [_place_info(place_gid, place_rows)]
-    people_links = si.person_links_map(conn)
-    people = [{"id": p["id"], "name": p.get("name") or "", "linked": p["id"] in people_links}
+    if person_map is None:
+        person_map = await si.load_person_map(gramps)
+    people = [{"id": p["id"], "name": p.get("name") or "", "linked": p["id"] in person_map}
               for p in asset.get("people") or [] if p.get("id")]
     return {
         "asset_id": asset_id,
@@ -715,7 +543,8 @@ async def load(gramps: GrampsClient, accounts: list[ImmichClient], conn: sqlite3
 
 
 async def pending_changes(gramps: GrampsClient, accounts: list[ImmichClient],
-                          conn: sqlite3.Connection, cfg: SyncImmichConfig, asset_id: str) -> list[str]:
+                          conn: sqlite3.Connection, cfg: SyncImmichConfig, asset_id: str,
+                          person_map: dict[str, str] | None = None) -> list[str]:
     """What a sync would change in Gramps for a photo already there; [] when nothing"""
     asset = await si._merged_one(accounts, asset_id)
     client, _err = await si.owner_client(accounts, asset)
@@ -732,9 +561,10 @@ async def pending_changes(gramps: GrampsClient, accounts: list[ImmichClient],
         if ev.action == "would_update":
             changes |= set((ev.data or {}).get("cols") or [ev.entity]) - {"description"}
     if client:
+        if person_map is None:
+            person_map = await si.load_person_map(gramps)
         async for ev in si.link_asset_faces(gramps, client, asset, asset_id, media["handle"], gid,
-                                            si.person_links_map(conn), si.new_face_results(),
-                                            apply=False):
+                                            person_map, si.new_face_results(), apply=False):
             if ev.action in ("created", "updated"):
                 changes.add("faces")
     return sorted(changes)
@@ -818,9 +648,6 @@ async def save(gramps: GrampsClient, accounts: list[ImmichClient], conn: sqlite3
         media, current_notes, holders, error = await _gramps_side(gramps, gid)
         if media is None:
             raise SyncError(502, error)
-        extra = codes.notes_of(conn, gid) if form["gramps_id"] else ""
-        if extra and extra not in notes:
-            notes = f"{notes}\n\n{extra}" if notes else extra
 
     title = media.get("desc") or ""
     changed: dict = {}
@@ -828,14 +655,14 @@ async def save(gramps: GrampsClient, accounts: list[ImmichClient], conn: sqlite3
     if desc != title:
         media["desc"] = desc
         changed["title"] = desc
-    had_form, readonly = date_from_gramps(media.get("date"))
+    had_form, readonly = dates.date_from_gramps(media.get("date"))
     if form["date"]:
-        new_date = gramps_date(form["date"])
-        if not si.dates_equal(media.get("date"), new_date):
+        new_date = dates.gramps_date(form["date"])
+        if not dates.dates_equal(media.get("date"), new_date):
             media["date"] = new_date
-            changed["date"] = format_gramps_date(new_date)
+            changed["date"] = dates.format_gramps_date(new_date)
     elif had_form and not readonly:
-        media["date"] = dict(EMPTY_DATE)
+        media["date"] = dict(dates.EMPTY_DATE)
         changed["date"] = "(none)"
     if si.set_media_links(media, form["links"]):
         changed["links"] = len(form["links"])
@@ -877,7 +704,7 @@ async def save(gramps: GrampsClient, accounts: list[ImmichClient], conn: sqlite3
             if ev.kind == "item" and ev.action != "skipped":
                 yield ev
     if member_ids:
-        await match_all(accounts, client, cfg, conn, asset_id, member_ids)
+        await match_all(accounts, client, cfg, asset_id, member_ids)
 
     yield SyncEvent(kind="summary", entity="media", gramps_id=gid, title=media["desc"],
                     detail="created" if created else "saved",
@@ -886,7 +713,7 @@ async def save(gramps: GrampsClient, accounts: list[ImmichClient], conn: sqlite3
 
 
 async def match_all(accounts: list[ImmichClient], client: ImmichClient, cfg: SyncImmichConfig,
-                    conn: sqlite3.Connection, main_id: str, member_ids: list[str]) -> int:
+                    main_id: str, member_ids: list[str]) -> int:
     """Every other version takes the main image's metadata; returns how many changed"""
     others = [m for m in member_ids if m != main_id]
     if not others:
@@ -898,19 +725,9 @@ async def match_all(accounts: list[ImmichClient], client: ImmichClient, cfg: Syn
         detail = details.get(member_id)
         if detail is None:
             continue
-        if await match_version(client, cfg, main, detail, conn):
+        if await match_version(client, cfg, main, detail):
             changed += 1
     return changed
-
-
-async def _wait_for_date(client: ImmichClient, asset_id: str, value: str,
-                         tries: int = 15, pause: float = 0.2) -> None:
-    """Immich recomputes localDateTime in the background after a date change"""
-    for _ in range(tries):
-        asset = await client.get_asset(asset_id)
-        if (asset.get("localDateTime") or "")[:10] == value:
-            return
-        await asyncio.sleep(pause)
 
 
 async def _recent(client: ImmichClient, page: int, person: str) -> dict:
@@ -944,7 +761,7 @@ async def _card_context(accounts: list[ImmichClient], conn: sqlite3.Connection):
     """Stack membership and the register, plus a card builder that uses them"""
     stacks, members_of = await _stack_index(accounts)
     minted = {r["source_id"]: r["gramps_id"] for r in conn.execute(
-        "SELECT gramps_id, source_id FROM minted_media WHERE source_system='immich'")}
+        "SELECT gramps_id, source_id FROM minted_media WHERE source_system='immich' AND withdrawn_at IS NULL")}
 
     def card(a: dict) -> dict:
         aid = a["id"]
@@ -1010,8 +827,8 @@ async def search(accounts: list[ImmichClient], conn: sqlite3.Connection,
     seen: set[str] = set()
     if mode == "synced":
         rows = conn.execute(
-            "SELECT gramps_id, source_id, title FROM minted_media WHERE source_system='immich' "
-            "ORDER BY minted_at DESC, gramps_id LIMIT ? OFFSET ?",
+            "SELECT gramps_id, source_id FROM minted_media WHERE source_system='immich' "
+            "AND withdrawn_at IS NULL ORDER BY minted_at DESC, gramps_id LIMIT ? OFFSET ?",
             (PAGE_SIZE + 1, (page - 1) * PAGE_SIZE)).fetchall()
         next_page = page + 1 if len(rows) > PAGE_SIZE else None
         rows = rows[:PAGE_SIZE]
@@ -1022,7 +839,7 @@ async def search(accounts: list[ImmichClient], conn: sqlite3.Connection,
             if aid in seen:
                 continue
             seen.add(aid)
-            a = details.get(aid) or {"id": aid, "originalFileName": r["title"] or "", "_missing": True}
+            a = details.get(aid) or {"id": aid, "originalFileName": "", "_missing": True}
             if owners is not None and a.get("ownerId") and a["ownerId"] not in owners:
                 continue
             items.append(card(a))
@@ -1051,20 +868,21 @@ async def search(accounts: list[ImmichClient], conn: sqlite3.Connection,
     return {"items": [i for i in items if not i["is_child"]], "nextPage": next_page}
 
 
-async def places(gramps: GrampsClient, cfg: SyncImmichConfig) -> list[dict]:
-    """Every Gramps place with its hierarchy, Place-tagged ones first"""
+def hierarchy(place: dict, by_handle: dict[str, dict]) -> list[str]:
+    """Place names, innermost first"""
+    names, seen, cur = [], set(), place
+    while cur and cur["handle"] not in seen:
+        seen.add(cur["handle"])
+        names.append((cur.get("name") or {}).get("value") or cur.get("gramps_id") or "")
+        refs = cur.get("placeref_list") or []
+        cur = by_handle.get(refs[0].get("ref")) if refs else None
+    return [n for n in names if n]
+
+
+async def places(gramps: GrampsClient) -> list[dict]:
+    """Every Gramps place with its hierarchy, by name"""
     rows = await gramps.list_places_full()
     by_handle = {p["handle"]: p for p in rows}
-
-    def hierarchy(place: dict) -> list[str]:
-        names, seen, cur = [], set(), place
-        while cur and cur["handle"] not in seen:
-            seen.add(cur["handle"])
-            names.append((cur.get("name") or {}).get("value") or cur.get("gramps_id") or "")
-            refs = cur.get("placeref_list") or []
-            cur = by_handle.get(refs[0].get("ref")) if refs else None
-        return [n for n in names if n]
-
     out = []
     for p in rows:
         gid = p.get("gramps_id") or ""
@@ -1073,11 +891,9 @@ async def places(gramps: GrampsClient, cfg: SyncImmichConfig) -> list[dict]:
         out.append({
             "gramps_id": gid,
             "name": (p.get("name") or {}).get("value") or gid,
-            "hierarchy": hierarchy(p),
-            "tagged": bool(cfg.place_tag_handle and cfg.place_tag_handle in (p.get("tag_list") or [])),
-            "has_coords": bool((p.get("lat") or "").strip() and (p.get("long") or "").strip()),
+            "hierarchy": hierarchy(p, by_handle),
         })
-    out.sort(key=lambda r: (not r["tagged"], r["name"].lower()))
+    out.sort(key=lambda r: r["name"].lower())
     return out
 
 

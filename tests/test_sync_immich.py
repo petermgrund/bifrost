@@ -7,7 +7,7 @@ from bifrost.core.clients.gramps import GrampsClient, GrampsError
 from bifrost.core.clients.immich import ImmichError
 from bifrost.core.config import SyncImmichConfig
 from bifrost.modules import sync_immich
-from bifrost.modules.sync_immich import SyncError, person_links_map, translate_path
+from bifrost.modules.sync_immich import PERSON_ATTR, SyncError, translate_path
 
 MAPPINGS = (
     ("/usr/src/app/upload/upload/", "immich/"),
@@ -33,41 +33,6 @@ class TestTranslatePath:
         with pytest.raises(SyncError) as exc:
             translate_path("/somewhere/else/x.jpg", MAPPINGS)
         assert exc.value.status == 400
-
-
-class TestDateCodePins:
-    def test_modifier_codes(self):
-        assert sync_immich._MODIFIERS == {
-            "regular": 0, "before": 1, "after": 2, "about": 3,
-            "range": 4, "span": 5, "textonly": 6,
-        }
-
-    def test_quality_codes(self):
-        assert sync_immich._QUALITIES == {"regular": 0, "estimated": 1, "calculated": 2}
-
-
-class TestMergeTagValues:
-    def test_plain_union(self):
-        assert sync_immich.merge_tag_values(
-            {"sync/gramps", "sync/date"}, {"sync/description"},
-        ) == {"sync/gramps", "sync/date", "sync/description"}
-
-    def test_owner_wins_modifier_group(self):
-        got = sync_immich.merge_tag_values(
-            {"date/before"}, {"date/after", "sync/location"})
-        assert got == {"date/before", "sync/location"}
-
-    def test_owner_wins_precision_group(self):
-        got = sync_immich.merge_tag_values({"date/year"}, {"date/month"})
-        assert got == {"date/year"}
-
-    def test_other_fills_group_owner_lacks(self):
-        got = sync_immich.merge_tag_values(
-            {"date/approximate"}, {"date/estimated", "date/month"})
-        assert got == {"date/approximate", "date/estimated", "date/month"}
-
-    def test_empty_owner_keeps_other(self):
-        assert sync_immich.merge_tag_values(set(), {"date/before"}) == {"date/before"}
 
 
 class FakeImmich:
@@ -235,6 +200,15 @@ class FakeGramps:
         self.deleted_notes = []
         self.checksums = {}
         self.unreadable = set()
+        self.list_people_calls = 0
+        self.list_ids_calls = 0
+
+    async def list_people(self, keys=None):
+        self.list_people_calls += 1
+        return list(self.people.values())
+
+    async def list_media(self, keys=None):
+        return list(self.media.values())
 
     async def get_media_by_gramps_id(self, gid, backlinks=False):
         media = self.media.get(gid)
@@ -279,6 +253,7 @@ class FakeGramps:
         self.updated_notes.append(obj)
 
     async def list_media_gramps_ids(self):
+        self.list_ids_calls += 1
         return set(self.media)
 
     async def create_media(self, obj):
@@ -297,7 +272,11 @@ class FakeGramps:
     async def update_place(self, handle, place_obj):
         self.updated_places.append(place_obj)
 
-    async def get_person(self, handle):
+    async def get_person(self, handle, ok_404=False):
+        if handle not in self.people:
+            if ok_404:
+                return None
+            raise GrampsError(f"GET /people/{handle} → 404")
         return self.people[handle]
 
     async def get_media_backlinks(self, handle):
@@ -344,11 +323,17 @@ def titled(a, title="t"):
     return a
 
 
-def mint(conn, gid, source_id, title="t"):
+def mint(conn, gid, source_id, system="immich"):
     conn.execute(
-        "INSERT INTO minted_media (gramps_id, source_system, source_id, title, minted_at) "
-        "VALUES (?, 'immich', ?, ?, '2026-01-01')", (gid, source_id, title))
+        "INSERT INTO minted_media (gramps_id, source_system, source_id, created_at, minted_at) "
+        "VALUES (?, ?, ?, '2026-01-01', '2026-01-01')", (gid, system, source_id))
     conn.commit()
+
+
+def linked(handle, *person_ids, media_list=()):
+    """A Gramps person carrying Immich Person ID attributes"""
+    return {"handle": handle, "media_list": list(media_list),
+            "attribute_list": [{"type": PERSON_ATTR, "value": pid} for pid in person_ids]}
 
 
 class TestPreviews:
@@ -415,17 +400,11 @@ class TestSyncAssetsScan:
     @pytest.fixture
     def conn(self, tmp_path):
         c = db.connect(tmp_path / "t.db")
-        c.execute(
-            "INSERT INTO person_links (gramps_handle, immich_person_id, label, created_at) "
-            "VALUES ('h-ed', 'uuid-ed', 'Ed', 't')")
         yield c
         c.close()
 
-    def _mint(self, conn, gid, source_id, title="t"):
-        conn.execute(
-            "INSERT INTO minted_media (gramps_id, source_system, source_id, title, minted_at) "
-            "VALUES (?, 'immich', ?, ?, '2026-01-01')", (gid, source_id, title))
-        conn.commit()
+    def _mint(self, conn, gid, source_id):
+        mint(conn, gid, source_id)
 
     def test_progress_is_one_running_count_over_every_item(self, conn):
         self._mint(conn, "K1", "a2")
@@ -448,6 +427,18 @@ class TestSyncAssetsScan:
         creates = actions(events, "would_create")
         assert [e.source_id for e in creates] == ["a1"]
         assert creates[0].title == "img1.jpg"
+        assert creates[0].data == {"cols": {"title": "img1.jpg"}}
+
+    def test_a_batch_lists_people_and_ids_once(self, conn):
+        im = FakeImmich(assets={"a1": asset("a1", "x.jpg"), "a2": asset("a2", "y.jpg")}, tagged={"a1", "a2"})
+        gr = FakeGramps(people={"h-ed": linked("h-ed", "uuid-ed")})
+        preview = run_scan(im, gr, conn)
+        assert (gr.list_people_calls, gr.list_ids_calls) == (0, 0)
+        run_scan(im, gr, conn, apply=True)
+        assert len(gr.created) == 2
+        assert (gr.list_people_calls, gr.list_ids_calls) == (1, 1)
+        assert len({m["gramps_id"] for m in gr.created}) == 2
+        assert len(preview) > 0
 
     def test_untagged_is_not_a_candidate(self, conn):
         a = asset("a1")
@@ -775,17 +766,6 @@ class TestSyncAssetsScan:
             run_scan(NoStacksImmich(), FakeGramps(), conn)
         assert exc.value.status == 502
 
-    def test_places_listing_failure_skips_links_not_the_scan(self, conn):
-        class NoPlacesGramps(FakeGramps):
-            async def list_places_full(self):
-                raise RuntimeError("gramps down")
-
-        im = FakeImmich(assets={"a1": asset("a1")}, tagged={"a1"})
-        events = run_scan(im, NoPlacesGramps(), conn, cfg=PLACE_CFG)
-        failed = actions(events, "failed")
-        assert len(failed) == 1 and "place links skipped" in failed[0].detail
-        assert len(actions(events, "would_create")) == 1
-
     def test_apply_create_mints_and_registers(self, conn):
         im = FakeImmich(assets={"a1": asset("a1", "img1.jpg")}, tagged={"a1"})
         gr = FakeGramps()
@@ -805,7 +785,8 @@ class TestSyncAssetsScan:
         assert len(failed) == 1 and "not registered" in failed[0].detail
         assert summary_of(events).data["created"] == 0
         assert summary_of(events).data["errors"] == 1
-        assert [r["source_id"] for r in conn.execute("SELECT source_id FROM minted_media")] == ["202"]
+        assert [r["source_id"] for r in conn.execute(
+            "SELECT source_id FROM minted_media WHERE source_system IS NOT NULL")] == ["202"]
 
 
 def test_sync_counts_are_all_initialized():
@@ -825,9 +806,6 @@ class TestSyncOneAsset:
     @pytest.fixture
     def conn(self, tmp_path):
         c = db.connect(tmp_path / "t.db")
-        c.execute(
-            "INSERT INTO person_links (gramps_handle, immich_person_id, label, created_at) "
-            "VALUES ('h-ed', 'uuid-ed', 'Ed', 't')")
         yield c
         c.close()
 
@@ -837,29 +815,26 @@ class TestSyncOneAsset:
                 gr, [im], conn, CFG, asset_id, gramps_id=gramps_id)]
         return asyncio.run(collect())
 
-    def test_create_uses_tag_metadata(self, conn):
+    def test_create_titles_by_file_name_and_seeds_nothing_else(self, conn):
         a = asset("a1", "img.jpg")
-        a["tags"] = [{"value": "Sync/Description"}, {"value": "Sync/Date"},
-                     {"value": "date/approximate"}]
-        a["exifInfo"] = {"description": "Easter 1966"}
+        a["tags"] = [{"value": "Sync/Gramps"}, {"value": "Holiday"}]
+        a["exifInfo"] = {"description": "Easter 1966", "latitude": 45.0, "longitude": -93.0}
         a["localDateTime"] = "1966-04-10T09:00:00Z"
         im = FakeImmich(assets={"a1": a})
-        gr = FakeGramps()
+        gr = FakeGramps(places=[{"handle": "ph1", "gramps_id": "P0001", "lat": "45.0", "long": "-93.0",
+                                 "name": {"value": "Farm"}, "media_list": []}])
         events = self._run(im, gr, conn, "a1")
         summary = summary_of(events)
         assert summary.data["created"] is True
-        assert summary.data["title"] == "Easter 1966"
-        assert "warning" not in summary.data
-        assert gr.created[0]["date"]["dateval"] == [0, 4, 1966, False]
+        assert summary.data["title"] == "img.jpg"
+        assert "date" not in gr.created[0] and gr.updated_places == []
+        assert {a["type"] for a in gr.created[0]["attribute_list"]} == {"Immich ID"}
         row = conn.execute(
-            "SELECT gramps_id FROM minted_media WHERE source_id='a1'").fetchone()
-        assert row["gramps_id"] == summary.data["gramps_id"]
+            "SELECT gramps_id, created_at, minted_at FROM minted_media WHERE source_id='a1'").fetchone()
+        assert row["gramps_id"] == summary.data["gramps_id"] and row["created_at"] == row["minted_at"]
 
     def test_rerun_resumes_via_register_only(self, conn):
-        conn.execute(
-            "INSERT INTO minted_media (gramps_id, source_system, source_id, title, minted_at) "
-            "VALUES ('BBBBBB', 'immich', 'a1', 'T', '2026-01-01')")
-        conn.commit()
+        mint(conn, "BBBBBB", "a1")
         im = FakeImmich(assets={"a1": asset("a1")})
         gr = FakeGramps({"BBBBBB": {"gramps_id": "BBBBBB", "handle": "h1",
                                     "desc": "T", "path": "immich/img.jpg"}})
@@ -869,10 +844,7 @@ class TestSyncOneAsset:
         assert len(actions(events, "skipped")) == 1
 
     def test_primary_of_registered_variant_resumes_not_mints(self, conn):
-        conn.execute(
-            "INSERT INTO minted_media (gramps_id, source_system, source_id, title, minted_at) "
-            "VALUES ('BBBBBB', 'immich', 'c1', 'T', '2026-01-01')")
-        conn.commit()
+        mint(conn, "BBBBBB", "c1")
         p = asset("p1", "new.jpg")
         p["stack"] = {"primaryAssetId": "p1"}
         im = FakeImmich(assets={"p1": p, "c1": asset("c1", "old.jpg")},
@@ -884,15 +856,12 @@ class TestSyncOneAsset:
         assert gr.created == []
         assert summary_of(events).data["created"] is False
         assert len(actions(events, "skipped")) == 1
-        rows = conn.execute("SELECT source_id FROM minted_media").fetchall()
+        rows = conn.execute("SELECT source_id FROM minted_media WHERE source_system IS NOT NULL").fetchall()
         assert [r["source_id"] for r in rows] == ["c1"]
 
     def test_two_register_rows_through_the_stack_error(self, conn):
-        conn.executemany(
-            "INSERT INTO minted_media (gramps_id, source_system, source_id, title, minted_at) "
-            "VALUES (?, 'immich', ?, 'T', '2026-01-01')",
-            [("G1G1G1", "c1"), ("G2G2G2", "c2")])
-        conn.commit()
+        mint(conn, "G1G1G1", "c1")
+        mint(conn, "G2G2G2", "c2")
         p = asset("p1")
         p["stack"] = {"primaryAssetId": "p1"}
         im = FakeImmich(assets={"p1": p},
@@ -936,19 +905,16 @@ class TestSyncOneAsset:
         assert exc.value.status == 400 and "invalid" in exc.value.detail
 
     def _issued_before(self, conn):
-        # XJ4DBT: minted, then its media was deleted from Gramps
-        conn.execute(
-            "INSERT INTO minted_media (gramps_id, source_system, source_id, title, minted_at) "
-            "VALUES ('XJ4DBT', 'paperless', '101', 'Deleted doc', '2026-01-01')")
-        conn.executemany(
-            "INSERT INTO reserved_ids (gramps_id, created_at, assigned_at, minted_at) "
-            "VALUES (?, 't', ?, ?)",
-            [("PENCHD", None, None), ("RSVD22", "t", None), ("MNTD22", "t", "t")])
+        mint(conn, "XJ4DBT", "101", system="paperless")
+        mint(conn, "MNTD22", "a9")
+        conn.execute("INSERT INTO minted_media (gramps_id, created_at) VALUES ('RSVD22', 't')")
+        conn.execute("INSERT INTO minted_media (gramps_id, created_at, withdrawn_at, withdrawn_reason) "
+                     "VALUES ('WDRN22', 't', 't', 'lost')")
         conn.commit()
 
-    def test_create_never_reissues_a_deleted_or_reserved_id(self, conn, script_ids):
+    def test_create_never_reissues_a_deleted_reserved_or_withdrawn_id(self, conn, script_ids):
         self._issued_before(conn)
-        script_ids("XJ4DBT", "PENCHD", "RSVD22", "MNTD22", "FRESH2")
+        script_ids("XJ4DBT", "RSVD22", "MNTD22", "WDRN22", "FRESH2")
         gr = FakeGramps()
         events = self._run(FakeImmich(assets={"a1": asset("a1")}), gr, conn, "a1")
         assert summary_of(events).data["gramps_id"] == "FRESH2"
@@ -959,10 +925,18 @@ class TestSyncOneAsset:
     def test_manual_id_issued_before_is_rejected(self, conn):
         self._issued_before(conn)
         gr = FakeGramps()
-        for gid in ("xj4dbt", "MNTD22"):
+        for gid in ("xj4dbt", "MNTD22", "WDRN22"):
             with pytest.raises(SyncError) as exc:
                 self._run(FakeImmich(assets={"a1": asset("a1")}), gr, conn, "a1", gramps_id=gid)
             assert exc.value.status == 400 and "issued before" in exc.value.detail
+        assert gr.created == []
+
+    def test_manual_id_refuses_guarded_shapes(self, conn):
+        gr = FakeGramps()
+        for gid in ("B2C3F4", "222222", "README"):
+            with pytest.raises(SyncError) as exc:
+                self._run(FakeImmich(assets={"a1": asset("a1")}), gr, conn, "a1", gramps_id=gid)
+            assert exc.value.status == 400 and "never issued" in exc.value.detail
         assert gr.created == []
 
     def test_manual_id_claims_its_open_reservation(self, conn):
@@ -970,8 +944,11 @@ class TestSyncOneAsset:
         events = self._run(FakeImmich(assets={"a1": asset("a1")}), FakeGramps(), conn, "a1",
                            gramps_id="RSVD22")
         assert summary_of(events).data["gramps_id"] == "RSVD22"
-        assert conn.execute(
-            "SELECT minted_at FROM reserved_ids WHERE gramps_id='RSVD22'").fetchone()[0]
+        row = conn.execute(
+            "SELECT source_system, source_id, created_at, minted_at FROM minted_media WHERE gramps_id='RSVD22'"
+        ).fetchone()
+        assert (row["source_system"], row["source_id"], row["created_at"]) == ("immich", "a1", "t")
+        assert row["minted_at"] and row["minted_at"] != "t"
 
     def test_register_conflict_fails_without_overwriting(self, conn):
         self._issued_before(conn)
@@ -982,8 +959,6 @@ class TestSyncOneAsset:
         row = conn.execute(
             "SELECT source_system, source_id FROM minted_media WHERE gramps_id='RSVD22'").fetchone()
         assert tuple(row) == ("paperless", "202")
-        assert conn.execute(
-            "SELECT minted_at FROM reserved_ids WHERE gramps_id='RSVD22'").fetchone()[0] is None
 
 
 class RacingGramps(FakeGramps):
@@ -996,94 +971,14 @@ class RacingGramps(FakeGramps):
     async def create_media(self, obj):
         await super().create_media(obj)
         self.conn.execute(
-            "INSERT INTO minted_media (gramps_id, source_system, source_id, title, minted_at) "
-            "VALUES (?, 'paperless', '202', 'Racer', '2026-01-01')", (obj["gramps_id"],))
+            "INSERT INTO minted_media (gramps_id, source_system, source_id, created_at, minted_at) "
+            "VALUES (?, 'paperless', '202', '2026-01-01', '2026-01-01') ON CONFLICT(gramps_id) DO UPDATE SET "
+            "source_system='paperless', source_id='202', minted_at='2026-01-01'", (obj["gramps_id"],))
         self.conn.commit()
-
-
-class TestTagDate:
-    """build_gramps_date"""
-
-    def _asset(self, *tags, dt="1955-07-14T10:00:00Z"):
-        return {"exifInfo": {"dateTimeOriginal": dt},
-                "tags": [{"value": t} for t in tags]}
-
-    def test_plain_exif_date(self):
-        d = sync_immich.build_gramps_date(self._asset())
-        assert d["dateval"] == [14, 7, 1955, False]
-        assert d["modifier"] == 0 and d["quality"] == 0
-
-    def test_approximate_strips_the_day(self):
-        d = sync_immich.build_gramps_date(self._asset("date/approximate"))
-        assert d["dateval"] == [0, 7, 1955, False]
-        assert d["modifier"] == 3
-
-    def test_precision_modifier_quality_compose(self):
-        d = sync_immich.build_gramps_date(
-            self._asset("date/year", "date/estimated", "date/before"))
-        assert d["dateval"] == [0, 0, 1955, False]
-        assert d["modifier"] == 1 and d["quality"] == 1
-
-    def test_month_precision(self):
-        d = sync_immich.build_gramps_date(self._asset("date/month", "date/calculated"))
-        assert d["dateval"] == [0, 7, 1955, False]
-        assert d["quality"] == 2
-
-    def test_no_exif_no_date(self):
-        assert sync_immich.build_gramps_date({"tags": [{"value": "date/year"}]}) is None
-
-    def test_wall_clock_wins_over_utc_instant(self):
-        a = {"localDateTime": "1966-04-10T21:30:00.000Z",
-             "exifInfo": {"dateTimeOriginal": "1966-04-11T02:30:00.000Z"},
-             "tags": []}
-        assert sync_immich.build_gramps_date(a)["dateval"] == [10, 4, 1966, False]
-
-    def test_garbage_exif_no_date(self):
-        assert sync_immich.build_gramps_date(self._asset(dt="not a date")) is None
-
-
-class TestTagTitleAndDate:
-    def test_description_needs_the_gate(self):
-        a = {"originalFileName": "f.jpg", "exifInfo": {"description": "Desc"}, "tags": []}
-        assert sync_immich.wanted_title(a) == "f.jpg"
-        a["tags"] = [{"value": "Sync/Description"}]
-        assert sync_immich.wanted_title(a) == "Desc"
-
-    def test_empty_description_falls_back(self):
-        a = {"originalFileName": "f.jpg", "exifInfo": {"description": "  "},
-             "tags": [{"value": "Sync/Description"}]}
-        assert sync_immich.wanted_title(a) == "f.jpg"
-        assert sync_immich.wanted_update_title(a) is None
-
-    def test_filename_never_drives_an_update(self):
-        a = {"originalFileName": "f.jpg", "tags": []}
-        assert sync_immich.wanted_update_title(a) is None
-
-    def test_exif_date_needs_the_gate(self):
-        a = {"exifInfo": {"dateTimeOriginal": "1955-07-14T10:00:00Z"}, "tags": []}
-        assert sync_immich.wanted_date(a) == (None, "")
-        a["tags"] = [{"value": "Sync/Date"}]
-        d, display = sync_immich.wanted_date(a)
-        assert d["dateval"] == [14, 7, 1955, False]
-        assert display
 
 
 class TestUpdatePlan:
     MAPPED = SyncImmichConfig(path_mappings=(("/usr/src/app/upload/upload/", "immich/"),))
-
-    def test_dates_equal_ignores_api_decoration(self):
-        stored = {"_class": "Date", "dateval": [0, 7, 1955, False], "modifier": 3,
-                  "quality": 0, "text": "", "sortval": 2422325, "calendar": 0}
-        fresh = sync_immich.build_gramps_date(
-            {"exifInfo": {"dateTimeOriginal": "1955-07-14T10:00:00Z"},
-             "tags": [{"value": "date/approximate"}]})
-        assert sync_immich.dates_equal(stored, fresh)
-
-    def test_dates_differ(self):
-        assert not sync_immich.dates_equal(
-            {"dateval": [0, 0, 1920, False], "modifier": 3, "quality": 1},
-            {"dateval": [0, 0, 1921, False], "modifier": 3, "quality": 1})
-        assert not sync_immich.dates_equal(None, {"dateval": [0, 0, 1920, False]})
 
     def test_title_and_date_are_not_the_syncs_business(self):
         a = {"originalFileName": "img_0001.jpg",
@@ -1132,156 +1027,54 @@ class TestUpdatePlan:
             )
 
 
-class TestPlaceHelpers:
-    def test_parse_gramps_coord(self):
-        assert sync_immich.parse_gramps_coord("N45.5") == 45.5
-        assert sync_immich.parse_gramps_coord("W92.9") == -92.9
-        assert sync_immich.parse_gramps_coord("45.5") == 45.5
-        assert sync_immich.parse_gramps_coord("") is None
-        assert sync_immich.parse_gramps_coord("north-ish") is None
-
-    def test_closest_place_respects_250m(self):
-        places = [{"lat": "45.0000", "long": "-93.0000", "name": {"value": "Near"}},
-                  {"lat": "N45.1000", "long": "W93.1000", "name": {"value": "Far"}}]
-        hit = sync_immich.closest_place(45.0001, -93.0001, places)
-        assert hit and hit[0]["name"]["value"] == "Near"
-        assert sync_immich.closest_place(46.0, -94.0, places) is None
-
-
-PLACE_CFG = SyncImmichConfig(
-    path_mappings=(("/up/", "immich/"),), place_tag_handle="PT", id_tag_prefix="")
-
-
-def _place(handle="ph1", name="Farmhouse"):
-    return {"handle": handle, "gramps_id": "P0001", "lat": "45.0", "long": "-93.0",
-            "tag_list": ["PT"], "name": {"value": name}, "media_list": []}
-
-
-class TestTagScanGates:
+class TestImmichFieldsStayInImmich:
 
     @pytest.fixture
     def conn(self, tmp_path):
         c = db.connect(tmp_path / "t.db")
-        c.execute(
-            "INSERT INTO person_links (gramps_handle, immich_person_id, label, created_at) "
-            "VALUES ('h-ed', 'uuid-ed', 'Ed', 't')")
         yield c
         c.close()
 
-    def _mint(self, conn, gid, source_id):
-        conn.execute(
-            "INSERT INTO minted_media (gramps_id, source_system, source_id, title, minted_at) "
-            "VALUES (?, 'immich', ?, 't', '2026-01-01')", (gid, source_id))
-        conn.commit()
-
-    def test_sync_date_gate_no_longer_drives_an_update(self, conn):
-        self._mint(conn, "BBBBBB", "a1")
+    def test_the_immich_description_and_date_never_change_the_media(self, conn):
+        mint(conn, "BBBBBB", "a1")
         a = asset("a1")
-        a["tags"] = [{"value": "Sync/Date"}]
-        a["exifInfo"] = {"dateTimeOriginal": "1955-07-14T10:00:00Z", "description": "t"}
+        a["exifInfo"] = {"description": "Grandma at the lake", "dateTimeOriginal": "1955-07-14T10:00:00Z"}
         im = FakeImmich(assets={"a1": a})
-        gr = FakeGramps({"BBBBBB": {"gramps_id": "BBBBBB", "handle": "h1",
-                                    "desc": "t", "path": "immich/img.jpg", "date": None,
-                                    "attribute_list": [{"type": "Immich ID", "value": "a1"}]}})
-        assert actions(run_scan(im, gr, conn), "would_update") == []
-
-    def test_ungated_exif_date_is_hands_off(self, conn):
-        self._mint(conn, "BBBBBB", "a1")
-        a = asset("a1")
-        a["exifInfo"] = {"dateTimeOriginal": "1955-07-14T10:00:00Z", "description": "t"}
-        im = FakeImmich(assets={"a1": a})
-        gr = FakeGramps({"BBBBBB": {"gramps_id": "BBBBBB", "handle": "h1",
-                                    "desc": "t", "path": "immich/img.jpg", "date": None,
-                                    "attribute_list": [
-                                        {"type": "Immich ID", "value": "a1"}]}})
-        assert actions(run_scan(im, gr, conn), "would_update") == []
-
-    def test_sync_description_gate_no_longer_retitles(self, conn):
-        self._mint(conn, "BBBBBB", "a1")
-        a = asset("a1")
-        a["tags"] = [{"value": "Sync/Description"}]
-        a["exifInfo"] = {"description": "Grandma at the lake"}
-        im = FakeImmich(assets={"a1": a})
-        gr = FakeGramps({"BBBBBB": {"gramps_id": "BBBBBB", "handle": "h1",
+        gr = FakeGramps({"BBBBBB": {"gramps_id": "BBBBBB", "handle": "h1", "date": None,
                                     "desc": "Grandma, 1920", "path": "immich/img.jpg",
                                     "attribute_list": [{"type": "Immich ID", "value": "a1"}]}})
         events = run_scan(im, gr, conn)
         updates = actions(events, "would_update")
         assert len(updates) == 1 and set(updates[0].data["cols"]) == {"description"}
         run_scan(im, gr, conn, apply=True)
-        assert gr.updated == [] and a["exifInfo"]["description"] == "Grandma, 1920"
+        assert gr.updated == [] and gr.media["BBBBBB"]["date"] is None
+        assert a["exifInfo"]["description"] == "Grandma, 1920"
 
-    def test_sync_location_leaves_a_registered_media_alone(self, conn):
-        self._mint(conn, "BBBBBB", "a1")
-        a = titled(asset("a1"))
-        a["tags"] = [{"value": "Sync/Location"}]
-        a["exifInfo"].update({"latitude": 45.0001, "longitude": -93.0001})
-        im = FakeImmich(assets={"a1": a})
-        gr = FakeGramps(
-            {"BBBBBB": {"gramps_id": "BBBBBB", "handle": "h1",
-                        "desc": "t", "path": "immich/img.jpg",
-                        "attribute_list": [{"type": "Immich ID", "value": "a1"}]}},
-            places=[_place()])
-        preview = run_scan(im, gr, conn, cfg=PLACE_CFG)
-        assert [e for e in preview if e.kind == "item"] == []
-        run_scan(im, gr, conn, apply=True, cfg=PLACE_CFG)
-        assert gr.updated_places == []
-
-    def test_place_link_is_idempotent(self, conn):
-        self._mint(conn, "BBBBBB", "a1")
-        a = asset("a1")
-        a["tags"] = [{"value": "Sync/Location"}]
-        a["exifInfo"] = {"latitude": 45.0, "longitude": -93.0}
-        place = _place()
-        place["media_list"] = [{"ref": "h1"}]
-        im = FakeImmich(assets={"a1": a})
-        gr = FakeGramps(
-            {"BBBBBB": {"gramps_id": "BBBBBB", "handle": "h1",
-                        "desc": "t", "path": "immich/img.jpg"}},
-            places=[place])
-        events = run_scan(im, gr, conn, apply=True, cfg=PLACE_CFG)
-        assert gr.updated_places == []
-        assert [e for e in events if e.entity == "place"] == []
-
-    def test_create_place_link_is_counted(self, conn):
-        a = asset("a1")
-        a["tags"] = [{"value": "Sync/Location"}]
-        a["exifInfo"] = {"latitude": 45.0, "longitude": -93.0}
-        im = FakeImmich(assets={"a1": a}, tagged={"a1"})
-        gr = FakeGramps(places=[_place()])
-        events = run_scan(im, gr, conn, apply=True, cfg=PLACE_CFG)
-        assert summary_of(events).data["places_linked"] == 1
-        assert len(gr.updated_places) == 1
-
-    def test_create_uses_description_and_exif_date(self, conn):
-        a = asset("a1")
-        a["tags"] = [{"value": "Sync/Description"}, {"value": "Sync/Date"},
-                     {"value": "date/approximate"}]
-        a["exifInfo"] = {"description": "Easter 1966",
+    def test_gps_and_the_description_seed_nothing_on_create(self, conn):
+        a = asset("a1", "img.jpg")
+        a["exifInfo"] = {"description": "Easter 1966", "latitude": 45.0, "longitude": -93.0,
                          "dateTimeOriginal": "1966-04-10T00:00:00Z"}
         im = FakeImmich(assets={"a1": a}, tagged={"a1"})
-        events = run_scan(im, FakeGramps(), conn)
-        creates = actions(events, "would_create")
-        assert len(creates) == 1
-        assert creates[0].title == "Easter 1966"
-        assert "date" in creates[0].data["cols"]
+        gr = FakeGramps(places=[{"handle": "ph1", "gramps_id": "P0001", "lat": "45.0", "long": "-93.0",
+                                 "name": {"value": "Farm"}, "media_list": []}])
+        events = run_scan(im, gr, conn, apply=True)
+        assert actions(events, "created")[0].title == "img.jpg"
+        assert gr.created[0]["desc"] == "img.jpg" and "date" not in gr.created[0]
+        assert gr.updated_places == [] and [e for e in events if e.entity == "place"] == []
 
 
-class TestPersonLinksMap:
-    def test_empty_table_is_empty(self, tmp_path):
-        conn = db.connect(tmp_path / "t.db")
-        assert person_links_map(conn) == {}
-        conn.close()
+class TestPersonMap:
+    def test_people_without_the_attribute_map_nothing(self):
+        assert sync_immich.person_map([{"handle": "h1", "attribute_list": [{"type": "Nickname", "value": "Ed"}]}]) == {}
 
-    def test_maps_rows(self, tmp_path):
-        conn = db.connect(tmp_path / "t.db")
-        conn.execute(
-            "INSERT INTO person_links (gramps_handle, immich_person_id, label, created_at) "
-            "VALUES ('abc123', 'uuid-1', 'Ed Grund', 't'), ('def456', 'uuid-2', NULL, 't')")
-        m = person_links_map(conn)
-        assert m["uuid-1"] == {"handle": "abc123", "label": "Ed Grund"}
-        assert m["uuid-2"]["label"] == ""
-        conn.close()
+    def test_maps_every_immich_person_id_to_its_handle(self):
+        people = [linked("abc123", "uuid-1", "uuid-2"), linked("def456", "uuid-3"),
+                  {"handle": "ghi789", "attribute_list": [{"type": PERSON_ATTR, "value": "  "}]}]
+        assert sync_immich.person_map(people) == {"uuid-1": "abc123", "uuid-2": "abc123", "uuid-3": "def456"}
+
+    def test_loads_from_gramps(self):
+        gr = FakeGramps(people={"h-ed": linked("h-ed", "uuid-ed")})
+        assert asyncio.run(sync_immich.load_person_map(gr)) == {"uuid-ed": "h-ed"}
 
 
 class TestPartnerFaces:
@@ -1289,9 +1082,6 @@ class TestPartnerFaces:
     @pytest.fixture
     def conn(self, tmp_path):
         c = db.connect(tmp_path / "t.db")
-        c.execute(
-            "INSERT INTO person_links (gramps_handle, immich_person_id, label, created_at) "
-            "VALUES ('h-ed', 'uuid-ed', 'Ed', 't')")
         yield c
         c.close()
 
@@ -1299,7 +1089,7 @@ class TestPartnerFaces:
         return SyncImmichConfig(path_mappings=(("/up/", "immich/"),), id_tag_prefix="")
 
     def _gramps(self):
-        return FakeGramps(people={"h-ed": {"handle": "h-ed", "media_list": []}})
+        return FakeGramps(people={"h-ed": linked("h-ed", "uuid-ed")})
 
     def test_partner_owned_asset_uses_partner_faces(self, conn, tmp_path):
         a = asset("a1")
@@ -1431,31 +1221,25 @@ class TestTwoAccountScan:
         assert [e.source_id for e in actions(events, "would_create")] == ["p1"]
         assert actions(events, "failed") == []
 
-    def test_tags_merge_across_accounts_with_owner_preference(self, conn):
+    def test_tags_union_across_accounts_and_the_owner_keeps_its_own(self, conn):
         base = self._owned("m1", "user-b")
-        owner_view = {**base, "tags": [{"value": "Sync/Gramps"},
-                                       {"value": "Sync/Date"},
-                                       {"value": "date/year"}],
-                      "exifInfo": {"dateTimeOriginal": "1955-07-14T10:00:00Z"}}
-        other_view = {**base, "tags": [{"value": "date/month"}],
-                      "exifInfo": {"dateTimeOriginal": "1955-07-14T10:00:00Z"}}
+        owner_view = {**base, "tags": [{"value": "Sync/Gramps"}, {"value": "ID/OLDONE"}]}
+        other_view = {**base, "tags": [{"value": "Holiday"}]}
         a = FakeImmich(assets={"m1": other_view}, tagged=set(), me_id="user-a")
         b = FakeImmich(assets={"m1": owner_view}, tagged={"m1"}, me_id="user-b")
+        merged = asyncio.run(sync_immich._merged_one([a, b], "m1"))
+        assert sync_immich.tag_values(merged) == {"sync/gramps", "id/oldone", "holiday"}
+        assert sync_immich.owner_tag_values(merged) == {"sync/gramps", "id/oldone"}
         events = self._run(FakeGramps(), [a, b], conn)
-        create = actions(events, "would_create")[0]
-        assert create.data["cols"]["date"].strip() == "1955"
+        assert actions(events, "would_create")[0].data["cols"] == {"title": "img.jpg"}
 
     def test_faces_read_via_the_owning_account(self, conn):
-        conn.execute(
-            "INSERT INTO person_links (gramps_handle, immich_person_id, label, created_at) "
-            "VALUES ('h-ed', 'uuid-ed', 'Ed', 't')")
-        conn.commit()
         a = FakeImmich(assets={"b1": self._owned("b1", "user-b")},
                        tagged=set(), me_id="user-a")
         b = FakeImmich(assets={"b1": self._owned("b1", "user-b")},
                        tagged={"b1"}, me_id="user-b",
                        faces={"b1": [{"person": {"id": "uuid-ed", "name": "Ed"}}]})
-        gr = FakeGramps(people={"h-ed": {"handle": "h-ed", "media_list": []}})
+        gr = FakeGramps(people={"h-ed": linked("h-ed", "uuid-ed")})
         self._run(gr, [a, b], conn, apply=True)
         assert b.faces_requested == ["b1"]
         assert a.faces_requested == []
@@ -1488,12 +1272,12 @@ class TestAccountRobustness:
 
     def test_merge_copies_unknown_owner_falls_back_to_plain_union(self):
         copies = [
-            ("u1", {"ownerId": "unknown", "tags": [{"value": "date/year"}]}),
-            ("u2", {"ownerId": "unknown", "tags": [{"value": "date/month"}]}),
+            ("u1", {"ownerId": "unknown", "tags": [{"value": "Holiday"}]}),
+            ("u2", {"ownerId": "unknown", "tags": [{"value": "ID/ABC123"}]}),
         ]
         merged = sync_immich._merge_copies(copies)
-        tags = {t["value"] for t in merged["tags"]}
-        assert tags == {"date/year", "date/month"}
+        assert {t["value"] for t in merged["tags"]} == {"Holiday", "ID/ABC123"}
+        assert sync_immich.owner_tag_values(merged) is None
 
     def test_merged_one_mixed_errors_is_a_502_not_a_404(self):
         class Down(FakeImmich):
@@ -1531,10 +1315,7 @@ class TestIdTags:
         c.close()
 
     def _mint(self, conn, gid, source_id):
-        conn.execute(
-            "INSERT INTO minted_media (gramps_id, source_system, source_id, title, minted_at) "
-            "VALUES (?, 'immich', ?, 't', '2026-01-01')", (gid, source_id))
-        conn.commit()
+        mint(conn, gid, source_id)
 
     def _media(self, gid="BBBBBB", asset_id="a1"):
         return {gid: {"gramps_id": gid, "handle": "h1", "desc": "t",
@@ -1687,9 +1468,6 @@ class TestFaceRects:
     @pytest.fixture
     def conn(self, tmp_path):
         c = db.connect(tmp_path / "t.db")
-        c.execute(
-            "INSERT INTO person_links (gramps_handle, immich_person_id, label, created_at) "
-            "VALUES ('h-ed', 'uuid-ed', 'Ed', 't')")
         yield c
         c.close()
 
@@ -1697,34 +1475,23 @@ class TestFaceRects:
         return SyncImmichConfig(path_mappings=(("/up/", "immich/"),), id_tag_prefix="")
 
     def test_face_rect_math(self):
-        assert sync_immich._face_rect(self.FACE, pad=False) == [48, 45, 52, 54]
-        assert sync_immich._face_rect(self.FACE, pad=True) == [47, 43, 53, 55]
+        assert sync_immich._face_rect(self.FACE) == [47, 43, 53, 55]
         assert sync_immich._face_rect({**self.FACE, "imageWidth": 0}) == []
         assert sync_immich._face_rect(
             {**self.FACE, "boundingBoxX2": self.FACE["boundingBoxX1"]}) == []
         near_edge = {"boundingBoxX1": 5, "boundingBoxY1": 5,
                      "boundingBoxX2": 100, "boundingBoxY2": 100,
                      "imageWidth": 100, "imageHeight": 100}
-        assert all(0 <= v <= 100 for v in sync_immich._face_rect(near_edge, pad=True))
+        assert all(0 <= v <= 100 for v in sync_immich._face_rect(near_edge))
 
     def test_new_link_gets_padded_rect(self, conn, tmp_path):
         im = FakeImmich(assets={"a1": asset("a1")}, tagged={"a1"},
                         faces={"a1": [{"person": {"id": "uuid-ed", "name": "Ed"},
                                        **self.FACE}]})
-        gr = FakeGramps(people={"h-ed": {"handle": "h-ed", "media_list": []}})
+        gr = FakeGramps(people={"h-ed": linked("h-ed", "uuid-ed")})
         run_scan(im, gr, conn, apply=True, cfg=self._cfg(tmp_path))
         ref = gr.updated_people[0]["media_list"][0]
         assert ref["rect"] == [47, 43, 53, 55]
-
-    def test_manual_faces_tag_gives_tight_rect(self, conn, tmp_path):
-        a = asset("a1")
-        a["tags"] = [{"value": "Sync/ManualFaces"}]
-        im = FakeImmich(assets={"a1": a}, tagged={"a1"},
-                        faces={"a1": [{"person": {"id": "uuid-ed", "name": "Ed"},
-                                       **self.FACE}]})
-        gr = FakeGramps(people={"h-ed": {"handle": "h-ed", "media_list": []}})
-        run_scan(im, gr, conn, apply=True, cfg=self._cfg(tmp_path))
-        assert gr.updated_people[0]["media_list"][0]["rect"] == [48, 45, 52, 54]
 
     def _resume(self, im, gr, conn, cfg):
         async def collect():
@@ -1733,35 +1500,29 @@ class TestFaceRects:
         return asyncio.run(collect())
 
     def test_empty_rect_healed_on_resync(self, conn, tmp_path):
-        conn.execute(
-            "INSERT INTO minted_media (gramps_id, source_system, source_id, title, minted_at) "
-            "VALUES ('BBBBBB', 'immich', 'a1', 'T', '2026-01-01')")
-        conn.commit()
+        mint(conn, "BBBBBB", "a1")
         im = FakeImmich(assets={"a1": asset("a1")},
                         faces={"a1": [{"person": {"id": "uuid-ed", "name": "Ed"},
                                        **self.FACE}]})
         gr = FakeGramps(
             media={"BBBBBB": {"gramps_id": "BBBBBB", "handle": "h1",
                               "desc": "T", "path": "immich/img.jpg"}},
-            people={"h-ed": {"handle": "h-ed", "media_list": [
-                {"_class": "MediaRef", "ref": "h1", "rect": []}]}})
+            people={"h-ed": linked("h-ed", "uuid-ed", media_list=[
+                {"_class": "MediaRef", "ref": "h1", "rect": []}])})
         events = self._resume(im, gr, conn, self._cfg(tmp_path))
         assert gr.updated_people[0]["media_list"][0]["rect"] == [47, 43, 53, 55]
         assert [e.action for e in events if e.entity == "face"] == ["updated"]
 
     def test_hand_set_rect_never_touched(self, conn, tmp_path):
-        conn.execute(
-            "INSERT INTO minted_media (gramps_id, source_system, source_id, title, minted_at) "
-            "VALUES ('BBBBBB', 'immich', 'a1', 'T', '2026-01-01')")
-        conn.commit()
+        mint(conn, "BBBBBB", "a1")
         im = FakeImmich(assets={"a1": asset("a1")},
                         faces={"a1": [{"person": {"id": "uuid-ed", "name": "Ed"},
                                        **self.FACE}]})
         gr = FakeGramps(
             media={"BBBBBB": {"gramps_id": "BBBBBB", "handle": "h1",
                               "desc": "T", "path": "immich/img.jpg"}},
-            people={"h-ed": {"handle": "h-ed", "media_list": [
-                {"_class": "MediaRef", "ref": "h1", "rect": [10, 10, 50, 50]}]}})
+            people={"h-ed": linked("h-ed", "uuid-ed", media_list=[
+                {"_class": "MediaRef", "ref": "h1", "rect": [10, 10, 50, 50]}])})
         events = self._resume(im, gr, conn, self._cfg(tmp_path))
         assert gr.updated_people == []
         assert gr.people["h-ed"]["media_list"][0]["rect"] == [10, 10, 50, 50]

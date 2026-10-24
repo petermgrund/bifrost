@@ -17,6 +17,7 @@ from ..core.clients import GeminiClient, GrampsClient, ImmichClient, PaperlessCl
 from ..core.clients.immich import ImmichError
 from ..core.config import load_config
 from ..modules import faces as faces_mod
+from . import runs
 
 WEB_DIR = Path(__file__).parent
 templates = Jinja2Templates(directory=WEB_DIR / "templates")
@@ -30,8 +31,14 @@ async def lifespan(app: FastAPI):
     app.state.cfg = cfg
     app.state.conn = db.connect(cfg.db_path)
     app.state.conn.execute("PRAGMA busy_timeout=5000")
-    faces_mod.import_person_map_yaml(app.state.conn, cfg.sync_immich.person_map_path)
+    swept = runs.sweep(app.state.conn)
+    if swept:
+        logging.getLogger("bifrost").info("%d run(s) left running by the last stop marked interrupted", swept)
     app.state.gramps = GrampsClient(cfg.gramps.base_url, cfg.gramps.username, cfg.gramps.password)
+    try:
+        await faces_mod.adopt_person_links(app.state.conn, app.state.gramps)
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger("bifrost").warning("person links not moved to Gramps yet: %s", exc)
     app.state.paperless = PaperlessClient(cfg.paperless.base_url, cfg.paperless.api_token)
     app.state.gemini = GeminiClient(cfg.gemini.api_key, cfg.gemini.model)
     # Immich sync endpoints answer 503 with no accounts configured
@@ -84,7 +91,6 @@ from .routes.codes import router as codes_router  # noqa: E402
 from .runs import ACTIVE  # noqa: E402
 from .routes.faces import router as faces_router  # noqa: E402
 from .routes.photos import router as photos_router  # noqa: E402
-from .routes.places import router as places_router  # noqa: E402
 from .routes.reprocess import router as reprocess_router  # noqa: E402
 from .routes.settings import router as settings_router  # noqa: E402
 from .routes.sync import router as sync_router  # noqa: E402
@@ -94,7 +100,6 @@ app.include_router(api_router)
 app.include_router(codes_router)
 app.include_router(faces_router)
 app.include_router(photos_router)
-app.include_router(places_router)
 app.include_router(reprocess_router)
 app.include_router(settings_router)
 app.include_router(sync_router)

@@ -6,12 +6,12 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel
 
-from ...core.clients.gramps import person_display_name
 from ...core.clients.immich import ImmichError
-from ...modules import faces, sync_immich
+from ...modules import faces
 from ..runs import record_run
 
 router = APIRouter(prefix="/faces", tags=["faces"])
+PEOPLE_KEY = "faces_gramps_people"
 
 
 def _state(request: Request):
@@ -25,6 +25,21 @@ def _accounts(request: Request) -> list:
     return accounts
 
 
+def _forget_people(st) -> None:
+    st.caches.pop(PEOPLE_KEY, None)
+    st.caches.pop("person_links", None)
+
+
+async def _people(request: Request, refresh: bool = False) -> list[dict]:
+    st = _state(request)
+    if st.caches.get(PEOPLE_KEY) is None or refresh:
+        try:
+            st.caches[PEOPLE_KEY] = faces.people_index(await st.gramps.list_people())
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(502, f"Gramps could not be read: {str(exc)[:200]}")
+    return st.caches[PEOPLE_KEY]
+
+
 @router.get("")
 async def faces_page(request: Request):
     return RedirectResponse(url="/photos#/faces")
@@ -32,20 +47,7 @@ async def faces_page(request: Request):
 
 @router.get("/api/gramps-people")
 async def gramps_people(request: Request, refresh: bool = False):
-    st = _state(request)
-    if st.caches.get("faces_gramps_people") is None or refresh:
-        raw = await st.gramps.list_people()
-        st.caches["faces_gramps_people"] = sorted(
-            ({
-                "handle": p["handle"],
-                "name": person_display_name(p),
-                "gramps_id": p.get("gramps_id", ""),
-                "media_count": len(p.get("media_list") or []),
-                "rect_count": sum(1 for mr in p.get("media_list") or []
-                                  if mr.get("rect")),
-            } for p in raw),
-            key=lambda r: r["name"].lower())
-    return st.caches["faces_gramps_people"]
+    return await _people(request, refresh)
 
 
 @router.get("/api/immich-people")
@@ -60,8 +62,7 @@ async def immich_people(request: Request, refresh: bool = False):
 @router.get("/api/person-thumbnail/{person_id}")
 async def person_thumbnail(request: Request, person_id: str):
     try:
-        content, mime = await faces.person_thumbnail_bytes(
-            _accounts(request), _state(request).conn, person_id)
+        content, mime = await faces.person_thumbnail_bytes(_accounts(request), person_id)
     except ImmichError as exc:
         raise HTTPException(404 if exc.status in (400, 404) else 502, exc.message)
     return Response(content, media_type=mime,
@@ -74,7 +75,7 @@ async def _links_payload(request: Request) -> dict:
     return {
         "gramps_url": st.cfg.sync_paperless.gramps_public_url,
         "accounts": [getattr(c, "label", "") for c in accounts],
-        "faces": await faces.grouped_links(accounts, st.conn),
+        "faces": await faces.grouped_links(accounts, await _people(request)),
     }
 
 
@@ -86,64 +87,49 @@ async def get_links(request: Request):
 class LinkBody(BaseModel):
     gramps_handle: str
     immich_person_id: str
-    label: str = ""
 
 
 @router.post("/api/links")
 async def create_link(request: Request, body: LinkBody):
     st = _state(request)
-    if not body.gramps_handle.strip() or not body.immich_person_id.strip():
-        raise HTTPException(400, "gramps_handle and immich_person_id required")
-    accounts = _accounts(request)
     handle = body.gramps_handle.strip()
     person_id = body.immich_person_id.strip()
-    info = None
+    if not handle or not person_id:
+        raise HTTPException(400, "gramps_handle and immich_person_id required")
+    accounts = _accounts(request)
+    known = False
     hard: ImmichError | None = None
     for client in accounts:
         try:
-            person = await client.get_person(person_id)
+            await client.get_person(person_id)
         except ImmichError as exc:
             if exc.status not in (400, 404):
                 hard = hard or exc
             continue
-        try:
-            uid = await sync_immich._user_id(client)
-        except ImmichError as exc:
-            hard = hard or exc
-            continue
-        info = {"owner_user_id": uid,
-                "account_label": getattr(client, "label", "")}
+        known = True
         break
-    if info is None:
+    if not known:
         if hard is not None:
-            # an account was unreachable but does it exist?
             raise HTTPException(502, f"could not verify the person id: {hard.message}")
         raise HTTPException(404, "no configured Immich account knows this person id")
-    for row in st.conn.execute(
-            "SELECT immich_person_id FROM person_links "
-            "WHERE gramps_handle=? AND owner_user_id IS NULL", (handle,)).fetchall():
-        old = await faces.resolve_person(accounts, row["immich_person_id"])
-        if old is not None:
-            with st.conn:
-                st.conn.execute(
-                    "UPDATE person_links SET owner_user_id=? "
-                    "WHERE gramps_handle=? AND immich_person_id=?",
-                    (old["owner_user_id"], handle, row["immich_person_id"]))
-    faces.set_link(st.conn, handle, person_id,
-                   body.label, owner_user_id=info["owner_user_id"])
+    linked = {pid: p["handle"] for p in await _people(request) for pid in p["immich_ids"]}
+    await faces.set_link(st.gramps, linked, handle, person_id)
+    _forget_people(st)
     return await _links_payload(request)
 
 
 @router.delete("/api/links/{gramps_handle}")
 async def remove_link(request: Request, gramps_handle: str):
     st = _state(request)
-    if not faces.delete_link(st.conn, gramps_handle):
+    if not await faces.delete_link(st.gramps, gramps_handle):
         raise HTTPException(404, "no link for this person")
+    _forget_people(st)
     return await _links_payload(request)
 
 
 class BackfillBody(BaseModel):
     selected: list[str] | None = None
+
 
 @router.get("/api/backfill/config")
 async def backfill_config(request: Request) -> dict:

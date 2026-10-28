@@ -61,6 +61,8 @@ class SyncPaperlessConfig:
     transcription_tag_id: int | None = None
     ocr_tag: str = ""
     webhook_token: str = ""
+    # Paperless custom field id -> the Gramps media attribute that mirrors it
+    attribute_fields: tuple[tuple[int, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -80,6 +82,44 @@ class Config:
     sync_immich: SyncImmichConfig = SyncImmichConfig()
     sync_paperless: SyncPaperlessConfig = SyncPaperlessConfig()
     gemini: GeminiConfig = GeminiConfig()
+
+
+# attributes the Paperless sync writes for its own purposes; a mirrored field may not take their names
+SYNC_ATTRIBUTES = frozenset({"Paperless ID", "Paperless URL"})
+
+
+def parse_attribute_fields(block: dict) -> tuple[tuple[int, str], ...]:
+    """sync.paperless.attribute_fields, a mapping of custom field id to attribute name, checked:
+    numeric ids, non-empty names, nothing listed twice, no key field and no name the sync owns"""
+    raw = block.get("attribute_fields")
+    if raw is None or raw == {}:
+        return ()
+    if not isinstance(raw, dict):
+        raise ConfigError("sync.paperless.attribute_fields must map Paperless field ids to attribute names")
+    keys = set()
+    for key in ("gramps_id_field_id", "gramps_url_field_id"):
+        try:
+            if block.get(key) not in (None, ""):
+                keys.add(int(block[key]))
+        except (TypeError, ValueError):
+            pass
+    out: list[tuple[int, str]] = []
+    for field, name in raw.items():
+        try:
+            fid = int(field)
+        except (TypeError, ValueError):
+            raise ConfigError(f"sync.paperless.attribute_fields: {field!r} is not a numeric field id")
+        text = " ".join(str(name or "").split())
+        if not text:
+            raise ConfigError(f"sync.paperless.attribute_fields: field {fid} needs an attribute name")
+        if fid in keys:
+            raise ConfigError(f"sync.paperless.attribute_fields: field {fid} is a key field, not one to mirror")
+        if text in SYNC_ATTRIBUTES:
+            raise ConfigError(f"sync.paperless.attribute_fields: {text!r} is written by the sync itself")
+        if any(f == fid or n == text for f, n in out):
+            raise ConfigError(f"sync.paperless.attribute_fields: field {fid} or {text!r} is listed twice")
+        out.append((fid, text))
+    return tuple(out)
 
 
 DEFAULT_PATH = Path(__file__).resolve().parents[2] / "config.yaml"
@@ -130,6 +170,7 @@ def load_config(path: str | Path | None = None) -> Config:
         transcription_tag_id=int_or_none(sp_raw, "sync.paperless", "transcription_tag_id"),
         ocr_tag=sp_raw.get("ocr_tag") or "",
         webhook_token=str(sp_raw.get("webhook_token") or "").strip(),
+        attribute_fields=parse_attribute_fields(sp_raw),
     )
     im_raw = raw.get("immich") or {}
     si_raw = (raw.get("sync") or {}).get("immich") or {}

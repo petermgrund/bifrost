@@ -147,6 +147,68 @@ def _doc_gramps_id(doc: dict, field_id: int) -> str | None:
     return None
 
 
+def _attr(attr_type: str, value: str) -> dict:
+    return {"_class": "Attribute", "type": attr_type, "value": value,
+            "private": False, "citation_list": [], "note_list": []}
+
+
+def attribute_value(raw, options: dict | None = None) -> str | None:
+    """A custom field's value as attribute text: a select option becomes its label,
+    a list joins its members, and nothing at all is None"""
+    if raw is None or raw == "" or raw == []:
+        return None
+    if isinstance(raw, bool):
+        return "Yes" if raw else "No"
+    if isinstance(raw, list):
+        parts = [attribute_value(v, options) for v in raw]
+        return ", ".join(p for p in parts if p) or None
+    text = str(raw).strip()
+    if not text:
+        return None
+    for key in (raw, text):
+        try:
+            if options and key in options:
+                return str(options[key])
+        except TypeError:
+            pass
+    return text
+
+
+def attribute_changes(media: dict, wanted: dict[str, str | None]) -> dict[str, str]:
+    """What mirror_attributes would do to the media: attribute name -> new, changed or removed"""
+    attrs = media.get("attribute_list") or []
+    cols: dict[str, str] = {}
+    for name, value in wanted.items():
+        current = [a.get("value") for a in attrs if a.get("type") == name]
+        if value is None:
+            if current:
+                cols[name] = "removed"
+        elif current != [value]:
+            cols[name] = "changed" if current else "new"
+    return cols
+
+
+def mirror_attributes(media: dict, wanted: dict[str, str | None]) -> dict[str, str]:
+    """Make the media carry one attribute per wanted name with the wanted value (None removes it),
+    in place where it already was; other attributes are not touched. Returns what changed"""
+    cols = attribute_changes(media, wanted)
+    if not cols:
+        return cols
+    out: list[dict] = []
+    placed: set[str] = set()
+    for a in media.get("attribute_list") or []:
+        name = a.get("type")
+        if name not in cols:
+            out.append(a)
+        elif wanted[name] is not None and name not in placed:
+            out.append(_attr(name, wanted[name]))
+            placed.add(name)
+    out += [_attr(name, wanted[name]) for name in cols
+            if wanted[name] is not None and name not in placed]
+    media["attribute_list"] = out
+    return cols
+
+
 def _media_mime(metadata: dict, doc: dict) -> str:
     """MIME of the file the media points at, the latest version; Paperless's
     doc mime_type describes the original, which a new version may not match"""
@@ -181,7 +243,8 @@ async def sync(
 ) -> AsyncIterator[SyncEvent]:
     counts = {"created": 0, "skipped": 0, "versions_updated": 0, "baselined": 0,
               "titles_updated": 0, "dates_updated": 0,
-              "tx_created": 0, "tx_updated": 0, "tx_skipped": 0, "errors": 0}
+              "tx_created": 0, "tx_updated": 0, "tx_skipped": 0,
+              "attributes_updated": 0, "errors": 0}
 
     if not (cfg.gramps_id_field_id and cfg.gramps_url_field_id):
         yield SyncEvent(kind="error", detail=(
@@ -214,6 +277,23 @@ async def sync(
             yield SyncEvent(kind="error", detail=f"date qualifier field options: {exc}")
             q_field = None
 
+    # the custom fields mirrored as media attributes, with the labels of their select options;
+    # a field Paperless cannot describe is left alone for this run
+    attr_fields: list[tuple[int, str]] = []
+    attr_options: dict[int, dict] = {}
+    if cfg.attribute_fields and not (transcriptions_only or versions_only):
+        for fid, name in cfg.attribute_fields:
+            try:
+                attr_options[fid] = await paperless.resolve_custom_field_options(fid)
+            except Exception as exc:  # noqa BLE001
+                yield SyncEvent(kind="error", detail=f"attribute field {fid} ({name}): {exc}")
+                continue
+            attr_fields.append((fid, name))
+
+    def _wanted_attributes(doc: dict) -> dict[str, str | None]:
+        return {name: attribute_value(PaperlessClient.custom_field_value(doc, fid), attr_options.get(fid))
+                for fid, name in attr_fields}
+
     def _prospective_cols(doc: dict) -> dict:
         cols: dict = {}
         if q_field:
@@ -234,6 +314,9 @@ async def sync(
                                            else "new")
             else:
                 cols["transcription"] = "tagged, no text yet"
+        for name, value in _wanted_attributes(doc).items():
+            if value is not None:
+                cols[name] = "new"
         return cols
 
     documents: list[dict] = []
@@ -326,11 +409,8 @@ async def sync(
             "private": False,
             "change": int(datetime.now(timezone.utc).timestamp()),
             "attribute_list": [
-                {"_class": "Attribute", "type": "Paperless URL",
-                 "value": f"{cfg.public_url}/documents/{doc_id}/details",
-                 "private": False, "citation_list": [], "note_list": []},
-                {"_class": "Attribute", "type": "Paperless ID", "value": str(doc_id),
-                 "private": False, "citation_list": [], "note_list": []},
+                _attr("Paperless URL", f"{cfg.public_url}/documents/{doc_id}/details"),
+                _attr("Paperless ID", str(doc_id)),
             ],
         }
 
@@ -526,6 +606,16 @@ async def sync(
                 media["date"] = date_obj
                 media_dirty = True
             counts["dates_updated"] += 1
+
+        if attr_fields:
+            wanted = _wanted_attributes(doc)
+            acols = attribute_changes(media, wanted)
+            if acols:
+                mcols.update(acols)
+                counts["attributes_updated"] += len(acols)
+                if apply:
+                    mirror_attributes(media, wanted)
+                    media_dirty = True
 
         if not media.get("checksum"):
             mcols["checksum"] = "missing"

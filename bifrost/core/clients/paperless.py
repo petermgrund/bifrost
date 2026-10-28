@@ -89,9 +89,9 @@ class PaperlessClient:
         return resp.json()
 
     async def resolve_custom_field_options(self, field_id: int) -> dict[str, str]:
-        """{option_id: label} for a select custom field"""
+        """{option_id: label} for a select custom field; {} for any other kind, whose extra_data is null"""
         resp = await self._request("GET", f"/api/custom_fields/{field_id}/")
-        opts = resp.json().get("extra_data", {}).get("select_options") or []
+        opts = (resp.json().get("extra_data") or {}).get("select_options") or []
         return {o["id"]: o["label"] for o in opts if "id" in o and "label" in o}
 
     @staticmethod

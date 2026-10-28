@@ -3,10 +3,12 @@
 import asyncio
 import copy
 
+import httpx
 import pytest
 
 from bifrost.core import db
 from bifrost.core.clients.gramps import GrampsClient
+from bifrost.core.clients.paperless import PaperlessClient
 from bifrost.core.config import ConfigError, SyncPaperlessConfig, load_config, parse_attribute_fields
 from bifrost.modules import sync_paperless
 from bifrost.modules.sync_paperless import attribute_changes, attribute_value, mirror_attributes
@@ -323,3 +325,26 @@ class TestSync:
         events = run(paperless, gramps, conn, apply=True, cfg=plain)
         assert media_events(events) == [] and paperless.option_calls == []
         assert "attributes_updated" in summary(events)
+
+
+class TestFieldOptions:
+    """resolve_custom_field_options against what Paperless answers for each kind of field"""
+
+    @staticmethod
+    def client(payload):
+        c = PaperlessClient("http://p", "t")
+
+        async def fake(method, path, **kw):
+            return httpx.Response(200, json=payload)
+        c._request = fake
+        return c
+
+    def test_a_string_field_has_no_options_and_no_error(self):
+        c = self.client({"id": 31, "name": "Digital provider", "data_type": "string", "extra_data": None})
+        assert asyncio.run(c.resolve_custom_field_options(31)) == {}
+
+    def test_a_select_field_maps_option_ids_to_labels(self):
+        c = self.client({"id": 18, "name": "Source URL access", "data_type": "select",
+                         "extra_data": {"select_options": [{"id": "a1", "label": "Paywall"},
+                                                           {"id": "b2", "label": "Free"}, {"label": "no id"}]}})
+        assert asyncio.run(c.resolve_custom_field_options(18)) == {"a1": "Paywall", "b2": "Free"}

@@ -33,6 +33,11 @@ sync:
     transcription_tag_id: null
     ocr_tag: "Gemini OCR"
     webhook_token: ""
+    # Paperless custom field id -> the Gramps media attribute that mirrors it. One way:
+    # the sync rewrites these attributes on every run, so edit the values in Paperless.
+    attribute_fields: {}
+    #   11: "Record URL"
+    #   18: "Record URL access"
 
 gemini:
   api_key: "REPLACE_ME"

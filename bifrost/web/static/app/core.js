@@ -93,6 +93,7 @@ const ACTION_WORDS = {
   versions_updated: ['update', 'updated', 'version'],
   titles_updated: ['update', 'updated', 'title'],
   dates_updated: ['set', 'set', 'date'],
+  attributes_updated: ['update', 'updated', 'attribute'],
   descs_updated: ['update', 'updated', 'description'],
   links_updated: ['re-link', 're-linked', 'photo'],
   tx_created: ['add', 'added', 'transcription'],

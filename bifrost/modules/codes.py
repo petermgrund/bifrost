@@ -14,6 +14,7 @@ from ..core.db import now
 
 MAX_MINT = 20
 REASON_MAX = 1000
+TITLE_MAX = 200
 
 RESERVED, IN_USE, WITHDRAWN = "reserved", "in use", "withdrawn"
 ATTENTION = "attention"
@@ -159,7 +160,7 @@ def _row(led: dict, code: str, live: set[str] | None, urls: Urls,
         "attention": attention,
         "in_ledger": r is not None,
         "type": _type(led, code),
-        "title": titles.get(code),
+        "title": titles.get(code) or (r["title"] if r is not None else None),
         "gramps": in_gramps,
         "gramps_url": f"{urls.gramps}/media/{code}" if urls.gramps and in_gramps else None,
         "paperless": [{"id": d, "url": f"{urls.paperless}/documents/{d}/details"
@@ -292,29 +293,53 @@ def check_new(conn: sqlite3.Connection, raw: str | None, live: Iterable[str] = (
 
 # ---- writing the ledger
 
-def _reserve(conn: sqlite3.Connection, codes: list[str]) -> None:
+def _title(raw: str | None) -> str | None:
+    text = " ".join((raw or "").split())
+    if len(text) > TITLE_MAX:
+        raise CodeError(400, f"The title is too long (at most {TITLE_MAX} characters).")
+    return text or None
+
+
+def _reserve(conn: sqlite3.Connection, codes: list[str], title: str | None = None) -> None:
     when = now()
     with conn:
-        conn.executemany("INSERT INTO minted_media (gramps_id, created_at) VALUES (?, ?)",
-                         [(code, when) for code in codes])
+        conn.executemany("INSERT INTO minted_media (gramps_id, created_at, title) VALUES (?, ?, ?)",
+                         [(code, when, title) for code in codes])
 
 
 def mint(conn: sqlite3.Connection, count: int = 1, live: Iterable[str] = (),
-         paperless: Iterable[str] = ()) -> list[str]:
+         paperless: Iterable[str] = (), title: str | None = None) -> list[str]:
     """Reserve `count` new codes, excluding every code ever seen and the guarded shapes"""
     if not isinstance(count, int) or not 1 <= count <= MAX_MINT:
         raise CodeError(400, f"Mint between 1 and {MAX_MINT} codes at a time.")
+    title = _title(title)
     existing = ids.all_ids_ever_seen(conn, live, paperless)
     codes = [ids.generate_gramps_id(existing) for _ in range(count)]
-    _reserve(conn, codes)
+    _reserve(conn, codes, title)
     return codes
 
 
 def claim(conn: sqlite3.Connection, raw: str | None, live: Iterable[str] = (),
-          paperless: Mapping[str, list] | None = None) -> str:
+          paperless: Mapping[str, list] | None = None, title: str | None = None) -> str:
     """Register a code that was written down before bifrost issued it"""
     code = check_new(conn, raw, live, paperless)
-    _reserve(conn, [code])
+    _reserve(conn, [code], _title(title))
+    return code
+
+
+def describe(conn: sqlite3.Connection, raw: str | None, title: str | None) -> str:
+    """Set or clear a reserved code's title; once minted, the Gramps media's title is the title"""
+    led = _load(conn)
+    code = normalize(raw)
+    text = _title(title)
+    r = _require_known(led, code)
+    if r["withdrawn_at"]:
+        raise CodeError(409, f"{code} is withdrawn.")
+    if r["source_system"]:
+        raise CodeError(409, f"{code} is in use, so its title is the Gramps media's.")
+    if text != r["title"]:
+        with conn:
+            conn.execute("UPDATE minted_media SET title=? WHERE gramps_id=?", (text, code))
     return code
 
 
@@ -386,7 +411,7 @@ def delete(conn: sqlite3.Connection, raw: str | None, live: Iterable[str] = (),
 
 def open_codes(conn: sqlite3.Connection, live: set[str]) -> list[dict]:
     """Reserved codes an Immich asset can take"""
-    return [{k: r[k] for k in ("code", "status", "created")}
+    return [{k: r[k] for k in ("code", "status", "title", "created")}
             for r in rows(conn, live) if r["status"] == RESERVED and r["in_ledger"]]
 
 

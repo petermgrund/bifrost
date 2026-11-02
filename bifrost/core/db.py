@@ -454,6 +454,10 @@ MIGRATIONS: list[str] = [
     DROP TABLE dated_photos;
     DROP TABLE version_labels;
     """,
+    # 33 a reserved code's working title, until its media is in Gramps
+    """
+    ALTER TABLE minted_media ADD COLUMN title TEXT;
+    """,
 ]
 
 

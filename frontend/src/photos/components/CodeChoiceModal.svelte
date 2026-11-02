@@ -9,7 +9,10 @@
 
   const shown = $derived.by(() => {
     const bare = q.replace(/[\s-]+/g, '').toUpperCase();
-    return bare ? codes.filter((c) => c.code.includes(bare)) : codes;
+    const text = q.trim().toLowerCase();
+    return text
+      ? codes.filter((c) => c.code.includes(bare) || (c.title || '').toLowerCase().includes(text))
+      : codes;
   });
 </script>
 
@@ -30,6 +33,7 @@
       {#each shown as c (c.code)}
         <ListButton selected={picked === c.code} onclick={() => (picked = c.code)}>
           <span class="font-mono">{c.code}</span>
+          {#if c.title}<span class="ms-3 truncate opacity-70">{c.title}</span>{/if}
         </ListButton>
       {:else}
         <Text size="small" color="muted">No codes match.</Text>

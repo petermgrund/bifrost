@@ -52,7 +52,7 @@ const chip = (label, on, onClick) => html`<button class="chip ${on ? 'fill' : ''
 const bare = (v) => v.replace(/[\s-]+/g, '').toUpperCase();
 
 function blankForm(mode = 'mint') {
-  return { mode, code: '', count: 1, reason: '', superseded_by: '' };
+  return { mode, code: '', count: 1, title: '', reason: '', superseded_by: '' };
 }
 
 class CodesPage extends BifrostElement {
@@ -181,7 +181,9 @@ class CodesPage extends BifrostElement {
   }
 
   openNew() { this.open('new'); }
-  openDetails(r) { this.open('details', r, { ...blankForm(), superseded_by: r.superseded_by || '' }); }
+  openDetails(r) {
+    this.open('details', r, { ...blankForm(), title: r.title || '', superseded_by: r.superseded_by || '' });
+  }
   openWithdraw(r) { this.open('withdraw', r); }
   openDelete(r) { this.open('delete', r); }
 
@@ -225,8 +227,8 @@ class CodesPage extends BifrostElement {
     this.formError = '';
     try {
       const r = claim
-        ? await post(`${API}/claim`, { code: f.code })
-        : await post(`${API}/mint`, { count });
+        ? await post(`${API}/claim`, { code: f.code, title: f.title })
+        : await post(`${API}/mint`, { count, title: count === 1 ? f.title : '' });
       this.minted = r.items;
       this.load();
     } catch (e) {
@@ -258,11 +260,19 @@ class CodesPage extends BifrostElement {
     return r?.status === 'withdrawn' && bare(this.form.superseded_by) !== (r.superseded_by || '');
   }
 
-  submitSupersede() {
+  get titleDirty() {
+    const r = this.target;
+    return r?.status === 'reserved' && this.form.title.trim() !== (r.title || '');
+  }
+
+  get detailsDirty() { return this.supersedeDirty || this.titleDirty; }
+
+  submitDetails() {
     const { code } = this.target;
-    if (!this.supersedeDirty) return;
+    if (!this.detailsDirty) return;
+    const body = this.titleDirty ? { title: this.form.title } : { superseded_by: this.form.superseded_by };
     this.change(`Saved ${code}`, () => api(`${API}/${encodeURIComponent(code)}`, {
-      method: 'PATCH', body: JSON.stringify({ superseded_by: this.form.superseded_by }),
+      method: 'PATCH', body: JSON.stringify(body),
     }));
   }
 
@@ -394,10 +404,10 @@ class CodesPage extends BifrostElement {
     return html`<a class="link mono" href="#" @click=${(e) => { e.preventDefault(); this.openCode(c); }}>${c}</a>`;
   }
 
-  facts(r) {
+  facts(r, withTitle = true) {
     const rows = [
       r.type && ['Type', TYPES[r.type]],
-      (r.type || r.title) && ['Title', r.title || 'No title'],
+      withTitle && (r.type || r.title) && ['Title', r.title || 'No title'],
       r.withdrawn_reason && ['Withdrawn', r.withdrawn_reason],
       r.superseded_by && ['Superseded by', this.codeLink(r.superseded_by)],
       r.supersedes.length && ['Supersedes', r.supersedes.map((c, i) => html`${i ? ', ' : ''}${this.codeLink(c)}`)],
@@ -430,6 +440,7 @@ class CodesPage extends BifrostElement {
     const claim = f.mode === 'claim';
     const count = Number(f.count) || 1;
     const codeError = claim && this.touched && !f.code.trim() ? 'Type the code as written' : '';
+    const single = claim || count === 1;
     const submit = () => this.submitNew();
     return html`
       <h5 id="codes-dialog-title">New code</h5>
@@ -443,6 +454,8 @@ class CodesPage extends BifrostElement {
           { mono: true, upper: true, placeholder: ' ', error: codeError, onEnter: submit })
         : selectField('How many codes', count, COUNTS,
           (e) => this.setForm({ count: Number(e.target.value) }))}
+      ${single ? field('Title', f.title, (e) => this.setForm({ title: e.target.value }),
+        { placeholder: ' ', onEnter: submit }) : nothing}
       ${this.formError ? html`<p>${statusLine('error', this.formError)}</p>` : nothing}
       <nav class="right-align">
         ${btn('Cancel', this.saving, () => this.closeDialog(), 'border')}
@@ -472,15 +485,19 @@ class CodesPage extends BifrostElement {
   renderDetails() {
     const r = this.target;
     const withdrawn = r.status === 'withdrawn';
-    const dirty = this.supersedeDirty;
+    const reserved = r.status === 'reserved';
+    const dirty = this.detailsDirty;
+    const save = () => this.submitDetails();
     return html`
       <div class="codes-head">
         <div class="max">
           <h5 id="codes-dialog-title"><span class="mono">${r.code}</span></h5>
-          ${this.facts(r)}
+          ${this.facts(r, !reserved)}
+          ${reserved ? field('Title', this.form.title, (e) => this.setForm({ title: e.target.value }),
+            { placeholder: ' ', onEnter: save }) : nothing}
           ${withdrawn ? field('Superseded by', this.form.superseded_by,
             (e) => this.setForm({ superseded_by: e.target.value }),
-            { mono: true, upper: true, placeholder: ' ', onEnter: () => this.submitSupersede() }) : nothing}
+            { mono: true, upper: true, placeholder: ' ', onEnter: save }) : nothing}
         </div>
         ${r.gramps && !this.thumbGone ? html`<img class="codes-thumb" alt=""
           src="${API}/${encodeURIComponent(r.code)}/thumbnail"
@@ -491,9 +508,9 @@ class CodesPage extends BifrostElement {
       <nav>
         ${r.deletable ? btn('Delete', this.saving, () => this.openDelete(r), 'border error-text') : nothing}
         <div class="max"></div>
-        ${withdrawn ? html`
+        ${withdrawn || reserved ? html`
           ${btn(dirty ? 'Cancel' : 'Close', this.saving, () => this.closeDialog(), 'border')}
-          ${btn(this.saving ? 'Saving...' : 'Save', this.saving || !dirty, () => this.submitSupersede())}`
+          ${btn(this.saving ? 'Saving...' : 'Save', this.saving || !dirty, save)}`
           : html`<button autofocus @click=${() => this.closeDialog()}>Close</button>`}
       </nav>`;
   }

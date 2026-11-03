@@ -107,6 +107,7 @@ async def list_codes(request: Request, status: str = "", q: str = "") -> dict:
 
 class MintBody(BaseModel):
     count: int = 1
+    title: str = ""
 
 
 @router.post("/api/mint")
@@ -116,7 +117,7 @@ async def mint(request: Request, body: MintBody) -> dict:
         if not 1 <= body.count <= codes.MAX_MINT:
             raise codes.CodeError(400, f"Mint between 1 and {codes.MAX_MINT} codes at a time.")
         live, paperless = await _taken(st)
-        new = codes.mint(st.conn, body.count, live, paperless)
+        new = codes.mint(st.conn, body.count, live, paperless, body.title)
     except codes.CodeError as exc:
         raise _refuse(exc)
     items = {r["code"]: r for r in codes.rows(st.conn, live, _urls(st.cfg), only=new)}
@@ -125,6 +126,7 @@ async def mint(request: Request, body: MintBody) -> dict:
 
 class ClaimBody(BaseModel):
     code: str = ""
+    title: str = ""
 
 
 @router.post("/api/claim")
@@ -134,7 +136,7 @@ async def claim(request: Request, body: ClaimBody) -> dict:
     try:
         codes.check_new(st.conn, body.code)
         live, paperless = await _taken(st)
-        code = codes.claim(st.conn, body.code, live, paperless)
+        code = codes.claim(st.conn, body.code, live, paperless, body.title)
     except codes.CodeError as exc:
         raise _refuse(exc)
     return {"codes": [code], "items": [_item(st, code, live)]}
@@ -206,15 +208,19 @@ async def withdraw(request: Request, code: str, body: WithdrawBody) -> dict:
 
 
 class PatchBody(BaseModel):
+    title: str | None = None
     superseded_by: str | None = None
 
 
 @router.patch("/api/{code}")
 async def patch(request: Request, code: str, body: PatchBody) -> dict:
-    """Name, change or clear the code that takes a withdrawn code's place"""
+    """A reserved code's title, or the code that takes a withdrawn code's place"""
     st = _state(request)
     try:
-        code = codes.supersede(st.conn, code, body.superseded_by)
+        if "title" in body.model_fields_set:
+            code = codes.describe(st.conn, code, body.title)
+        else:
+            code = codes.supersede(st.conn, code, body.superseded_by)
     except codes.CodeError as exc:
         raise _refuse(exc)
     return {"item": _item(st, code)}

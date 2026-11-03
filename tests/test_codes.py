@@ -92,7 +92,7 @@ def test_migration_32_folds_the_ledger_into_minted_media(tmp_path):
     rows = {r["gramps_id"]: dict(r) for r in conn.execute("SELECT * FROM minted_media")}
     assert set(rows) == {MNTD22, "RSVMNT", "RSVD22", "WDRSVD", "WDONLY", "SCAN22"} | RETIRED
     assert set(rows[MNTD22]) == {"gramps_id", "source_system", "source_id", "created_at", "minted_at",
-                                 "withdrawn_at", "withdrawn_reason", "superseded_by"}
+                                 "withdrawn_at", "withdrawn_reason", "superseded_by", "title"}
     minted = rows[MNTD22]
     assert (minted["source_system"], minted["source_id"]) == ("immich", "asset-1")
     assert minted["created_at"] == minted["minted_at"] == "2026-02-01T10:00:00"
@@ -313,9 +313,48 @@ def test_history_is_chronological(conn):
     assert by_code(conn, live={"GRMP22"})["GRMP22"]["history"] == []
 
 
-def test_title_comes_from_gramps(conn):
+def test_title_comes_from_gramps_or_the_ledger(conn):
+    codes.describe(conn, "rsvd-22", "  Loose print,  back of the album ")
+    conn.execute("UPDATE minted_media SET title='Mario' WHERE gramps_id=?", (MNTD22,))
     rows = by_code(conn, titles={MNTD22: "Mario, First Communion 1952"})
-    assert rows[MNTD22]["title"] == "Mario, First Communion 1952" and rows["RSVD22"]["title"] is None
+    assert rows[MNTD22]["title"] == "Mario, First Communion 1952"
+    assert rows["RSVD22"]["title"] == "Loose print, back of the album" and rows["PENCHD"]["title"] is None
+    assert by_code(conn, titles={MNTD22: ""})[MNTD22]["title"] == "Mario"
+    assert codes.search(codes.rows(conn, {MNTD22}, URLS), "album")[0]["code"] == "RSVD22"
+
+
+def test_describe_sets_and_clears_a_reserved_codes_title(conn):
+    assert codes.describe(conn, "rsvd22", "Loose print") == "RSVD22"
+    assert ledger_row(conn, "RSVD22")["title"] == "Loose print"
+    codes.describe(conn, "RSVD22", "   ")
+    assert ledger_row(conn, "RSVD22")["title"] is None
+    codes.describe(conn, "RSVD22", None)
+    assert by_code(conn)["RSVD22"]["title"] is None
+
+
+@pytest.mark.parametrize("code,title,status,msg", [
+    ("", "x", 400, "No code given"), ("NOPE22", "x", 404, "not in the ledger"),
+    ("JYMZ", "x", 409, "is withdrawn"), (MNTD22, "x", 409, "in use"),
+    ("RSVD22", "x" * 201, 400, "too long"),
+])
+def test_describe_refusals(conn, code, title, status, msg):
+    with pytest.raises(codes.CodeError, match=msg) as exc:
+        codes.describe(conn, code, title)
+    assert exc.value.status == status
+    assert ledger_row(conn, "RSVD22")["title"] is None
+
+
+def test_mint_and_claim_take_a_title(conn, script_ids):
+    script_ids("FRESH2")
+    assert codes.mint(conn, title=" Box 3,  loose prints ") == ["FRESH2"]
+    assert ledger_row(conn, "FRESH2")["title"] == "Box 3, loose prints"
+    assert codes.claim(conn, "w9tp-4f", title="Album cover") == "W9TP4F"
+    assert ledger_row(conn, "W9TP4F")["title"] == "Album cover"
+    assert codes.claim(conn, "X2BR7N", title="  ") == "X2BR7N"
+    assert ledger_row(conn, "X2BR7N")["title"] is None
+    with pytest.raises(codes.CodeError, match="too long"):
+        codes.mint(conn, title="x" * 201)
+    assert ledger_codes(conn) == SEEDED | {"FRESH2", "W9TP4F", "X2BR7N"}
 
 
 # ---- withdraw, supersede, delete
@@ -415,9 +454,10 @@ def test_deleting_refuses_codes_held_elsewhere(conn):
 # ---- open codes and the CSV
 
 def test_open_codes_are_the_ones_a_photo_can_take(conn):
+    codes.describe(conn, "RSVD22", "Loose print")
     assert codes.open_codes(conn, {MNTD22}) == [
-        {"code": "PENCHD", "status": "reserved", "created": "2026-03-02T10:00:00"},
-        {"code": "RSVD22", "status": "reserved", "created": "2026-03-01T10:00:00"}]
+        {"code": "PENCHD", "status": "reserved", "title": None, "created": "2026-03-02T10:00:00"},
+        {"code": "RSVD22", "status": "reserved", "title": "Loose print", "created": "2026-03-01T10:00:00"}]
     assert [c["code"] for c in codes.open_codes(conn, {MNTD22, "RSVD22", "GRMP22"})] == ["PENCHD"]
     codes.withdraw(conn, "PENCHD", "wrong print")
     assert codes.open_codes(conn, {MNTD22, "RSVD22"}) == []
@@ -592,6 +632,28 @@ def test_api_claim(conn, code, status, msg):
         assert gramps.calls == (1 if code == "PPR222" else 0)
     else:
         assert r.json()["codes"] == ["FRSH22"] and r.json()["items"][0]["status"] == "reserved"
+
+
+def test_api_patch_titles_a_reserved_code(conn):
+    app = make_app(conn)
+    r = call(app, "PATCH", "/codes/api/rsvd22", json={"title": " Loose  print "})
+    assert r.status_code == 200 and r.json()["item"]["title"] == "Loose print"
+    r = call(app, "PATCH", "/codes/api/RSVD22", json={"title": None})
+    assert r.status_code == 200 and r.json()["item"]["title"] is None
+    assert call(app, "PATCH", "/codes/api/RSVD22", json={"title": "x" * 201}).status_code == 400
+    assert call(app, "PATCH", f"/codes/api/{MNTD22}", json={"title": "Mario"}).status_code == 409
+    assert call(app, "PATCH", "/codes/api/JYMZ", json={"title": "late"}).status_code == 409
+    assert call(app, "PATCH", "/codes/api/NOPE22", json={"title": "x"}).status_code == 404
+
+
+def test_api_mint_and_claim_take_a_title(conn, script_ids):
+    script_ids("FRESH2")
+    r = call(make_app(conn), "POST", "/codes/api/mint", json={"count": 1, "title": " Box 3 "})
+    assert r.status_code == 200, r.text
+    assert [(i["code"], i["title"]) for i in r.json()["items"]] == [("FRESH2", "Box 3")]
+    r = call(make_app(conn), "POST", "/codes/api/claim", json={"code": "w9tp-4f", "title": "Album cover"})
+    assert r.status_code == 200, r.text
+    assert [(i["code"], i["status"], i["title"]) for i in r.json()["items"]] == [("W9TP4F", "reserved", "Album cover")]
 
 
 def test_api_withdraw_patch_and_delete(conn):

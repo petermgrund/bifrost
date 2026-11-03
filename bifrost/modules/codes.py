@@ -1,5 +1,3 @@
-"""The Codes ledger: every code Bifrost issued, claimed or withdrew, and the media it stands for"""
-
 from __future__ import annotations
 
 import csv
@@ -27,7 +25,6 @@ CSV_COLUMNS = (
 
 
 class CodeError(Exception):
-    """A refused ledger change, with the HTTP status that fits it"""
 
     def __init__(self, status: int, detail: str) -> None:
         super().__init__(detail)
@@ -37,19 +34,16 @@ class CodeError(Exception):
 
 @dataclass(frozen=True)
 class Urls:
-    """Public base URLs for the 'used in' links; empty means no link"""
     gramps: str = ""
     paperless: str = ""
     immich: str = ""
 
 
 def normalize(raw: str | None) -> str:
-    """' phkn-3d ' -> 'PHKN3D'"""
     return re.sub(r"[\s-]+", "", raw or "").upper()
 
 
 def status_filter(raw: str | None) -> str | None:
-    """'in_use' -> 'in use', 'needs attention' -> 'attention', '' -> None"""
     text = " ".join((raw or "").lower().replace("_", " ").replace("-", " ").split())
     if not text or text == "all":
         return None
@@ -58,7 +52,7 @@ def status_filter(raw: str | None) -> str | None:
     if text in STATUSES:
         return text
     raise ValueError(
-        f"unknown status {raw!r}: use reserved, in use, withdrawn or attention")
+        f"unknown status {raw!r}")
 
 
 # ---- reading the ledger
@@ -89,7 +83,6 @@ def _status(led: dict, code: str, live: set[str] | None) -> str:
 
 
 def _record(led: dict, code: str) -> str | None:
-    """Where a code's digital record lives, like 'Immich' or 'Paperless document 16'"""
     r = led["codes"].get(code)
     if r is not None and r["source_system"]:
         return "Immich" if r["source_system"] == "immich" else f"Paperless document {r['source_id']}"
@@ -98,7 +91,6 @@ def _record(led: dict, code: str) -> str | None:
 
 
 def _type(led: dict, code: str) -> str | None:
-    """'image' for a code minted from Immich, 'document' for one in Paperless"""
     r = led["codes"].get(code)
     if r is not None and r["source_system"]:
         return "image" if r["source_system"] == "immich" else "document"
@@ -106,7 +98,6 @@ def _type(led: dict, code: str) -> str | None:
 
 
 def _history(led: dict, code: str) -> list[dict]:
-    """What happened to a code, oldest first"""
     r = led["codes"].get(code)
     if r is None:
         return []
@@ -123,7 +114,6 @@ def _history(led: dict, code: str) -> list[dict]:
 
 
 def _deletable(led: dict, code: str, live: set[str] | None) -> bool:
-    """Only reserved: never minted, withdrawn or in Gramps"""
     r = led["codes"].get(code)
     return (r is not None and not r["source_system"] and not r["withdrawn_at"]
             and code not in led["versions"] and code not in (live or ()))
@@ -147,11 +137,11 @@ def _row(led: dict, code: str, live: set[str] | None, urls: Urls,
         missing = [name for name, gone in (("Gramps", in_gramps is False), ("Paperless", deleted))
                    if gone]
         if r is None:
-            attention = "In Gramps, but not in bifrost's ledger"
+            attention = "In Gramps but not in Bifrost's ledger"
         elif missing:
             attention = f"Deleted from {' and '.join(missing)}"
     elif status == WITHDRAWN and in_gramps:
-        attention = "Withdrawn, but still in Gramps"
+        attention = "Withdrawn but still need to delete in Gramps"
 
     return {
         "code": code,
@@ -182,9 +172,6 @@ def rows(conn: sqlite3.Connection, live: set[str] | None, urls: Urls = Urls(),
          only: Iterable[str] | None = None,
          titles: Mapping[str, str] | None = None,
          documents: set[str] | None = None) -> list[dict]:
-    """Every code, newest first. live=None means Gramps could not be read, so
-    'in use' rests on the ledger alone and missing media can't be flagged;
-    documents=None likewise for Paperless"""
     titles = titles or {}
     led = _load(conn)
     codes = set(led["codes"])
@@ -193,7 +180,6 @@ def rows(conn: sqlite3.Connection, live: set[str] | None, urls: Urls = Urls(),
     if only is not None:
         codes &= {normalize(c) for c in only}
     out = [_row(led, c, live, urls, titles, documents) for c in codes]
-    # birth date newest first; codes with none, like the retired 4-character ones, go last
     out.sort(key=lambda r: r["code"])
     out.sort(key=lambda r: (r["created"] or "")[:19], reverse=True)
     return out
@@ -251,7 +237,7 @@ def _where_seen(led: dict, code: str, live: set[str],
         return (f"{code} is already in use: minted from {source} {r['source_id']} "
                 f"on {(r['minted_at'] or '')[:10]}.")
     if r is not None:
-        return f"{code} is already in the ledger: reserved since {(r['created_at'] or '')[:10]}."
+        return f"{code} is already in the ledger and reserved since {(r['created_at'] or '')[:10]}."
     if code in live:
         return f"{code} is already the ID of a Gramps media object."
     if code in paperless:
@@ -262,21 +248,20 @@ def _where_seen(led: dict, code: str, live: set[str],
 
 def check_new(conn: sqlite3.Connection, raw: str | None, live: Iterable[str] = (),
               paperless: Mapping[str, list] | None = None) -> str:
-    """A code written down by hand, normalized, if it may enter the ledger"""
     led = _load(conn)
     code = normalize(raw)
     if not code:
-        raise CodeError(400, "Type the code as it is written.")
+        raise CodeError(400, "Type the code as written.")
     r = led["codes"].get(code)
     if r is not None and r["withdrawn_at"]:
         raise CodeError(409, f"{code} was withdrawn on {r['withdrawn_at'][:10]}: "
-                             f"{r['withdrawn_reason']}. A withdrawn code is never used again.")
+                             f"{r['withdrawn_reason']}.")
     bad = sorted({ch for ch in code if ch not in ids.CHARSET})
     if bad:
-        raise CodeError(400, f"{code} contains {', '.join(bad)}, which no code uses. "
-                             "Codes use A-Z and 2-9, never I, L, O, 0 or 1.")
+        raise CodeError(400, f"{code} contains {', '.join(bad)}. "
+                             "Codes use A-Z and 2-9 but avoid ambiguous characters I, L, O, 0 and 1.")
     if len(code) != 6:
-        raise CodeError(400, f"{code} has {len(code)} characters; a code has exactly 6.")
+        raise CodeError(400, f"{code} has {len(code)} characters.")
     why = ids.guard_reason(code)
     if why:
         raise CodeError(400, f"{code} {why}, so it is never used as a code.")
@@ -301,7 +286,6 @@ def _reserve(conn: sqlite3.Connection, codes: list[str]) -> None:
 
 def mint(conn: sqlite3.Connection, count: int = 1, live: Iterable[str] = (),
          paperless: Iterable[str] = ()) -> list[str]:
-    """Reserve `count` new codes, excluding every code ever seen and the guarded shapes"""
     if not isinstance(count, int) or not 1 <= count <= MAX_MINT:
         raise CodeError(400, f"Mint between 1 and {MAX_MINT} codes at a time.")
     existing = ids.all_ids_ever_seen(conn, live, paperless)
@@ -312,14 +296,12 @@ def mint(conn: sqlite3.Connection, count: int = 1, live: Iterable[str] = (),
 
 def claim(conn: sqlite3.Connection, raw: str | None, live: Iterable[str] = (),
           paperless: Mapping[str, list] | None = None) -> str:
-    """Register a code that was written down before bifrost issued it"""
     code = check_new(conn, raw, live, paperless)
     _reserve(conn, [code])
     return code
 
 
 def _superseding(led: dict, code: str, raw: str | None) -> str | None:
-    """A code in the ledger, other than this one and not withdrawn, that takes its place"""
     other = normalize(raw)
     if not other:
         return None
@@ -335,14 +317,13 @@ def _superseding(led: dict, code: str, raw: str | None) -> str | None:
 
 def withdraw(conn: sqlite3.Connection, raw: str | None, reason: str | None,
              superseded_by: str | None = None) -> str:
-    """Retire a code for good, optionally naming the code that takes its place"""
     led = _load(conn)
     code = normalize(raw)
     text = " ".join((reason or "").split())
     if not text:
-        raise CodeError(400, "Give a reason. The ledger keeps it with the code for good.")
+        raise CodeError(400, "Give a reason.")
     if len(text) > REASON_MAX:
-        raise CodeError(400, f"The reason is too long (at most {REASON_MAX} characters).")
+        raise CodeError(400, f"The reason is too long.")
     r = _require_known(led, code)
     if r["withdrawn_at"]:
         raise CodeError(409, f"{code} was already withdrawn on {r['withdrawn_at'][:10]}: "
@@ -356,12 +337,11 @@ def withdraw(conn: sqlite3.Connection, raw: str | None, reason: str | None,
 
 
 def supersede(conn: sqlite3.Connection, raw: str | None, superseded_by: str | None) -> str:
-    """Name, change or clear the code that takes a withdrawn code's place"""
     led = _load(conn)
     code = normalize(raw)
     r = _require_known(led, code)
     if not r["withdrawn_at"]:
-        raise CodeError(409, f"{code} is not withdrawn, so nothing supersedes it.")
+        raise CodeError(409, f"{code} is not withdrawn so nothing supersedes it.")
     other = _superseding(led, code, superseded_by)
     if other != r["superseded_by"]:
         with conn:
@@ -371,12 +351,11 @@ def supersede(conn: sqlite3.Connection, raw: str | None, superseded_by: str | No
 
 def delete(conn: sqlite3.Connection, raw: str | None, live: Iterable[str] = (),
            paperless: Mapping[str, list] | None = None) -> str:
-    """Remove a reservation nothing has used yet; the code may be issued again"""
     led = _load(conn)
     code = normalize(raw)
     _require_known(led, code)
     if not _deletable(led, code, set(live)) or code in (paperless or {}):
-        raise CodeError(409, f"{code} has been used, so it can only be withdrawn.")
+        raise CodeError(409, f"{code} has been used so it can only be withdrawn.")
     if led["supersedes"].get(code):
         raise CodeError(409, f"{code} supersedes {', '.join(led['supersedes'][code])}.")
     with conn:
@@ -385,7 +364,6 @@ def delete(conn: sqlite3.Connection, raw: str | None, live: Iterable[str] = (),
 
 
 def open_codes(conn: sqlite3.Connection, live: set[str]) -> list[dict]:
-    """Reserved codes an Immich asset can take"""
     return [{k: r[k] for k in ("code", "status", "created")}
             for r in rows(conn, live) if r["status"] == RESERVED and r["in_ledger"]]
 
@@ -393,7 +371,6 @@ def open_codes(conn: sqlite3.Connection, live: set[str]) -> list[dict]:
 # ---- export
 
 def to_csv(items: list[dict]) -> str:
-    """Every column of every code; the BOM makes Excel read it as UTF-8 (å ä ö)"""
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(CSV_COLUMNS)

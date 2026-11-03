@@ -9,9 +9,6 @@ CHARSET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 
 MANUAL_ID_RE = re.compile(rf"^[{CHARSET}]{{6}}$")
 
-# an undotted location mark (B2C3F4 = box 2, compartment 3, folder 1; S1 = shelf 1).
-# Anchored: real ids that merely start with B or S and a digit, like B36Z55, pass
-LOCATION_SHAPE_RE = re.compile(r"^[BS][1-9][0-9]*(C[1-9][0-9]*)?(F[1-9][0-9]*)?$")
 STOP_WORDS = frozenset({"README", "SCHEME"})
 
 
@@ -20,12 +17,8 @@ class IdReused(sqlite3.IntegrityError):
 
 
 def guard_reason(code: str) -> str | None:
-    """Why an otherwise well-formed id must never be issued, or None"""
     if re.fullmatch(r"[0-9]+", code):
         return "is all digits, like a Paperless document number"
-    if LOCATION_SHAPE_RE.match(code):
-        dotted = re.sub(r"(?<=[0-9])(?=[CF])", ".", code)
-        return f"looks like the location mark {dotted}"
     if code in STOP_WORDS:
         return "is a reserved word"
     return None
@@ -58,10 +51,6 @@ def all_ids_ever_seen(
     *,
     open_reservations: bool = True,
 ) -> set[str]:
-    """Every id that must never be handed out again: the whole ledger (reserved, minted,
-    withdrawn, media gone from Gramps or not), live Gramps media ids and the Paperless
-    gramps_id field. open_reservations=False leaves out reserved codes nothing has taken,
-    so a manual id can claim its own reservation"""
     query = "SELECT gramps_id FROM minted_media"
     if not open_reservations:
         query += " WHERE source_system IS NOT NULL OR withdrawn_at IS NOT NULL"
@@ -72,8 +61,6 @@ def all_ids_ever_seen(
 
 def register_minted(conn: sqlite3.Connection, gramps_id: str, source_system: str,
                     source_id: str, when: str) -> None:
-    """Record the media a code now stands for: a new row, or its reservation taken;
-    a code that already has a media or was withdrawn is never overwritten"""
     row = conn.execute(
         "SELECT source_system, source_id, withdrawn_at FROM minted_media WHERE gramps_id=?",
         (gramps_id,)).fetchone()

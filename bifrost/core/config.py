@@ -72,6 +72,47 @@ class GeminiConfig:
     thinking_budget: int | None = None
 
 
+# the words a `Cited for` row may hold: the Gramps event type in lower case for a dated fact,
+# and these for everything else (house style, Part A)
+DEFAULT_CITED_FOR = (
+    "identity", "name", "birth", "birthplace", "age", "baptism", "confirmation",
+    "mother", "father", "parents", "child", "spouse", "marriage", "divorce",
+    "death", "burial", "residence", "household", "census", "occupation",
+    "emigration", "immigration", "naturalization", "military", "muster",
+    "property", "probate", "inventory", "will", "depicts", "place",
+)
+
+# words an attached event of this type accounts for, beyond its own name in lower case
+DEFAULT_CLAIM_WORDS = (
+    ("Birth", ("birth", "birthplace", "age")),
+    ("Baptism", ("baptism",)),
+    ("Christening", ("baptism",)),
+    ("Burial", ("burial",)),
+    ("Cremation", ("burial",)),
+    ("Marriage", ("marriage", "spouse")),
+    ("Marriage Banns", ("marriage",)),
+    ("Residence", ("residence", "household")),
+    ("Census", ("census", "household", "residence")),
+    ("Probate", ("probate", "inventory", "will")),
+    ("Military Service", ("military", "muster")),
+)
+
+DEFAULT_EVIDENCE_TAGS = (
+    ("unproven", "Unproven"), ("conflict", "Conflict"), ("lapse", "Lapse"), ("disproven", "Disproven"))
+
+
+@dataclass(frozen=True)
+class EvidenceConfig:
+    """The Evidence section: claims, proofs and audits over the citations in Gramps"""
+    enabled: bool = False
+    cited_for: tuple[str, ...] = DEFAULT_CITED_FOR
+    claim_words: tuple[tuple[str, tuple[str, ...]], ...] = DEFAULT_CLAIM_WORDS
+    tags: tuple[tuple[str, str], ...] = DEFAULT_EVIDENCE_TAGS
+
+    def tag(self, status: str) -> str:
+        return dict(self.tags)[status]
+
+
 @dataclass(frozen=True)
 class Config:
     gramps: GrampsConfig
@@ -82,6 +123,7 @@ class Config:
     sync_immich: SyncImmichConfig = SyncImmichConfig()
     sync_paperless: SyncPaperlessConfig = SyncPaperlessConfig()
     gemini: GeminiConfig = GeminiConfig()
+    evidence: EvidenceConfig = EvidenceConfig()
 
 
 # attributes the Paperless sync writes for its own purposes; a mirrored field may not take their names
@@ -120,6 +162,65 @@ def parse_attribute_fields(block: dict) -> tuple[tuple[int, str], ...]:
             raise ConfigError(f"sync.paperless.attribute_fields: field {fid} or {text!r} is listed twice")
         out.append((fid, text))
     return tuple(out)
+
+
+def _words(raw, where: str) -> tuple[str, ...]:
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, (list, tuple)):
+        raise ConfigError(f"{where} must be a list of words")
+    out: list[str] = []
+    for w in raw:
+        word = " ".join(str(w or "").split()).lower()
+        if not word or "," in word or ";" in word or ":" in word:
+            raise ConfigError(f"{where}: {w!r} is not a single word")
+        if word not in out:
+            out.append(word)
+    return tuple(out)
+
+
+def parse_evidence(block: dict) -> EvidenceConfig:
+    """The evidence block: a switch, the `Cited for` vocabulary, the words an event type accounts
+    for, and the four status tags. Every claim word must be in the vocabulary"""
+    if block is None:
+        return EvidenceConfig()
+    if not isinstance(block, dict):
+        raise ConfigError("evidence must be a mapping")
+    cited_for = (_words(block["cited_for"], "evidence.cited_for")
+                 if block.get("cited_for") is not None else DEFAULT_CITED_FOR)
+    claim_words: list[tuple[str, tuple[str, ...]]] = []
+    raw_words = block.get("claim_words")
+    if raw_words is None:
+        claim_words = list(DEFAULT_CLAIM_WORDS)
+    elif not isinstance(raw_words, dict):
+        raise ConfigError("evidence.claim_words must map event types to lists of words")
+    else:
+        for etype, words in raw_words.items():
+            claim_words.append((str(etype).strip(), _words(words, f"evidence.claim_words.{etype}")))
+    for etype, words in claim_words:
+        for w in words:
+            if w not in cited_for:
+                raise ConfigError(f"evidence.claim_words.{etype}: {w!r} is not in evidence.cited_for")
+    tags = dict(DEFAULT_EVIDENCE_TAGS)
+    raw_tags = block.get("tags")
+    if raw_tags is not None:
+        if not isinstance(raw_tags, dict):
+            raise ConfigError("evidence.tags must map unproven/conflict/lapse/disproven to tag names")
+        for status, name in raw_tags.items():
+            if status not in tags:
+                raise ConfigError(f"evidence.tags: unknown status {status!r}")
+            text = " ".join(str(name or "").split())
+            if not text:
+                raise ConfigError(f"evidence.tags.{status} needs a tag name")
+            tags[status] = text
+    if len(set(tags.values())) != len(tags):
+        raise ConfigError("evidence.tags: two statuses share a tag name")
+    return EvidenceConfig(
+        enabled=bool(block.get("enabled", False)),
+        cited_for=cited_for,
+        claim_words=tuple(claim_words),
+        tags=tuple(tags.items()),
+    )
 
 
 DEFAULT_PATH = Path(__file__).resolve().parents[2] / "config.yaml"
@@ -245,4 +346,5 @@ def load_config(path: str | Path | None = None) -> Config:
             model=gem_raw.get("model") or "gemini-3-flash-preview",
             thinking_budget=gem_raw.get("thinking_budget"),
         ),
+        evidence=parse_evidence(raw.get("evidence")),
     )

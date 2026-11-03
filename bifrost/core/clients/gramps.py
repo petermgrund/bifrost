@@ -106,8 +106,13 @@ class GrampsClient:
         resp = await self._request("GET", "/metadata/")
         return resp.json()
 
-    async def list_people(self, keys: str | None = None) -> list[dict]:
-        return await self._paged("/people/", **({"keys": keys} if keys else {}))
+    async def list_people(self, keys: str | None = None, **params) -> list[dict]:
+        return await self._paged("/people/", **({"keys": keys} if keys else {}), **params)
+
+    async def list_objects(self, api_path: str, keys: str | None = None, **params) -> list[dict]:
+        """Every object of one kind; keys narrows the fields, params go to the endpoint
+        (backlinks="true", profile="self", locale="en", ...)"""
+        return await self._paged(f"/{api_path}/", **({"keys": keys} if keys else {}), **params)
 
     async def get_person(self, handle: str, ok_404: bool = False) -> dict | None:
         resp = await self._request("GET", f"/people/{handle}", ok_404=ok_404)

@@ -39,6 +39,14 @@ sync:
     #   11: "Record URL"
     #   18: "Record URL access"
 
+# The Evidence section: claims, proofs and audits over the citations in Gramps (read-only).
+evidence:
+  enabled: false
+  # cited_for: [identity, name, birth, ...]   # the `Cited for` vocabulary; defaults to the house-style list
+  # claim_words:                               # words an attached event of this type accounts for
+  #   Probate: [probate, inventory, will]
+  # tags: {unproven: Unproven, conflict: Conflict, lapse: Lapse, disproven: Disproven}
+
 gemini:
   api_key: "REPLACE_ME"
   model: "gemini-3-flash-preview"

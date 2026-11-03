@@ -168,3 +168,14 @@ input[type="color"].seed-input {
 .seed-input::-moz-color-swatch { border: none; border-radius: 0.35rem; }
 config-page table td { block-size: auto; padding-block: 0.25rem; }
 
+
+/* Evidence section */
+.ev-people, .ev-claims { max-block-size: 50vh; }
+.ev-people li, .ev-claims li { cursor: pointer; }
+.ev-stars { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-block: 0.25rem 0.5rem; }
+.ev-missing { margin-block: 0.25rem 0; padding-inline-start: 1.25rem; }
+.ev-rows td { vertical-align: top; }
+.ev-check summary nav .chev { transition: transform var(--speed2); }
+.ev-check[open] summary nav .chev { transform: rotate(90deg); }
+.ev-id { white-space: nowrap; }
+.pre { white-space: pre-wrap; }

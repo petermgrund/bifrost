@@ -6,6 +6,7 @@ import './reprocess-page.js';
 import './faces-backfill-page.js';
 import './codes-page.js';
 import './reconcile-page.js';
+import './evidence-page.js';
 
 const SECTIONS = [
   { id: 'sync', title: 'Sync',
@@ -23,6 +24,8 @@ const SECTIONS = [
     body: html`<codes-page></codes-page>
       <div class="large-space"></div>
       <reconcile-page></reconcile-page>` },
+  { id: 'evidence', title: 'Evidence', desc: 'Claims, proofs and audits over the citations in Gramps',
+    body: html`<evidence-page></evidence-page>` },
   { id: 'other', title: 'Other tools', desc: 'Other tools for managing your data',
     body: html`<reprocess-page></reprocess-page>` },
 ];

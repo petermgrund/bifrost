@@ -1,5 +1,3 @@
-"""Read-only v1 views of what only Bifrost holds: the Codes ledger, collections, photo links"""
-
 from __future__ import annotations
 
 import sqlite3

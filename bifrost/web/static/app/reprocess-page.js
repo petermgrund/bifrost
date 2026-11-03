@@ -5,7 +5,7 @@ class ReprocessPage extends SyncPage {
   get jobName() { return 'reprocess.widths'; }
   get itemColLabel() { return 'Paperless document'; }
   get lastColLabel() { return 'Pages'; }
-  get scanHeading() { return 'Scan Paperless for mixed-width documents'; }
+  get scanHeading() { return 'Normalize mixed-width documents'; }
 
   lastCol(r) { return r.data.pages ?? ' '; }
 }

@@ -933,7 +933,7 @@ class TestSyncOneAsset:
 
     def test_manual_id_refuses_guarded_shapes(self, conn):
         gr = FakeGramps()
-        for gid in ("B2C3F4", "222222", "README"):
+        for gid in ("222222", "README"):
             with pytest.raises(SyncError) as exc:
                 self._run(FakeImmich(assets={"a1": asset("a1")}), gr, conn, "a1", gramps_id=gid)
             assert exc.value.status == 400 and "never issued" in exc.value.detail

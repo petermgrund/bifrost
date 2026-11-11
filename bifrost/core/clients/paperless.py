@@ -71,6 +71,11 @@ class PaperlessClient:
         results = resp.json().get("results", [])
         return results[0]["id"] if results else None
 
+    async def list_documents(self, fields: str | None = None) -> list[dict]:
+        """Every doc paginated"""
+        params = {"fields": fields} if fields else None
+        return await self._paginated("/api/documents/", params=params)
+
     async def list_documents_by_tags(self, tag_ids: list[int]) -> list[dict]:
         """All docs carrying any  given tags"""
         if not tag_ids:

@@ -293,7 +293,7 @@ def _reserve(conn: sqlite3.Connection, codes: list[str], title: str | None = Non
 
 
 def mint(conn: sqlite3.Connection, count: int = 1, live: Iterable[str] = (),
-         paperless: Iterable[str] = ()) -> list[str]:
+         paperless: Iterable[str] = (), title: str | None = None) -> list[str]:
     if not isinstance(count, int) or not 1 <= count <= MAX_MINT:
         raise CodeError(400, f"Mint between 1 and {MAX_MINT} codes at a time.")
     title = _title(title)
@@ -304,7 +304,7 @@ def mint(conn: sqlite3.Connection, count: int = 1, live: Iterable[str] = (),
 
 
 def claim(conn: sqlite3.Connection, raw: str | None, live: Iterable[str] = (),
-          paperless: Mapping[str, list] | None = None) -> str:
+          paperless: Mapping[str, list] | None = None, title: str | None = None) -> str:
     code = check_new(conn, raw, live, paperless)
     _reserve(conn, [code], _title(title))
     return code
@@ -389,7 +389,7 @@ def delete(conn: sqlite3.Connection, raw: str | None, live: Iterable[str] = (),
 
 
 def open_codes(conn: sqlite3.Connection, live: set[str]) -> list[dict]:
-    return [{k: r[k] for k in ("code", "status", "created")}
+    return [{k: r[k] for k in ("code", "status", "title", "created")}
             for r in rows(conn, live) if r["status"] == RESERVED and r["in_ledger"]]
 
 

@@ -4,6 +4,7 @@ import './immich-sync-page.js';
 import './transcribe-page.js';
 import './reprocess-page.js';
 import './faces-backfill-page.js';
+import './ancestry-links-page.js';
 import './codes-page.js';
 import './reconcile-page.js';
 
@@ -14,7 +15,9 @@ const SECTIONS = [
       <div class="large-space"></div>
       <immich-sync-page></immich-sync-page>
       <div class="large-space"></div>
-      <faces-backfill-page></faces-backfill-page>` },
+      <faces-backfill-page></faces-backfill-page>
+      <div class="large-space"></div>
+      <ancestry-links-page></ancestry-links-page>` },
   { id: 'photos', title: 'Photos', desc: 'Curate Immich photos for Gramps',
     body: html`<a class="button" href="/photos"><span>Open Photos</span></a>` },
   { id: 'transcribe', title: 'Transcribe', desc: 'Run OCR on Paperless docs',

@@ -15,6 +15,7 @@ Your family-tree data itself always lives in Gramps, and documents/photos/videos
 * Describe Immich photos in the Photos editor to add them to Gramps as media objects. Title, date (fuzzy dates like about 1920 or before June 1955), place, notes and web links.
 * Sync documents in Paperless-ngx to Gramps Web as media objects, and keep their versions, titles, dates, and transcription text up to date. Chosen custom fields are mirrored as attributes on the media object (`sync.paperless.attribute_fields`); Paperless is where they are edited, the sync rewrites them in Gramps.
 * Link Immich's face recognition to Gramps people by pairing each recognized face with its Gramps person once. Then, every synced photo gets face boxes in Gramps.
+* Attach Paperless documents downloaded from Ancestry to the Gramps citations Ancestry created, matched by record id (`sync.paperless.source_url_field_id`).
 * Old handwriting and faded print often defeat regular OCR. Bifrost sends the page to an AI model and writes the transcription back into Paperless and Gramps.
 
 Developer's comment: I am developing Bifrost to assist me in my genealogical documentation workflow. Therefore, you may not be interested in using all of the features. Feel free to pick and choose which tools you'd like to use. At a minimum, you need to configure Gramps Web and Paperless-ngx.

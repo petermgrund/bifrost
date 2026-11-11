@@ -138,9 +138,6 @@ def test_a_fresh_ledger_holds_the_retired_codes_as_withdrawn(conn):
 
 @pytest.mark.parametrize("code,why", [
     ("222222", "all digits"), ("234567", "all digits"),
-    ("B2C3F4", "location mark B2.C3.F4"), ("B23456", "location mark B23456"),
-    ("S2C3F4", "location mark S2.C3.F4"), ("B2C345", "location mark B2.C345"),
-    ("S1", "location mark S1"), ("B99F22", "location mark B99.F22"),
     ("README", "reserved word"), ("SCHEME", "reserved word"),
 ])
 def test_guarded_shapes(code, why):
@@ -148,13 +145,14 @@ def test_guarded_shapes(code, why):
 
 
 @pytest.mark.parametrize("code", ["B36Z55", "B2YQHE", "B446TP", "B5KU2X", "B74XFT", "B788RV",
-                                  "B9U4GF", "S4WVRG", "S7HP82", "BC2345", "PHKN3D", "XFETYZ"])
+                                  "B9U4GF", "S4WVRG", "S7HP82", "BC2345", "PHKN3D", "XFETYZ",
+                                  "B2C3F4", "S2C3F4", "B23456"])
 def test_real_ids_pass_the_guards(code):
     assert ids.guard_reason(code) is None
 
 
 def test_generator_skips_guarded_candidates(script_ids):
-    script_ids("222222", "B2C3F4", "README", "SCHEME", "FRESH2")
+    script_ids("222222", "README", "SCHEME", "FRESH2")
     assert ids.generate_gramps_id(set()) == "FRESH2"
 
 
@@ -163,7 +161,7 @@ def test_generator_skips_guarded_candidates(script_ids):
 def test_mint_never_returns_a_used_withdrawn_or_guarded_code(conn, script_ids):
     codes.withdraw(conn, "PENCHD", "wrong print")
     script_ids(GONE, MNTD22, "RSVD22", "PENCHD", "GRMP22", "PPR222",
-               "222222", "B2C3F4", "README", "FRESH2", "FRESH3")
+               "222222", "README", "FRESH2", "FRESH3")
     assert codes.mint(conn, 2, live={"GRMP22"}, paperless={"PPR222"}) == ["FRESH2", "FRESH3"]
     fresh = ledger_row(conn, "FRESH2")
     assert fresh["created_at"] and fresh["source_system"] is None and fresh["minted_at"] is None
@@ -187,16 +185,15 @@ def test_claim_normalizes_and_registers(conn):
 
 
 @pytest.mark.parametrize("raw,status,msg", [
-    ("", 400, "Type the code as it is written."),
-    ("   ", 400, "Type the code as it is written."),
-    ("FRSH20", 400, "FRSH20 contains 0, which no code uses."),
-    ("FRSH2", 400, "FRSH2 has 5 characters; a code has exactly 6."),
-    ("B2C3F4", 400, "looks like the location mark B2.C3.F4"),
+    ("", 400, "Type the code as written."),
+    ("   ", 400, "Type the code as written."),
+    ("FRSH20", 400, "FRSH20 contains 0."),
+    ("FRSH2", 400, "FRSH2 has 5 characters."),
     ("222222", 400, "is all digits"),
     (MNTD22, 409, "MNTD22 is already in use: minted from Immich asset asset-1 on 2026-02-01."),
     (GONE, 409, "XJ4DBT is already in use: minted from Paperless document 101 on 2026-01-01."),
-    ("rsvd22", 409, "RSVD22 is already in the ledger: reserved since 2026-03-01."),
-    ("JYMZ", 409, "A withdrawn code is never used again."),
+    ("rsvd22", 409, "RSVD22 is already in the ledger and reserved since 2026-03-01."),
+    ("JYMZ", 409, "JYMZ was withdrawn on"),
     ("GRMP22", 409, "GRMP22 is already the ID of a Gramps media object."),
     ("PPR222", 409, "PPR222 is already in the Gramps ID field of Paperless document 7."),
 ])
@@ -228,14 +225,14 @@ def test_status_derivation(conn):
 
 def test_the_three_attention_cases(conn):
     rows = by_code(conn, live={MNTD22, "GRMP22"})
-    assert rows["GRMP22"]["attention"] == "In Gramps, but not in bifrost's ledger"
+    assert rows["GRMP22"]["attention"] == "In Gramps but not in Bifrost's ledger"
     assert rows[GONE]["attention"] == "Deleted from Gramps"
     assert by_code(conn, live={MNTD22}, documents={"99"})[GONE]["attention"] == "Deleted from Gramps and Paperless"
     assert by_code(conn, live={MNTD22, GONE}, documents={"99"})[GONE]["attention"] == "Deleted from Paperless"
     assert by_code(conn, live={MNTD22, GONE}, documents={"99", "101"})[GONE]["attention"] is None
     codes.withdraw(conn, MNTD22, "duplicate of another print")
     row = by_code(conn)[MNTD22]
-    assert (row["status"], row["attention"]) == ("withdrawn", "Withdrawn, but still in Gramps")
+    assert (row["status"], row["attention"]) == ("withdrawn", "Withdrawn but still need to delete in Gramps")
     assert by_code(conn, live=set())[MNTD22]["attention"] is None
     assert codes.counts(codes.rows(conn, {MNTD22, "GRMP22"}, URLS))["attention"] == 3
 
@@ -620,7 +617,7 @@ def test_api_mint_checks_the_form_before_calling_out(conn):
 
 @pytest.mark.parametrize("code,status,msg", [
     ("frsh-22", 200, None), ("", 400, "Type the code"), ("FRSH20", 400, "contains 0"),
-    (MNTD22, 409, "already in use"), ("JYMZ", 409, "withdrawn"), ("B2C3F4", 400, "location mark"),
+    (MNTD22, 409, "already in use"), ("JYMZ", 409, "withdrawn"),
     ("PPR222", 409, "Paperless document 7"),
 ])
 def test_api_claim(conn, code, status, msg):

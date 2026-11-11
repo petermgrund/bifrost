@@ -1,17 +1,10 @@
-import { BifrostElement, html, nothing, api, post, btn, spinner, statusLine,
-         iconYes, iconNo } from './core.js';
-import { applySeed, cacheSeed } from './theme.js';
+import { BifrostElement, html, nothing, api, btn, spinner, statusLine, iconYes, iconNo } from './core.js';
 
 class ConfigPage extends BifrostElement {
   static properties = {
     status: { state: true },
     busy: { state: true },
     error: { state: true },
-    seed: { state: true },
-    savedSeed: { state: true },
-    defaultSeed: { state: true },
-    savingTheme: { state: true },
-    themeResult: { state: true },
   };
 
   constructor() {
@@ -19,11 +12,6 @@ class ConfigPage extends BifrostElement {
     this.status = null;
     this.busy = false;
     this.error = '';
-    this.seed = '';
-    this.savedSeed = '';
-    this.defaultSeed = '';
-    this.savingTheme = false;
-    this.themeResult = null;
   }
 
   connectedCallback() {
@@ -35,60 +23,12 @@ class ConfigPage extends BifrostElement {
     this.busy = true;
     this.error = '';
     try {
-      const [status, theme] = await Promise.all([
-        api('/config/api/status'),
-        api('/config/api/theme'),
-      ]);
-      this.status = status;
-      this.seed = theme.seed;
-      this.savedSeed = theme.seed;
-      this.defaultSeed = theme.default;
+      this.status = await api('/config/api/status');
     } catch (e) {
       this.error = e.message;
     } finally {
       this.busy = false;
     }
-  }
-
-  previewSeed(seed) {
-    this.seed = seed;
-    this.themeResult = null;
-    applySeed(seed, this.defaultSeed);
-  }
-
-  async saveSeed() {
-    this.savingTheme = true;
-    this.themeResult = null;
-    try {
-      const r = await post('/config/api/theme', { seed: this.seed });
-      this.savedSeed = r.seed;
-      this.seed = r.seed;
-      this.defaultSeed = r.default;
-      cacheSeed(r.seed, r.default);
-      await applySeed(r.seed, r.default);
-      this.themeResult = { kind: 'ok', body: 'Saved' };
-    } catch (e) {
-      this.themeResult = { kind: 'error', body: e.message };
-    } finally {
-      this.savingTheme = false;
-    }
-  }
-
-  renderTheme() {
-    const seed = this.seed || this.defaultSeed;
-    return html`
-      <h6 class="small">Color scheme</h6>
-      <nav class="wrap left-align">
-        <input type="color" class="seed-input" .value=${seed}
-          @input=${(e) => this.previewSeed(e.target.value)}>
-        <span class="mono">${seed}</span>
-        ${btn(this.savingTheme ? 'Saving...' : 'Save',
-          this.savingTheme || seed === this.savedSeed, () => this.saveSeed())}
-        ${btn('Reset to default', this.savingTheme || seed === this.defaultSeed,
-          () => this.previewSeed(this.defaultSeed), 'border')}
-        ${this.savingTheme ? spinner : nothing}
-        ${this.themeResult ? statusLine(this.themeResult.kind, this.themeResult.body) : nothing}
-      </nav>`;
   }
 
   render() {
@@ -116,14 +56,11 @@ class ConfigPage extends BifrostElement {
         ${this.error ? statusLine('error', this.error) : nothing}
       </nav>
       <div class="large-space"></div>
-      ${this.renderTheme()}
-      <div class="large-space"></div>
       <h6 class="small">This instance</h6>
       <table class="capped-width">
         <tbody>
           <tr><td>Version</td><td class="mono small-text">${s.version}</td></tr>
           <tr><td>Config file</td><td class="mono small-text">${s.config_path}</td></tr>
-          <tr><td>Database</td><td class="mono small-text">${s.database}</td></tr>
         </tbody>
       </table>`;
   }

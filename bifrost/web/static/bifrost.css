@@ -152,19 +152,5 @@ dialog.codes-dialog table td { block-size: auto; padding-block: 0.25rem; }
   max-block-size: 7rem;
   border-radius: 0.5rem;
 }
-input[type="color"].seed-input {
-  position: static !important;
-  opacity: 1 !important;
-  inline-size: 3.25rem !important;
-  block-size: 2.25rem !important;
-  padding: 2px;
-  cursor: pointer;
-  border: 1px solid var(--outline-variant);
-  border-radius: 0.5rem;
-  background: var(--surface);
-}
-.seed-input::-webkit-color-swatch-wrapper { padding: 0; }
-.seed-input::-webkit-color-swatch { border: none; border-radius: 0.35rem; }
-.seed-input::-moz-color-swatch { border: none; border-radius: 0.35rem; }
 config-page table td { block-size: auto; padding-block: 0.25rem; }
 

@@ -5,10 +5,8 @@
   import { untrack } from 'svelte';
   import { del, get, post, put, qs, upload } from '../lib/api.svelte.js';
   import { dateProblem, filled, formFrom, formKey, linkProblem, payload } from '../lib/format.js';
-  import { loadCollections, recordChanged } from '../lib/store.svelte.js';
+  import { recordChanged } from '../lib/store.svelte.js';
   import AddVersionDialog from './AddVersionDialog.svelte';
-  import CodeChoiceModal from './CodeChoiceModal.svelte';
-  import CollectionsTab from './CollectionsTab.svelte';
   import DetailsTab from './DetailsTab.svelte';
   import Lightbox from './Lightbox.svelte';
   import NotesTab from './NotesTab.svelte';
@@ -27,7 +25,6 @@
   let lightbox = $state(null);
   let adding = $state(null);
   let content = $state(null);
-  let choosing = $state(null);
 
   const edited = $derived(!!form && formKey(form) !== saved);
   const problem = $derived(form ? dateProblem(form.date) || linkProblem(form.link) : '');
@@ -36,13 +33,11 @@
   const tabs = $derived.by(() => {
     if (!rec) return [];
     const versions = rec.versions?.members?.length || 0;
-    const cols = rec.collections?.length || 0;
     return [
       { id: 'details', label: 'Details' },
       { id: 'notes', label: 'Notes' },
       { id: 'versions', label: versions > 1 ? `Versions (${versions})` : 'Versions' },
       { id: 'people', label: rec.people.length ? `People (${rec.people.length})` : 'People' },
-      { id: 'collections', label: cols ? `Collections (${cols})` : 'Collections' },
     ];
   });
 
@@ -116,31 +111,11 @@
 
   async function save() {
     if (!rec || busy || !savable) return;
-    if (!rec.gramps) {
-      busy = 'save';
-      status = { kind: 'busy', msg: 'Looking up reserved codes' };
-      try {
-        const open = (await get('/codes/api/open')).items;
-        status = null;
-        if (open.length) {
-          choosing = open;
-          return;
-        }
-      } catch (e) {
-        fail(e);
-        return;
-      } finally {
-        busy = '';
-      }
-    }
-    await runSave(null);
-  }
-
-  async function runSave(grampsId) {
+    const body = payload(form, rec);
     busy = 'save';
-    status = { kind: 'busy', msg: rec.gramps ? 'Saving to Gramps' : grampsId ? `Adding to Gramps as ${grampsId}` : 'Adding to Gramps' };
+    status = { kind: 'busy', msg: rec.gramps ? 'Saving to Gramps' : body.gramps_id ? `Adding to Gramps as ${body.gramps_id}` : 'Adding to Gramps' };
     try {
-      const r = await put(`/photos/api/photo/${rec.asset_id}`, { ...payload(form, rec), gramps_id: grampsId });
+      const r = await put(`/photos/api/photo/${rec.asset_id}`, body);
       applyRecord(r.photo);
       const failed = (r.events || []).some((e) => e.action === 'failed');
       if (failed) status = { kind: 'error', msg: saveSummary(r) };
@@ -246,40 +221,6 @@
     try {
       applyRecord(await put(`/photos/api/photo/${rec.asset_id}/versions/${m.asset_id}/label`, { label }), null, true);
       succeed(label ? `Renamed to ${label}` : 'Name set back to the file name');
-    } catch (e) {
-      fail(e);
-    } finally {
-      busy = '';
-    }
-  }
-
-  async function addToCollection(it) {
-    if (!rec || busy) return;
-    busy = 'collection';
-    status = { kind: 'busy', msg: 'Adding to the collection' };
-    try {
-      let id = it.id;
-      if (id === '__new') id = (await post('/photos/api/collections', { name: it.name, description: '' })).id;
-      await post(`/photos/api/collections/${id}/items`, { asset_ids: [rec.asset_id] });
-      applyRecord(await get(`/photos/api/photo/${rec.asset_id}`), null, true);
-      loadCollections();
-      succeed(`Added to ${it.name || it.label}`);
-    } catch (e) {
-      fail(e);
-    } finally {
-      busy = '';
-    }
-  }
-
-  async function removeFromCollection(c) {
-    if (!rec || busy) return;
-    busy = 'collection';
-    status = { kind: 'busy', msg: 'Removing from the collection' };
-    try {
-      await del(`/photos/api/collections/${c.id}/items/${rec.asset_id}`);
-      applyRecord(await get(`/photos/api/photo/${rec.asset_id}`), null, true);
-      loadCollections();
-      succeed(`Removed from ${c.name}`);
     } catch (e) {
       fail(e);
     } finally {
@@ -397,9 +338,6 @@
               <Tabs.Content value="people" class="immich-scrollbar -mx-1 min-h-0 flex-1 overflow-y-auto px-1 pt-4">
                 <PeopleTab {rec} />
               </Tabs.Content>
-              <Tabs.Content value="collections" class="immich-scrollbar -mx-1 min-h-0 flex-1 overflow-y-auto px-1 pt-4">
-                <CollectionsTab {rec} {busy} onAdd={addToCollection} onRemove={removeFromCollection} onGo={onClose} />
-              </Tabs.Content>
             </Tabs.Root>
           </div>
         {/if}
@@ -430,16 +368,6 @@
 </Dialog.Root>
 
 <Lightbox item={lightbox} onClose={() => (lightbox = null)} />
-
-{#if choosing}
-  <CodeChoiceModal
-    codes={choosing}
-    onClose={(choice) => {
-      choosing = null;
-      if (choice !== undefined) runSave(choice);
-    }}
-  />
-{/if}
 
 {#if adding && rec}
   <AddVersionDialog

@@ -68,8 +68,7 @@ ensure_env() {
 ensure_dirs() {
   mkdir -p data/gramps/media \
            data/paperless/media/documents/originals data/paperless/export data/paperless/consume \
-           data/immich/library/upload \
-           data/bifrost samples/photos
+           data/immich/library/upload samples/photos
 }
 
 ensure_config() {
@@ -84,7 +83,6 @@ gramps:
 paperless:
   base_url: "http://paperless:8000"
   api_token: "not-seeded-yet"
-database: data/bifrost/bifrost.db
 YAML
   echo "wrote placeholder dev/config.yaml"
 }

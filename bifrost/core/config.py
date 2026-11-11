@@ -58,6 +58,7 @@ class SyncPaperlessConfig:
     gramps_id_field_id: int = 0
     gramps_url_field_id: int = 0
     date_qualifier_field_id: int | None = None
+    source_url_field_id: int | None = None
     transcription_tag_id: int | None = None
     ocr_tag: str = ""
     webhook_token: str = ""
@@ -76,7 +77,6 @@ class GeminiConfig:
 class Config:
     gramps: GrampsConfig
     paperless: PaperlessConfig
-    db_path: Path
     config_path: Path
     immich: ImmichConfig = ImmichConfig()
     sync_immich: SyncImmichConfig = SyncImmichConfig()
@@ -156,9 +156,6 @@ def load_config(path: str | Path | None = None) -> Config:
                 f"(or null), got {val!r}"
             )
 
-    db = Path(raw.get("database") or "data/bifrost.db")
-    if not db.is_absolute():
-        db = cfg_path.parent / db
     sp_raw = (raw.get("sync") or {}).get("paperless") or {}
     sync_paperless = SyncPaperlessConfig(
         sync_tags=tuple(sp_raw.get("sync_tags") or ("doc", "img")),
@@ -167,6 +164,7 @@ def load_config(path: str | Path | None = None) -> Config:
         gramps_id_field_id=int_or_none(sp_raw, "sync.paperless", "gramps_id_field_id") or 0,
         gramps_url_field_id=int_or_none(sp_raw, "sync.paperless", "gramps_url_field_id") or 0,
         date_qualifier_field_id=int_or_none(sp_raw, "sync.paperless", "date_qualifier_field_id"),
+        source_url_field_id=int_or_none(sp_raw, "sync.paperless", "source_url_field_id"),
         transcription_tag_id=int_or_none(sp_raw, "sync.paperless", "transcription_tag_id"),
         ocr_tag=sp_raw.get("ocr_tag") or "",
         webhook_token=str(sp_raw.get("webhook_token") or "").strip(),
@@ -232,7 +230,6 @@ def load_config(path: str | Path | None = None) -> Config:
     return Config(
         gramps=GrampsConfig(**section("gramps", ["base_url", "username", "password"])),
         paperless=PaperlessConfig(**section("paperless", ["base_url", "api_token"])),
-        db_path=db,
         config_path=cfg_path,
         immich=ImmichConfig(
             base_url=(im_raw.get("base_url") or "").rstrip("/"),

@@ -14,8 +14,6 @@
   import {
     mdiAccountOutline,
     mdiArrowLeft,
-    mdiBookmarkMultiple,
-    mdiBookmarkMultipleOutline,
     mdiCheckCircle,
     mdiCheckCircleOutline,
     mdiClockOutline,
@@ -29,8 +27,6 @@
     mdiWeatherSunny,
   } from '@mdi/js';
   import BifrostMark from './components/BifrostMark.svelte';
-  import CollectionView from './components/CollectionView.svelte';
-  import CollectionsList from './components/CollectionsList.svelte';
   import FacesView from './components/FacesView.svelte';
   import PhotoBrowser from './components/PhotoBrowser.svelte';
   import PhotoEditor from './components/PhotoEditor.svelte';
@@ -46,22 +42,12 @@
   const wide = window.matchMedia('(min-width: 768px)');
 
   let sidebarOpen = $state(wide.matches);
-  let collectionsOpen = $state(true);
   let q = $state('');
   let qDraft = $state('');
   let person = $state(null);
   let personQ = $state('');
   let editorId = $state(null);
   let dark = $state(document.documentElement.classList.contains('dark'));
-
-  const collectionNav = $derived(
-    (store.collections || []).map((c) => ({
-      title: c.name,
-      href: `#/collections/${c.id}`,
-      active: route.view === 'collections' && route.collection === c.id,
-      variant: 'compact',
-    })),
-  );
 
   const personItems = $derived.by(() => {
     const needle = personQ.trim().toLowerCase();
@@ -141,8 +127,8 @@
               shape="round"
               leadingIcon={mdiMagnify}
               trailingIcon={qDraft ? clearButton : undefined}
-              placeholder="Search titles and file names"
-              aria-label="Search titles and file names"
+              placeholder="Search titles, file names and codes"
+              aria-label="Search titles, file names and codes"
               onkeydown={(e) => {
                 if (e.key === 'Enter') search();
                 else if (e.key === 'Escape') clearSearch();
@@ -205,15 +191,6 @@
             active={route.view === item.id}
           />
         {/each}
-        <NavbarItem
-          title="Collections"
-          href="#/collections"
-          icon={mdiBookmarkMultipleOutline}
-          activeIcon={mdiBookmarkMultiple}
-          active={route.view === 'collections' && !route.collection}
-          bind:expanded={collectionsOpen}
-          items={collectionNav.length ? collectionNav : undefined}
-        />
       </nav>
     </AppShellSidebar>
 
@@ -225,12 +202,6 @@
       </div>
     {:else if route.view === 'faces'}
       <FacesView />
-    {:else if route.view === 'collections'}
-      {#if route.collection}
-        <CollectionView id={route.collection} onOpenPhoto={(id) => (editorId = id)} />
-      {:else}
-        <CollectionsList />
-      {/if}
     {:else}
       <PhotoBrowser mode={route.view} {q} {person} onClearQuery={clearSearch} onOpenPhoto={(id) => (editorId = id)} />
     {/if}

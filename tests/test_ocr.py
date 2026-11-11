@@ -4,7 +4,6 @@ import asyncio
 
 import pytest
 
-from bifrost.core import db
 from bifrost.core.config import GeminiConfig, SyncPaperlessConfig
 from bifrost.modules import ocr
 
@@ -59,13 +58,6 @@ class NoGramps:
         raise AssertionError(f"Gramps touched via {name}")
 
 
-@pytest.fixture
-def conn(tmp_path):
-    c = db.connect(tmp_path / "t.db")
-    yield c
-    c.close()
-
-
 def _docs():
     return [{"id": 1, "title": "One", "content": "abc", "tags": [5],
              "custom_fields": [{"field": 1, "value": "ABC123"}]},
@@ -83,18 +75,18 @@ def _rows(events):
     return [e for e in events if e.kind == "item"]
 
 
-def test_scan_lists_every_tagged_doc_as_create_or_replace(conn):
-    rows = _rows(_events(ocr.run(FakePaperless(_docs()), FakeGemini(), conn, CFG, GEM, apply=False)))
+def test_scan_lists_every_tagged_doc_as_create_or_replace():
+    rows = _rows(_events(ocr.run(FakePaperless(_docs()), FakeGemini(), CFG, GEM, apply=False)))
     assert [(e.source_id, e.action) for e in rows] == [
         ("1", "would_replace"), ("2", "would_create"), ("3", "would_create")]
-    assert rows[0].data["cols"] == {"current text": "3 chars"}
-    assert rows[1].data is None
+    assert rows[0].data["cols"] == {"transcribe": "replace 3 chars"}
+    assert rows[1].data["cols"] == {"transcribe": "no text yet"}
     assert rows[0].gramps_id == "ABC123" and rows[1].gramps_id is None
 
 
-def test_selected_limits_an_apply_and_transcribed_docs_lose_the_ocr_tag(conn):
+def test_selected_limits_an_apply_and_transcribed_docs_lose_the_ocr_tag():
     pl, gem = FakePaperless(_docs()), FakeGemini()
-    events = _events(ocr.run(pl, gem, conn, CFG, GEM, apply=True, selected={"doc:2", "doc:1"}))
+    events = _events(ocr.run(pl, gem, CFG, GEM, apply=True, selected={"doc:2", "doc:1"}))
     assert sorted(pl.patched) == [1, 2] and gem.calls == ["application/pdf"] * 2
     rows = _rows(events)
     assert [(e.source_id, e.action) for e in rows] == [("1", "replaced"), ("2", "created")]
@@ -104,20 +96,20 @@ def test_selected_limits_an_apply_and_transcribed_docs_lose_the_ocr_tag(conn):
     assert all(e.data["cols"]["OCR tag"] == "removed" for e in rows)
     assert pl.tags_set == {1: [9], 2: [9]}
     assert events[-1].data == {"transcribed": 1, "replaced": 1, "errors": 0}
-    rows = _rows(_events(ocr.run(pl, gem, conn, CFG, GEM, apply=False)))
+    rows = _rows(_events(ocr.run(pl, gem, CFG, GEM, apply=False)))
     assert [e.source_id for e in rows] == ["3"]
 
 
-def test_run_with_sync_skips_the_note_sync_when_nothing_was_transcribed(conn):
-    events = _events(ocr.run_with_sync(FakePaperless(_docs()), NoGramps(), FakeGemini(), conn,
+def test_run_with_sync_skips_the_note_sync_when_nothing_was_transcribed():
+    events = _events(ocr.run_with_sync(FakePaperless(_docs()), NoGramps(), FakeGemini(),
                                        CFG, GEM, selected=set()))
     assert [e.kind for e in events] == ["started", "summary"]
     assert events[-1].data == {"transcribed": 0, "replaced": 0, "errors": 0}
 
 
-def test_run_without_gemini_key_is_an_error_event(conn):
+def test_run_without_gemini_key_is_an_error_event():
     class Unconfigured(FakeGemini):
         configured = False
 
-    events = _events(ocr.run(FakePaperless(_docs()), Unconfigured(), conn, CFG, GEM, apply=True))
+    events = _events(ocr.run(FakePaperless(_docs()), Unconfigured(), CFG, GEM, apply=True))
     assert events[0].kind == "error" and "Gemini" in events[0].detail

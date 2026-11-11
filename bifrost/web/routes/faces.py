@@ -8,7 +8,6 @@ from pydantic import BaseModel
 
 from ...core.clients.immich import ImmichError
 from ...modules import faces
-from ..runs import record_run
 
 router = APIRouter(prefix="/faces", tags=["faces"])
 PEOPLE_KEY = "faces_gramps_people"
@@ -126,30 +125,3 @@ async def remove_link(request: Request, gramps_handle: str):
     _forget_people(st)
     return await _links_payload(request)
 
-
-class BackfillBody(BaseModel):
-    selected: list[str] | None = None
-
-
-@router.get("/api/backfill/config")
-async def backfill_config(request: Request) -> dict:
-    return {"enabled": bool(getattr(_state(request), "immich_accounts", []))}
-
-
-@router.post("/api/backfill/preview")
-async def backfill_preview(request: Request, body: BackfillBody = BackfillBody()):
-    st = _state(request)
-    gen = faces.apply_links(st.gramps, _accounts(request), st.conn, apply=False)
-    run_id, events = await record_run(st.conn, "faces.backfill.preview", gen)
-    return {"run_id": run_id, "apply": False, "events": [e.__dict__ for e in events]}
-
-
-@router.post("/api/backfill/apply")
-async def backfill_apply(request: Request, body: BackfillBody = BackfillBody()):
-    st = _state(request)
-    gen = faces.apply_links(
-        st.gramps, _accounts(request), st.conn, apply=True,
-        selected=set(body.selected) if body.selected is not None else None)
-    run_id, events = await record_run(st.conn, "faces.backfill", gen)
-    st.caches.clear()
-    return {"run_id": run_id, "apply": True, "events": [e.__dict__ for e in events]}

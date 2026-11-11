@@ -4,19 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import re
-import sqlite3
+from datetime import datetime, timezone
 from typing import AsyncIterator
 
 from ..core import dates
-from ..core import settings as ui_settings
 from ..core.clients import GrampsClient, ImmichClient
 from ..core.clients.immich import ImmichError
 from ..core.config import SyncImmichConfig
-from ..core.db import now as _now
 from ..core.events import SyncEvent
-from . import photo_collections
+from . import codes
 from . import sync_immich as si
-from .sync_immich import SyncError, compose_description
+from .sync_immich import SyncError, compose_description, registered_gid
 
 PAGE_SIZE = 24
 _LINK_RE = re.compile(r"^https?://\S+$", re.IGNORECASE)
@@ -82,19 +80,6 @@ async def apply_tags(client: ImmichClient, asset_id: str, add: dict[str, str],
         tag = index.get(low)
         if tag:
             await client.untag_asset(tag["id"], asset_id)
-
-
-def registered_gid(conn: sqlite3.Connection, asset_id: str,
-                   member_ids: list[str] = ()) -> str | None:
-    """The Gramps id registered for the asset or any of its stack members"""
-    wanted = [asset_id, *member_ids]
-    rows = conn.execute(
-        "SELECT gramps_id, source_id FROM minted_media WHERE source_system='immich' "
-        f"AND withdrawn_at IS NULL AND source_id IN ({','.join('?' * len(wanted))})", wanted).fetchall()
-    for r in rows:
-        if r["source_id"] == asset_id:
-            return r["gramps_id"]
-    return rows[0]["gramps_id"] if rows else None
 
 
 def browse_accounts(accounts: list[ImmichClient], cfg: SyncImmichConfig) -> list[ImmichClient]:
@@ -271,10 +256,12 @@ async def _primary_and_client(accounts: list[ImmichClient], asset_id: str) -> tu
     return asset, client
 
 
-async def add_version(gramps: GrampsClient, accounts: list[ImmichClient], conn: sqlite3.Connection,
-                      cfg: SyncImmichConfig, asset_id: str, new_id: str,
-                      place_rows: dict | None = None) -> dict:
+async def add_version(gramps: GrampsClient, accounts: list[ImmichClient], cfg: SyncImmichConfig,
+                      asset_id: str, new_id: str, place_rows: dict | None = None,
+                      registered: dict[str, str] | None = None) -> dict:
     """Stack another asset under this photo and give it the photo's tags, location and faces"""
+    if registered is None:
+        registered = await si.registered_map(gramps)
     primary, client = await _primary_and_client(accounts, asset_id)
     if new_id == asset_id:
         raise SyncError(400, "that is this photo's main image")
@@ -285,30 +272,31 @@ async def add_version(gramps: GrampsClient, accounts: list[ImmichClient], conn: 
         raise SyncError(400, "versions must belong to the same Immich account as the main image")
     _versions, member_ids = await _stack_members(client, primary)
     others = [m for m in member_ids if m != asset_id]
-    main_gid = registered_gid(conn, asset_id, member_ids)
-    new_gid = registered_gid(conn, new_id)
+    main_gid = registered_gid(registered, asset_id, member_ids)
+    new_gid = registered_gid(registered, new_id)
     if main_gid and new_gid and new_gid != main_gid:
         raise SyncError(400, f"both photos are already in Gramps ({main_gid} and {new_gid}); "
                              "a stack can stand for only one media object")
     if new_gid and not main_gid:
         await client.create_stack([new_id, asset_id] + others)
-        photo_collections.move_items(conn, asset_id, new_id)
         main_id = new_id
     else:
         await client.create_stack([asset_id] + others + [new_id])
         main_id = asset_id
     await match_all(accounts, client, cfg, main_id, [asset_id, *others, new_id])
-    return await load(gramps, accounts, conn, cfg, main_id, place_rows)
+    return await load(gramps, accounts, cfg, main_id, place_rows, registered=registered)
 
 
-async def upload_version(gramps: GrampsClient, accounts: list[ImmichClient], conn: sqlite3.Connection,
-                         cfg: SyncImmichConfig, asset_id: str, filename: str, data, modified_at: str,
-                         place_rows: dict | None = None) -> tuple[str, dict]:
+async def upload_version(gramps: GrampsClient, accounts: list[ImmichClient], cfg: SyncImmichConfig,
+                         asset_id: str, filename: str, data, modified_at: str,
+                         place_rows: dict | None = None,
+                         registered: dict[str, str] | None = None) -> tuple[str, dict]:
     """Upload a file to the main image's Immich account and add it as a version"""
     _primary, client = await _primary_and_client(accounts, asset_id)
-    new_id = (await client.upload_asset(filename, data, modified_at or _now()))["id"]
+    when = modified_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
+    new_id = (await client.upload_asset(filename, data, when))["id"]
     await _wait_for_thumbnail(client, new_id)
-    return new_id, await add_version(gramps, accounts, conn, cfg, asset_id, new_id, place_rows)
+    return new_id, await add_version(gramps, accounts, cfg, asset_id, new_id, place_rows, registered)
 
 
 async def _wait_for_thumbnail(client: ImmichClient, asset_id: str,
@@ -320,21 +308,21 @@ async def _wait_for_thumbnail(client: ImmichClient, asset_id: str,
         await asyncio.sleep(pause)
 
 
-async def match_member(gramps: GrampsClient, accounts: list[ImmichClient], conn: sqlite3.Connection,
-                       cfg: SyncImmichConfig, asset_id: str, member_id: str,
-                       place_rows: dict | None = None) -> dict:
+async def match_member(gramps: GrampsClient, accounts: list[ImmichClient], cfg: SyncImmichConfig,
+                       asset_id: str, member_id: str, place_rows: dict | None = None,
+                       registered: dict[str, str] | None = None) -> dict:
     primary, client = await _primary_and_client(accounts, asset_id)
     _versions, member_ids = await _stack_members(client, primary)
     if member_id not in member_ids or member_id == asset_id:
         raise SyncError(404, "that asset is not a version of this photo")
     member = await si._merged_one(accounts, member_id)
     await match_version(client, cfg, primary, member)
-    return await load(gramps, accounts, conn, cfg, asset_id, place_rows)
+    return await load(gramps, accounts, cfg, asset_id, place_rows, registered=registered)
 
 
-async def remove_version(gramps: GrampsClient, accounts: list[ImmichClient], conn: sqlite3.Connection,
-                         cfg: SyncImmichConfig, asset_id: str, member_id: str,
-                         place_rows: dict | None = None) -> dict:
+async def remove_version(gramps: GrampsClient, accounts: list[ImmichClient], cfg: SyncImmichConfig,
+                         asset_id: str, member_id: str, place_rows: dict | None = None,
+                         registered: dict[str, str] | None = None) -> dict:
     """Unstack a version; its sync and ID tags go too, so no second media object gets minted"""
     primary, client = await _primary_and_client(accounts, asset_id)
     if member_id == asset_id:
@@ -348,7 +336,7 @@ async def remove_version(gramps: GrampsClient, accounts: list[ImmichClient], con
              if k == cfg.sync_tag.lower()
              or (cfg.id_tag_prefix and k.startswith(cfg.id_tag_prefix.lower() + "/"))}
     await apply_tags(client, member_id, {}, strip)
-    return await load(gramps, accounts, conn, cfg, asset_id, place_rows)
+    return await load(gramps, accounts, cfg, asset_id, place_rows, registered=registered)
 
 
 async def clear_face_rects(gramps: GrampsClient, gramps_id: str) -> int:
@@ -371,9 +359,12 @@ async def clear_face_rects(gramps: GrampsClient, gramps_id: str) -> int:
     return cleared
 
 
-async def promote(accounts: list[ImmichClient], conn: sqlite3.Connection, cfg: SyncImmichConfig,
-                  gramps: GrampsClient, asset_id: str, member_id: str, redraw_faces: bool) -> str:
+async def promote(accounts: list[ImmichClient], cfg: SyncImmichConfig, gramps: GrampsClient,
+                  asset_id: str, member_id: str, redraw_faces: bool,
+                  registered: dict[str, str] | None = None) -> str:
     """Make a version the main image; returns the new main's id for the sync that follows"""
+    if registered is None:
+        registered = await si.registered_map(gramps)
     primary, client = await _primary_and_client(accounts, asset_id)
     _versions, member_ids = await _stack_members(client, primary)
     if member_id not in member_ids or member_id == asset_id:
@@ -381,8 +372,7 @@ async def promote(accounts: list[ImmichClient], conn: sqlite3.Connection, cfg: S
     member = await si._merged_one(accounts, member_id)
     await match_version(client, cfg, primary, member)
     await client.update_stack(primary["stack"]["id"], member_id)
-    photo_collections.move_items(conn, asset_id, member_id)
-    gid = registered_gid(conn, asset_id, member_ids)
+    gid = registered_gid(registered, asset_id, member_ids)
     if redraw_faces and gid:
         await clear_face_rects(gramps, gid)
     return member_id
@@ -455,11 +445,14 @@ async def _gramps_side(gramps: GrampsClient, gid: str) -> tuple[dict | None, lis
     return media, notes, places, None
 
 
-async def load(gramps: GrampsClient, accounts: list[ImmichClient], conn: sqlite3.Connection,
-               cfg: SyncImmichConfig, asset_id: str, place_rows: dict[str, dict] | None = None,
-               person_map: dict[str, str] | None = None) -> dict:
+async def load(gramps: GrampsClient, accounts: list[ImmichClient], cfg: SyncImmichConfig,
+               asset_id: str, place_rows: dict[str, dict] | None = None,
+               person_map: dict[str, str] | None = None,
+               registered: dict[str, str] | None = None) -> dict:
     """The editor's record for one asset, its facts from the Gramps media object once it has one;
     a stack variant opens as its main image"""
+    if registered is None:
+        registered = await si.registered_map(gramps)
     asset = await si._merged_one(accounts, asset_id)
     main = (asset.get("stack") or {}).get("primaryAssetId")
     if main and main != asset_id:
@@ -469,10 +462,7 @@ async def load(gramps: GrampsClient, accounts: list[ImmichClient], conn: sqlite3
     exif = asset.get("exifInfo") or {}
     title, link_line = si.split_description(exif.get("description") or "")
     versions, member_ids = await _stack_members(client, asset)
-    for member in member_ids:
-        if member != asset_id:
-            photo_collections.move_items(conn, member, asset_id)
-    gid = registered_gid(conn, asset_id, member_ids)
+    gid = registered_gid(registered, asset_id, member_ids)
     labels = await labels_for(client, [asset_id, *member_ids])
     if versions is not None:
         details = await client.get_assets_many([m for m in member_ids if m != asset_id])
@@ -489,7 +479,7 @@ async def load(gramps: GrampsClient, accounts: list[ImmichClient], conn: sqlite3
             member["label"] = labels.get(member["asset_id"], "")
     suggestions = await _suggestions(client, cfg, asset, member_ids, gid)
     for sg in suggestions:
-        sg["gramps_id"] = registered_gid(conn, sg["asset_id"])
+        sg["gramps_id"] = registered_gid(registered, sg["asset_id"])
     media, gramps_error, change = None, None, None
     date_readonly = None
     places: list[dict] = []
@@ -504,7 +494,7 @@ async def load(gramps: GrampsClient, accounts: list[ImmichClient], conn: sqlite3
         change = media.get("change")
     else:
         date_form_ = None
-        notes_text, links = ("", []) if gramps_error else si.leftover_rows(conn, asset_id)
+        notes_text, links = "", []
     if person_map is None:
         person_map = await si.load_person_map(gramps)
     people = [{"id": p["id"], "name": p.get("name") or "", "linked": p["id"] in person_map}
@@ -537,26 +527,27 @@ async def load(gramps: GrampsClient, accounts: list[ImmichClient], conn: sqlite3
         "people": people,
         "versions": versions,
         "suggestions": suggestions,
-        "collections": photo_collections.for_asset(conn, asset_id),
         "links": [{"url": u} for u in links],
     }
 
 
-async def pending_changes(gramps: GrampsClient, accounts: list[ImmichClient],
-                          conn: sqlite3.Connection, cfg: SyncImmichConfig, asset_id: str,
-                          person_map: dict[str, str] | None = None) -> list[str]:
+async def pending_changes(gramps: GrampsClient, accounts: list[ImmichClient], cfg: SyncImmichConfig,
+                          asset_id: str, person_map: dict[str, str] | None = None,
+                          registered: dict[str, str] | None = None) -> list[str]:
     """What a sync would change in Gramps for a photo already there; [] when nothing"""
+    if registered is None:
+        registered = await si.registered_map(gramps)
     asset = await si._merged_one(accounts, asset_id)
     client, _err = await si.owner_client(accounts, asset)
     _versions, member_ids = await _stack_members(client, asset) if client else (None, [])
-    gid = registered_gid(conn, asset_id, member_ids)
+    gid = registered_gid(registered, asset_id, member_ids)
     if not gid:
         return []
     media = await gramps.get_media_by_gramps_id(gid)
     if media is None:
         return ["media"]
     changes: set[str] = set()
-    async for ev in si.update_synced(gramps, accounts, conn, cfg, gid, asset, media,
+    async for ev in si.update_synced(gramps, accounts, cfg, gid, asset, media,
                                      False, None, si.new_counts()):
         if ev.action == "would_update":
             changes |= set((ev.data or {}).get("cols") or [ev.entity]) - {"description"}
@@ -588,26 +579,28 @@ def _item(entity: str, action: str, asset_id: str, gid: str | None, title: str, 
                      gramps_id=gid, title=title, **extra)
 
 
-async def save(gramps: GrampsClient, accounts: list[ImmichClient], conn: sqlite3.Connection,
-               cfg: SyncImmichConfig, asset_id: str, form: dict) -> AsyncIterator[SyncEvent]:
+async def save(gramps: GrampsClient, accounts: list[ImmichClient], cfg: SyncImmichConfig,
+               asset_id: str, form: dict,
+               registered: dict[str, str] | None = None) -> AsyncIterator[SyncEvent]:
     """Write the editor's form onto the Gramps media object, adding the photo to Gramps on its first save,
     then copy the title into Immich and finish the sync work"""
     form = validate_form(form)
-    link_on = ui_settings.get_description_link(conn)
+    if registered is None:
+        registered = await si.registered_map(gramps)
     asset = await si._merged_one(accounts, asset_id)
     stack = asset.get("stack") or {}
     if stack.get("primaryAssetId") and stack["primaryAssetId"] != asset_id:
         raise SyncError(400, "this asset is a stack variant, edit the stack's main image")
     client, _err = await si.owner_client(accounts, asset)
     _versions, member_ids = await _stack_members(client, asset)
-    gid = registered_gid(conn, asset_id, member_ids)
+    gid = registered_gid(registered, asset_id, member_ids)
     current_desc = ((asset.get("exifInfo") or {}).get("description") or "").strip()
     filled = any([form["title"], form["date"], form["place_gramps_id"], form["notes"], form["links"]])
     warning = None
 
     async def copy_title(title: str, gid: str | None) -> None:
         nonlocal warning
-        wanted = compose_description(title, si.gramps_url(cfg, gid) if link_on else None)
+        wanted = compose_description(title, None)
         if wanted == current_desc:
             return
         try:
@@ -639,7 +632,8 @@ async def save(gramps: GrampsClient, accounts: list[ImmichClient], conn: sqlite3
         if form["change"] is not None and media.get("change") != form["change"]:
             raise SyncError(409, "changed in Gramps since you opened it, reload")
     else:
-        async for ev in si.sync_one_asset(gramps, accounts, conn, cfg, asset_id, gramps_id=form["gramps_id"]):
+        async for ev in si.sync_one_asset(gramps, accounts, cfg, asset_id, gramps_id=form["gramps_id"],
+                                          registered=registered):
             if ev.kind == "item":
                 yield ev
             elif ev.kind == "summary":
@@ -700,7 +694,8 @@ async def save(gramps: GrampsClient, accounts: list[ImmichClient], conn: sqlite3
         yield _item("media", "skipped", asset_id, gid, media["desc"], detail=warning)
 
     if not created:
-        async for ev in si.sync_one_asset(gramps, accounts, conn, cfg, asset_id, update=True, description=False):
+        async for ev in si.sync_one_asset(gramps, accounts, cfg, asset_id, update=True, description=False,
+                                          registered=registered):
             if ev.kind == "item" and ev.action != "skipped":
                 yield ev
     if member_ids:
@@ -757,11 +752,10 @@ async def _stack_index(accounts: list[ImmichClient]) -> tuple[dict, dict]:
     return stacks, members_of
 
 
-async def _card_context(accounts: list[ImmichClient], conn: sqlite3.Connection):
-    """Stack membership and the register, plus a card builder that uses them"""
+async def _card_context(accounts: list[ImmichClient], registered: dict[str, str]):
+    """Stack membership plus a card builder that uses it and the register"""
     stacks, members_of = await _stack_index(accounts)
-    minted = {r["source_id"]: r["gramps_id"] for r in conn.execute(
-        "SELECT gramps_id, source_id FROM minted_media WHERE source_system='immich' AND withdrawn_at IS NULL")}
+    minted = registered
 
     def card(a: dict) -> dict:
         aid = a["id"]
@@ -780,45 +774,19 @@ async def _card_context(accounts: list[ImmichClient], conn: sqlite3.Connection):
     return stacks, card
 
 
-async def primaries_of(accounts: list[ImmichClient], asset_ids: list[str]) -> list[str]:
-    """Stack variants swapped for their main image, order kept, duplicates dropped"""
-    stacks, _members = await _stack_index(accounts)
-    out = []
-    for aid in asset_ids:
-        st = stacks.get(aid)
-        main = (st[1] or aid) if st else aid
-        if main not in out:
-            out.append(main)
-    return out
-
-
-async def fold_stacked_items(accounts: list[ImmichClient], conn: sqlite3.Connection, cid: int) -> list[str]:
-    """A collection's ids after each stack variant in it gives its place to the stack's main image"""
-    stacks, _members = await _stack_index(accounts)
-    for aid in photo_collections.item_ids(conn, cid):
-        main = stacks[aid][1] if aid in stacks else None
-        if main and main != aid:
-            photo_collections.move_items(conn, aid, main)
-    return photo_collections.item_ids(conn, cid)
-
-
-async def cards_for(accounts: list[ImmichClient], conn: sqlite3.Connection,
-                    asset_ids: list[str]) -> list[dict]:
-    """Cards in the given order; an asset Immich no longer has is marked missing"""
-    stacks, card = await _card_context(accounts, conn)
-    details = await si._merged_details(accounts, list(dict.fromkeys(asset_ids)))
-    out = []
-    for aid in asset_ids:
-        a = details.get(aid) or {"id": aid, "originalFileName": "", "_missing": True}
-        out.append(card(a))
-    return out
-
-
-async def search(accounts: list[ImmichClient], conn: sqlite3.Connection,
+async def search(accounts: list[ImmichClient], registered: dict[str, str],
                  mode: str = "recent", q: str = "", person: str = "", page: int = 1,
                  browse: list[ImmichClient] | None = None) -> dict:
-    """One page of photo cards, stack variants folded into their main image"""
-    stacks, card = await _card_context(accounts, conn)
+    """One page of photo cards, stack variants folded into their main image; a code finds its photo"""
+    stacks, card = await _card_context(accounts, registered)
+    code = codes.normalize(q)
+    hit = next((aid for aid, gid in registered.items() if gid == code), None) if code else None
+    if hit is not None:
+        if page > 1:
+            return {"items": [], "nextPage": None}
+        main = (stacks[hit][1] or hit) if hit in stacks else hit
+        a = (await si._merged_details(accounts, [main])).get(main)
+        return {"items": [card(a or {"id": main, "originalFileName": "", "_missing": True})], "nextPage": None}
     owners: set[str] | None = None
     if browse is not None and len(browse) < len(accounts):
         owners = {await si._user_id(c) for c in browse}
@@ -826,16 +794,13 @@ async def search(accounts: list[ImmichClient], conn: sqlite3.Connection,
     next_page: int | None = None
     seen: set[str] = set()
     if mode == "synced":
-        rows = conn.execute(
-            "SELECT gramps_id, source_id FROM minted_media WHERE source_system='immich' "
-            "AND withdrawn_at IS NULL ORDER BY minted_at DESC, gramps_id LIMIT ? OFFSET ?",
-            (PAGE_SIZE + 1, (page - 1) * PAGE_SIZE)).fetchall()
+        start = (page - 1) * PAGE_SIZE
+        rows = list(registered)[start:start + PAGE_SIZE + 1]
         next_page = page + 1 if len(rows) > PAGE_SIZE else None
         rows = rows[:PAGE_SIZE]
-        shown = [stacks[r["source_id"]][1] or r["source_id"] if r["source_id"] in stacks
-                 else r["source_id"] for r in rows]
+        shown = [stacks[r][1] or r if r in stacks else r for r in rows]
         details = await si._merged_details(accounts, list(dict.fromkeys(shown)))
-        for r, aid in zip(rows, shown):
+        for aid in shown:
             if aid in seen:
                 continue
             seen.add(aid)
@@ -895,44 +860,3 @@ async def places(gramps: GrampsClient) -> list[dict]:
         })
     out.sort(key=lambda r: r["name"].lower())
     return out
-
-
-async def list_albums(browse: list[ImmichClient]) -> list[dict]:
-    """Immich albums of the browsed accounts, by name"""
-    out = []
-    for client in browse:
-        for a in await client.list_albums():
-            out.append({"id": a["id"], "name": a.get("albumName") or "", "count": a.get("assetCount") or 0,
-                        "description": a.get("description") or "", "order": a.get("order") or "desc",
-                        "account": getattr(client, "label", ""),
-                        "thumb": f"/photos/api/thumb/{a['albumThumbnailAssetId']}" if a.get("albumThumbnailAssetId") else None})
-    out.sort(key=lambda a: (a["name"].lower(), a["account"]))
-    return out
-
-
-async def album_assets(browse: list[ImmichClient], album_id: str) -> tuple[dict, list[str]]:
-    """The album and its asset ids in the album's own order"""
-    for client in browse:
-        album = next((a for a in await client.list_albums() if a["id"] == album_id), None)
-        if album is None:
-            continue
-        ids: list[str] = []
-        page: int | None = 1
-        while page and len(ids) < photo_collections.MAX_ITEMS:
-            r = await client.search_assets(page=page, size=200, album_id=album_id,
-                                           order=album.get("order") or "desc")
-            ids.extend(a["id"] for a in r["items"])
-            page = r["nextPage"]
-        return album, ids
-    raise SyncError(404, "no such Immich album in the browsed accounts")
-
-
-async def import_album(accounts: list[ImmichClient], browse: list[ImmichClient],
-                       conn: sqlite3.Connection, album_id: str) -> tuple[int, int]:
-    """A new collection with the album's name, description and order; returns (id, added)"""
-    album, ids = await album_assets(browse, album_id)
-    ids = await primaries_of(accounts, ids)
-    collection = photo_collections.create(conn, album.get("albumName") or "Immich album",
-                                          album.get("description") or "")
-    added = photo_collections.add_items(conn, collection["id"], ids[:photo_collections.MAX_ITEMS])
-    return collection["id"], added

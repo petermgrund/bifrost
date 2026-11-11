@@ -85,6 +85,12 @@
     <Input bind:value={form.title} />
   </Field>
 
+  {#if !rec.gramps}
+    <Field label="Code" class="max-w-40">
+      <Input bind:value={form.code} maxlength={6} class="font-mono uppercase" />
+    </Field>
+  {/if}
+
   <div class="@container flex flex-col gap-1">
     <Label label="Date" size="small" />
     <div class="flex flex-col gap-2">

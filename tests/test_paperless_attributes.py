@@ -6,7 +6,6 @@ import copy
 import httpx
 import pytest
 
-from bifrost.core import db
 from bifrost.core.clients.gramps import GrampsClient
 from bifrost.core.clients.paperless import PaperlessClient
 from bifrost.core.config import ConfigError, SyncPaperlessConfig, load_config, parse_attribute_fields
@@ -175,10 +174,12 @@ class Gramps:
     async def create_media(self, obj):
         self.media[obj["gramps_id"]] = obj
 
-    async def get_media_by_gramps_id(self, gid):
-        # a fresh dict each time, like the API: a preview that mutated its copy would show here as no change
+    async def get_media_by_gramps_id(self, gid, backlinks=False, notes=False):
         found = self.media.get(gid)
         return copy.deepcopy(found) if found else None
+
+    async def find_notes(self, note_type):
+        return []
 
     async def update_media(self, handle, obj):
         self.updates += 1
@@ -207,9 +208,9 @@ def synced(gramps, fields, extra_attrs=()):
 FILLED = ((11, "https://example.org/record"), (18, "opt-pay"), (21, "opt-pub"))
 
 
-def run(paperless, gramps, conn, apply, cfg=CFG, **kw):
+def run(paperless, gramps, apply, cfg=CFG, **kw):
     async def collect():
-        return [e async for e in sync_paperless.sync(paperless, gramps, conn, cfg, apply=apply, **kw)]
+        return [e async for e in sync_paperless.sync(paperless, gramps, cfg, apply=apply, **kw)]
     return asyncio.run(collect())
 
 
@@ -223,89 +224,76 @@ def summary(events):
 
 class TestSync:
 
-    @pytest.fixture
-    def conn(self, tmp_path):
-        c = db.connect(tmp_path / "a.db")
-        yield c
-        c.close()
 
-    def test_preview_names_the_attributes_and_writes_nothing(self, conn):
+    def test_preview_names_the_attributes_and_writes_nothing(self):
         gramps = Gramps()
-        events = run(Paperless([synced(gramps, FILLED)]), gramps, conn, apply=False)
+        events = run(Paperless([synced(gramps, FILLED)]), gramps, apply=False)
         (ev,) = media_events(events)
         assert ev.action == "would_update"
         assert ev.data["cols"] == {"Record URL": "new", "Record URL access": "new", "Date meaning": "new"}
         assert summary(events)["attributes_updated"] == 3
         assert gramps.updates == 0 and len(gramps.media["DOC111"]["attribute_list"]) == 2
 
-    def test_apply_writes_them_after_the_keys_and_a_rerun_is_in_sync(self, conn):
+    def test_apply_writes_them_after_the_keys_and_a_rerun_is_in_sync(self):
         gramps = Gramps()
         paperless = Paperless([synced(gramps, FILLED)])
-        events = run(paperless, gramps, conn, apply=True)
+        events = run(paperless, gramps, apply=True)
         (ev,) = media_events(events)
         assert ev.action == "updated"
         assert types_of(gramps.media["DOC111"]) == [
             ("Paperless URL", "http://p/documents/1/details"), ("Paperless ID", "1"),
             ("Record URL", "https://example.org/record"), ("Record URL access", "Paywall"),
             ("Date meaning", "Publication")]
-        again = run(paperless, gramps, conn, apply=True)
+        again = run(paperless, gramps, apply=True)
         assert media_events(again) == [] and summary(again)["attributes_updated"] == 0
         assert gramps.updates == 1
 
-    def test_a_changed_and_a_cleared_field_follow_in_place(self, conn):
+    def test_a_changed_and_a_cleared_field_follow_in_place(self):
         gramps = Gramps()
         doc = synced(gramps, FILLED)
-        run(Paperless([doc]), gramps, conn, apply=True)
+        run(Paperless([doc]), gramps, apply=True)
         doc["custom_fields"] = [{"field": 12, "value": "DOC111"}, {"field": 11, "value": "https://example.org/v2"},
                                 {"field": 18, "value": ""}, {"field": 21, "value": "opt-pub"}]
-        events = run(Paperless([doc]), gramps, conn, apply=True)
+        events = run(Paperless([doc]), gramps, apply=True)
         (ev,) = media_events(events)
         assert ev.data["cols"] == {"Record URL": "changed", "Record URL access": "removed"}
         assert types_of(gramps.media["DOC111"]) == [
             ("Paperless URL", "http://p/documents/1/details"), ("Paperless ID", "1"),
             ("Record URL", "https://example.org/v2"), ("Date meaning", "Publication")]
 
-    def test_an_edit_made_in_gramps_is_overwritten(self, conn):
+    def test_an_edit_made_in_gramps_is_overwritten(self):
         gramps = Gramps()
         doc = synced(gramps, FILLED, extra_attrs=[_attr("Record URL", "https://typed-in-gramps")])
-        events = run(Paperless([doc]), gramps, conn, apply=True)
+        events = run(Paperless([doc]), gramps, apply=True)
         (ev,) = media_events(events)
         assert ev.data["cols"]["Record URL"] == "changed"
         assert ("Record URL", "https://example.org/record") in types_of(gramps.media["DOC111"])
 
-    def test_a_field_paperless_cannot_describe_is_left_alone_this_run(self, conn):
+    def test_a_field_paperless_cannot_describe_is_left_alone_this_run(self):
         gramps = Gramps()
         doc = synced(gramps, FILLED, extra_attrs=[_attr("Record URL access", "Free")])
         paperless = Paperless([doc], broken={18})
-        events = run(paperless, gramps, conn, apply=True)
+        events = run(paperless, gramps, apply=True)
         errors = [e for e in events if e.kind == "error"]
         assert len(errors) == 1 and "attribute field 18 (Record URL access)" in errors[0].detail
         (ev,) = media_events(events)
         assert ev.data["cols"] == {"Record URL": "new", "Date meaning": "new"}
         assert ("Record URL access", "Free") in types_of(gramps.media["DOC111"])
 
-    def test_a_document_created_this_run_gets_its_attributes(self, conn):
+    def test_a_document_created_this_run_gets_its_attributes(self):
         gramps = Gramps()
         doc = {"id": 3, "title": "New", "tags": [1],
                "custom_fields": [{"field": f, "value": v} for f, v in FILLED]}
-        events = run(Paperless([doc]), gramps, conn, apply=True)
+        events = run(Paperless([doc]), gramps, apply=True)
         created = next(e for e in events if e.action == "created")
         assert created.data["cols"] == {"Record URL": "new", "Record URL access": "new", "Date meaning": "new"}
         (media,) = gramps.media.values()
         assert [t for t, _ in types_of(media)] == [
             "Paperless URL", "Paperless ID", "Record URL", "Record URL access", "Date meaning"]
-        preview = run(Paperless([doc]), gramps, conn, apply=False)
+        preview = run(Paperless([doc]), gramps, apply=False)
         assert media_events(preview) == []
 
-    def test_version_and_transcription_runs_do_not_look_at_fields(self, conn):
-        gramps = Gramps()
-        paperless = Paperless([synced(gramps, FILLED)])
-        for kw in ({"versions_only": True}, {"transcriptions_only": True}):
-            events = run(paperless, gramps, conn, apply=True, **kw)
-            assert media_events(events) == []
-        assert paperless.option_calls == [] and gramps.updates == 0
-
-    def test_a_single_document_run_mirrors_it(self, conn):
+    def test_a_single_document_run_mirrors_it(self):
         gramps = Gramps()
         other = {"id": 2, "title": "Other", "tags": [1],
                  "custom_fields": [{"field": 12, "value": "OTHER2"}, {"field": 11, "value": "https://other"}]}
@@ -313,16 +301,16 @@ class TestSync:
                                   "path": "paperless/0000002.pdf", "mime": "application/pdf",
                                   "checksum": "md5-h2", "attribute_list": [_attr("Paperless ID", "2")]}
         paperless = Paperless([synced(gramps, FILLED), other])
-        events = run(paperless, gramps, conn, apply=True, single_doc_id=1)
+        events = run(paperless, gramps, apply=True, doc_ids=[1])
         assert [e.source_id for e in media_events(events)] == ["1"]
         assert ("Record URL", "https://example.org/record") in types_of(gramps.media["DOC111"])
         assert types_of(gramps.media["OTHER2"]) == [("Paperless ID", "2")]
 
-    def test_off_without_configured_fields(self, conn):
+    def test_off_without_configured_fields(self):
         gramps = Gramps()
         paperless = Paperless([synced(gramps, FILLED)])
         plain = SyncPaperlessConfig(sync_tags=("sync",), gramps_id_field_id=12, gramps_url_field_id=14)
-        events = run(paperless, gramps, conn, apply=True, cfg=plain)
+        events = run(paperless, gramps, apply=True, cfg=plain)
         assert media_events(events) == [] and paperless.option_calls == []
         assert "attributes_updated" in summary(events)
 

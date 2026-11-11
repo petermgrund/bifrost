@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
+from datetime import datetime, timezone
 
 import httpx
+
+from ..ids import next_sequential_id
 
 # keys Gramps 6 stores on a place, the only ones the API accepts back
 PLACE_KEYS = frozenset({
@@ -82,6 +86,15 @@ class GrampsClient:
         if resp.status_code >= 400:
             raise GrampsError(f"{method} {path} → {resp.status_code}: {resp.text[:500]}")
         return resp
+
+    async def page_of(self, path: str, page: int, page_size: int = 200,
+                      **params) -> tuple[list[dict], int]:
+        """One page of a listing plus the total count"""
+        resp = await self._request(
+            "GET", path, params={"pagesize": page_size, "page": page, **params})
+        items = resp.json()
+        items = items if isinstance(items, list) else []
+        return items, int(resp.headers.get("X-Total-Count") or len(items))
 
     async def _paged(self, path: str, page_size: int = 200, **params) -> list[dict]:
         items: list[dict] = []
@@ -188,11 +201,14 @@ class GrampsClient:
     async def list_places_full(self) -> list[dict]:
         return await self._paged("/places/")
 
-    async def get_media_by_gramps_id(self, gramps_id: str, backlinks: bool = False) -> dict | None:
-        """One media object; with backlinks, the objects referencing it ride along under 'backlinks'"""
+    async def get_media_by_gramps_id(self, gramps_id: str, backlinks: bool = False,
+                                     notes: bool = False) -> dict | None:
+        """One media object; backlinks ride along under 'backlinks', its notes under 'extended'"""
         params = {"gramps_id": gramps_id}
         if backlinks:
             params["backlinks"] = "true"
+        if notes:
+            params["extend"] = "note_list"
         resp = await self._request("GET", "/media/", ok_404=True, params=params)
         if resp.status_code == 404:
             return None
@@ -202,6 +218,16 @@ class GrampsClient:
                 if m.get("gramps_id") == gramps_id:
                     return m
         return None
+
+    async def find_notes(self, note_type: str) -> list[dict]:
+        """The notes of one type"""
+        rules = json.dumps({"rules": [{"name": "HasType", "values": [note_type]}]})
+        resp = await self._request("GET", "/notes/", params={"rules": rules})
+        return [n for n in resp.json() if n.get("type") == note_type]
+
+    async def next_note_id(self) -> str:
+        items = await self._paged("/notes/", keys="gramps_id")
+        return next_sequential_id("N", {i["gramps_id"] for i in items if i.get("gramps_id")})
 
     async def get_note(self, handle: str) -> dict | None:
         resp = await self._request("GET", f"/notes/{handle}", ok_404=True)
@@ -275,6 +301,20 @@ class GrampsClient:
         resp = await self._request("GET", f"/places/{handle}", params=params or None)
         return resp.json()
 
+
+
+def note_obj(handle: str, gramps_id: str, text: str, note_type: str) -> dict:
+    return {
+        "_class": "Note",
+        "handle": handle,
+        "gramps_id": gramps_id,
+        "text": {"_class": "StyledText", "string": text, "tags": []},
+        "type": note_type,
+        "format": 0,
+        "change": int(datetime.now(timezone.utc).timestamp()),
+        "tag_list": [],
+        "private": False,
+    }
 
 
 def person_display_name(person: dict) -> str:

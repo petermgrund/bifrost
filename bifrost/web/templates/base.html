@@ -12,7 +12,6 @@
   </script>
   <script type="module" src="/static/vendor/material-dynamic-colors.min.js"></script>
   <script type="module" src="/static/vendor/beer.min.js"></script>
-  <script type="module" src="/static/app/theme.js"></script>
   {% block head %}{% endblock %}
 </head>
 <body class="light">
@@ -24,7 +23,6 @@
       document.body.classList.toggle('light', !dark);
       localStorage.setItem('bifrost-theme', dark ? 'dark' : 'light');
       syncThemeIcon();
-      window.__bifrostReapplyTheme?.();
     }
     function syncThemeIcon() {
       const icon = document.getElementById('theme-icon');

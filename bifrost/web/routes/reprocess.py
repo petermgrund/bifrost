@@ -44,7 +44,7 @@ def _doc_ids(selected: list[str] | None) -> list[int]:
 async def preview(request: Request, body: ApplyBody = ApplyBody()):
     st = request.app.state
     gen = reprocess.scan(st.paperless, _scan_tag(request))
-    run_id, events = await record_run(st.conn, "reprocess.widths.preview", gen)
+    run_id, events = await record_run("reprocess.widths.preview", gen)
     return {"run_id": run_id, "apply": False, "events": [e.__dict__ for e in events]}
 
 
@@ -55,6 +55,6 @@ async def apply(request: Request, body: ApplyBody):
     if not doc_ids:
         raise HTTPException(400, "no documents selected")
     gen = reprocess.run_batch(st.paperless, doc_ids, reprocess.MODE_WIDEST)
-    run_id, events = await record_run(st.conn, "reprocess.widths", gen)
+    run_id, events = await record_run("reprocess.widths", gen)
     st.caches.clear()
     return {"run_id": run_id, "apply": True, "events": [e.__dict__ for e in events]}

@@ -113,6 +113,7 @@ export function formFrom(rec) {
     place: rec.place ? placeItem(rec.place) : null,
     notes: rec.notes || '',
     link: rec.links?.[0]?.url || '',
+    code: '',
   };
 }
 
@@ -120,11 +121,11 @@ export function formKey(f) {
   const d = f.date;
   const span = d.modifier === 'span' ? [years(d.minus), years(d.plus)] : [];
   const date = [d.year.trim(), d.month, d.day.trim(), d.modifier, d.quality, ...span];
-  return JSON.stringify([f.title.trim(), f.notes.trim(), f.place?.id || null, date, f.link.trim()]);
+  return JSON.stringify([f.title.trim(), f.notes.trim(), f.place?.id || null, date, f.link.trim(), f.code.trim()]);
 }
 
 export function filled(f) {
-  return !!(f.title.trim() || f.notes.trim() || f.place || f.link.trim() || dateOf(f.date));
+  return !!(f.title.trim() || f.notes.trim() || f.place || f.link.trim() || f.code.trim() || dateOf(f.date));
 }
 
 export function payload(f, rec) {
@@ -135,6 +136,7 @@ export function payload(f, rec) {
     date: dateOf(f.date),
     links: f.link.trim() ? [f.link.trim()] : [],
     change: rec.change,
+    gramps_id: rec.gramps ? null : f.code.trim().toUpperCase() || null,
   };
 }
 

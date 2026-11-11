@@ -509,11 +509,12 @@ def seed_paperless(docs: list[dict]) -> dict:
     log(f"paperless: authenticated as '{PAPERLESS_USER}'")
     tags = {name: p.get_or_create_tag(name) for name in PAPERLESS_TAGS}
     p.ensure_workflow(WORKFLOW_NAME, f"{URLS['bifrost']}/sync/api/paperless/webhook", WEBHOOK_TOKEN,
-                      [tags["doc"], tags["img"], tags["transcription"]])
+                      [tags["doc"], tags["img"], tags["transcription"], tags["Gemini OCR"]])
     fields = {
         "Gramps ID": p.get_or_create_field("Gramps ID", "string"),
         "Gramps URL": p.get_or_create_field("Gramps URL", "url"),
         "Date qualifier": p.get_or_create_field("Date qualifier", "select", DATE_QUALIFIERS),
+        "Source URL": p.get_or_create_field("Source URL", "url"),
         "Date meaning": p.get_or_create_field("Date meaning", "select", DATE_MEANINGS),
     }
     for name in DOCUMENT_TYPES:
@@ -810,7 +811,6 @@ def write_config(gramps: dict, paperless: dict | None, immich: dict | None) -> N
         "gramps": {"base_url": f"{URLS['gramps']}/api", "username": GRAMPS_USER, "password": PASSWORD},
         "paperless": {"base_url": URLS["paperless"],
                       "api_token": paperless["api_token"] if paperless else "not-seeded-yet"},
-        "database": "data/bifrost/bifrost.db",
         "sync": {
             "immich": {
                 "enabled": bool(immich),
@@ -828,6 +828,7 @@ def write_config(gramps: dict, paperless: dict | None, immich: dict | None) -> N
                 "gramps_id_field_id": paperless["fields"]["Gramps ID"] if paperless else None,
                 "gramps_url_field_id": paperless["fields"]["Gramps URL"] if paperless else None,
                 "date_qualifier_field_id": paperless["fields"]["Date qualifier"] if paperless else None,
+                "source_url_field_id": paperless["fields"]["Source URL"] if paperless else None,
                 "transcription_tag_id": paperless["tags"]["transcription"] if paperless else None,
                 "ocr_tag": "Gemini OCR",
                 "webhook_token": WEBHOOK_TOKEN,

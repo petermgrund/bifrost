@@ -56,6 +56,5 @@ dev/
     gramps/media/                     Gramps media base dir
     paperless/media/documents/originals -> Gramps /app/media/paperless (ro)
     immich/library/upload/            -> Gramps /app/media/immich (ro)
-    bifrost/bifrost.db                Bifrost's database
     samples/                          the generated documents and photos
 ```

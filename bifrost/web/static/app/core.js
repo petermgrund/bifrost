@@ -105,11 +105,8 @@ const ACTION_WORDS = {
   id_tags_written: ['write', 'wrote', 'ID tag', 'ID tags'],
   faces_linked: ['link', 'linked', 'face'],
   boxes_added: ['add', 'added', 'face box', 'face boxes'],
-  registered: ['register', 'registered', 'code'],
-  repointed: ['repoint', 'repointed', 'code'],
-  withdrawn: ['withdraw', 'withdrew', 'code'],
 };
-const QUIET = new Set(['skipped', 'tx_skipped', 'baselined', 'errors', 'unreadable', 'attention']);
+const QUIET = new Set(['skipped', 'errors', 'unreadable']);
 
 export function summarize(counts, applied) {
   if (!counts) return '';

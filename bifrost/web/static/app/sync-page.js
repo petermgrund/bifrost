@@ -43,7 +43,8 @@ export class SyncPage extends BifrostElement {
   lastCol(r) { return r.gramps_id || ' '; }
   previewBody() { return {}; }
   applyBody() { return { selected: [...this.selected] }; }
-  renderScanExtras() { return nothing; }    // e.g. a scope toggle next to Scan
+  renderScanExtras() { return nothing; }
+  isPrimary(e) { return e.entity === this.primaryEntity; }
 
   connectedCallback() {
     super.connectedCallback();
@@ -153,7 +154,7 @@ export class SyncPage extends BifrostElement {
         byDoc.set(e.source_id, r);
         out.push(r);
       }
-      if (e.entity === this.primaryEntity && this.groupOf(e.action) !== 'update') r.group = this.groupOf(e.action);
+      if (this.isPrimary(e) && this.groupOf(e.action) !== 'update') r.group = this.groupOf(e.action);
       r.keys.push(this.keyOf(e));
       Object.assign(r.cols, e.data?.cols);
       r.data = { ...r.data, ...(e.data || {}) };
@@ -272,7 +273,7 @@ export class SyncPage extends BifrostElement {
 
   row(r) {
     const CHIP = { create: ['green', 'Create'], update: ['primary-container', 'Update'],
-      replace: ['tertiary-container', 'Replace'],   // same weight as Update, a word that asks for a second look
+      replace: ['tertiary-container', 'Replace'],
       skip: ['', 'Skip'], error: ['error', 'Failed'] }[r.group];
     const tip = Object.entries(r.cols).map(([k, v]) => `${k}: ${v}`);
     if (r.detail) tip.push(r.detail);

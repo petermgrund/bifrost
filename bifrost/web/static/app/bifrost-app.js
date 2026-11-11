@@ -1,14 +1,17 @@
 import { BifrostElement, html, nothing } from './core.js';
 import './sync-check-page.js';
 import './reprocess-page.js';
+import './ancestry-links-page.js';
 import './codes-page.js';
 
 const SECTIONS = [
-  { id: 'sync', title: 'Sync', desc: 'Check Paperless docs, Immich photos and faces against Gramps',
-    body: html`<sync-check-page></sync-check-page>` },
+  { id: 'sync', title: 'Sync', desc: 'Manually check and run syncs',
+    body: html`<sync-check-page></sync-check-page>
+      <div class="large-space"></div>
+      <ancestry-links-page></ancestry-links-page>` },
   { id: 'photos', title: 'Photos', desc: 'Curate Immich photos for Gramps',
     body: html`<a class="button" href="/photos"><span>Open Photos</span></a>` },
-  { id: 'codes', title: 'Codes', desc: 'Manage PID codes',
+  { id: 'codes', title: 'Codes', desc: 'Manage UID codes',
     body: html`<codes-page></codes-page>` },
   { id: 'other', title: 'Other tools', desc: 'Other tools for managing your data',
     body: html`<reprocess-page></reprocess-page>` },

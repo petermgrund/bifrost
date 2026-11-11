@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import re
 import secrets
-import sqlite3
 from typing import Iterable
 
 CHARSET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
@@ -10,10 +9,6 @@ CHARSET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 MANUAL_ID_RE = re.compile(rf"^[{CHARSET}]{{6}}$")
 
 STOP_WORDS = frozenset({"README", "SCHEME"})
-
-
-class IdReused(sqlite3.IntegrityError):
-    """A minted id is already in the register"""
 
 
 def guard_reason(code: str) -> str | None:
@@ -44,35 +39,6 @@ def next_sequential_id(prefix: str, existing: set[str]) -> str:
     return f"{prefix}{n:04d}"
 
 
-def all_ids_ever_seen(
-    conn: sqlite3.Connection,
-    live: Iterable[str] = (),
-    paperless: Iterable[str | None] = (),
-    *,
-    open_reservations: bool = True,
-) -> set[str]:
-    query = "SELECT gramps_id FROM minted_media"
-    if not open_reservations:
-        query += " WHERE source_system IS NOT NULL OR withdrawn_at IS NOT NULL"
-    stored = {r[0] for r in conn.execute(query)}
-    return {str(v).strip().upper() for v in (*stored, *live, *paperless)
-            if v and str(v).strip()}
-
-
-def register_minted(conn: sqlite3.Connection, gramps_id: str, source_system: str,
-                    source_id: str, when: str) -> None:
-    row = conn.execute(
-        "SELECT source_system, source_id, withdrawn_at FROM minted_media WHERE gramps_id=?",
-        (gramps_id,)).fetchone()
-    if row is None:
-        conn.execute(
-            "INSERT INTO minted_media (gramps_id, source_system, source_id, created_at, minted_at) "
-            "VALUES (?, ?, ?, ?, ?)", (gramps_id, source_system, source_id, when, when))
-        return
-    if row[0] is not None:
-        raise IdReused(f"{gramps_id} is already registered to {row[0]} {row[1]}, not overwritten")
-    if row[2]:
-        raise IdReused(f"{gramps_id} was withdrawn on {row[2][:10]} and is never used again")
-    conn.execute(
-        "UPDATE minted_media SET source_system=?, source_id=?, minted_at=? WHERE gramps_id=?",
-        (source_system, source_id, when, gramps_id))
+def taken_ids(*sources: Iterable[str | None]) -> set[str]:
+    """Every id a new code must avoid, normalized"""
+    return {str(v).strip().upper() for source in sources for v in source if v and str(v).strip()}

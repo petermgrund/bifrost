@@ -3,23 +3,15 @@ import io
 
 import pytest
 
-from bifrost.core import dates, db
-from bifrost.core import settings as ui_settings
+from bifrost.core import dates
 from bifrost.core.clients.immich import ImmichError
-from bifrost.core.config import SyncImmichConfig
+from bifrost.core.config import SyncImmichConfig, load_config
 from bifrost.modules import codes, photos, sync_immich
 from bifrost.modules.sync_immich import SyncError
-from test_sync_immich import FakeGramps, FakeImmich, asset, linked, mint, run_scan, summary_of
+from test_sync_immich import FakeGramps, FakeImmich, _fresh_register, asset, linked, mint, run_scan, summary_of  # noqa: F401
 
 CFG = SyncImmichConfig(path_mappings=(("/up/", "immich/"),), id_tag_prefix="ID",
                        gramps_public_url="https://gramps.example")
-
-
-@pytest.fixture
-def conn(tmp_path):
-    c = db.connect(tmp_path / "t.db")
-    yield c
-    c.close()
 
 
 def tagged(aid, *values, name="img.jpg", desc=None, when="1923-06-15T12:00:00Z"):
@@ -56,13 +48,13 @@ def run(coro):
     return asyncio.run(coro)
 
 
-def load(gr, im, conn, aid, place_rows=None):
-    return run(photos.load(gr, [im], conn, CFG, aid, place_rows))
+def load(gr, im, aid, place_rows=None):
+    return run(photos.load(gr, [im], CFG, aid, place_rows))
 
 
-def save(gr, im, conn, aid, form):
+def save(gr, im, aid, form):
     async def collect():
-        return [e async for e in photos.save(gr, [im], conn, CFG, aid, form)]
+        return [e async for e in photos.save(gr, [im], CFG, aid, form)]
     return run(collect())
 
 
@@ -102,16 +94,16 @@ class TestDateForms:
         out = photos.validate_form({"date": dict(body.date)})
         assert (out["date"]["minus"], out["date"]["plus"]) == (10, 5)
 
-    def test_saving_a_new_span_replaces_the_gramps_range(self, conn):
-        mint(conn, "ABC123", "a1")
+    def test_saving_a_new_span_replaces_the_gramps_range(self):
+        mint("ABC123", "a1")
         a = tagged("a1", "ID/ABC123", desc="T", when="1945-06-15T12:00:00Z")
         im = FakeImmich(assets={"a1": a})
         gr = FakeGramps({"ABC123": media(date=dates.range_date(1935, 1950, 0))})
         form = {"title": "T", "date": {"value": "1945", "modifier": "span", "minus": 5, "plus": 5}, "change": 100}
-        save(gr, im, conn, "a1", form)
+        save(gr, im, "a1", form)
         assert gr.updated[0]["date"] == dates.range_date(1940, 1950, 0)
         assert im.upserted == [] and im.untagged_assets == []
-        assert load(gr, im, conn, "a1")["date"]["display"] == "Between 1940 and 1950"
+        assert load(gr, im, "a1")["date"]["display"] == "Between 1940 and 1950"
 
 
 class TestDescriptions:
@@ -134,23 +126,22 @@ class TestDescriptions:
 
 
 class TestSave:
-    def _registered(self, conn, **media_extra):
-        mint(conn, "ABC123", "a1")
+    def _registered(self, **media_extra):
+        mint("ABC123", "a1")
         a = tagged("a1", "Sync/Gramps", "ID/ABC123", desc="Old title")
         im = FakeImmich(assets={"a1": a})
         gr = FakeGramps({"ABC123": media(desc="Old title", **media_extra)}, places=[place(), place("P0002", "Taylors Falls")])
         return im, gr
 
-    def test_save_writes_the_gramps_media_and_copies_the_title(self, conn):
-        im, gr = self._registered(conn)
+    def test_save_writes_the_gramps_media_and_copies_the_title(self):
+        im, gr = self._registered()
         gr.notes["n-other"] = note("n-other", "a researcher's note", kind="Research", gid="N0007")
         gr.media["ABC123"]["note_list"] = ["n-other"]
         gr.media["ABC123"]["attribute_list"].append(sync_immich._attr("Source URL", "https://old.example/x"))
         form = {"title": "Farm, 1923", "notes": "Scanned from the album", "place_gramps_id": "P0001",
                 "date": {"value": "1923-06", "modifier": "about", "quality": "estimated"},
                 "links": ["https://example.org/box-3", "https://example.org/other"], "change": 100}
-        ui_settings.set_description_link(conn, True)
-        events = save(gr, im, conn, "a1", form)
+        events = save(gr, im, "a1", form)
         saved = gr.media["ABC123"]
         assert saved["desc"] == "Farm, 1923"
         assert saved["date"] == gdate(0, 6, 1923, modifier=3, quality=1)
@@ -160,36 +151,36 @@ class TestSave:
         assert new_note["type"] == "Media Note" and new_note["text"]["string"] == "Scanned from the album"
         assert saved["note_list"] == ["n-other", new_note["handle"]]
         assert gr.places[0]["media_list"][0]["ref"] == "h1"
-        assert im.updated_assets == [("a1", {"description": "Farm, 1923\nhttps://gramps.example/media/ABC123"})]
+        assert im.updated_assets == [("a1", {"description": "Farm, 1923"})]
         assert im.upserted == [] and im.bulk_tagged == []
         summary = summary_of(events).data
         assert summary["created"] is False and summary["warning"] is None
         assert set(summary["changed"]) == {"title", "date", "links"} and summary["note"] == "created"
         assert summary["place"] == "Chisago Lake"
-        rec = load(gr, im, conn, "a1", {"P0001": {"name": "Chisago Lake", "hierarchy": ["Chisago Lake", "Minnesota"]}})
+        rec = load(gr, im, "a1", {"P0001": {"name": "Chisago Lake", "hierarchy": ["Chisago Lake", "Minnesota"]}})
         assert (rec["title"], rec["notes"], rec["change"]) == ("Farm, 1923", "Scanned from the album", 101)
         assert rec["date"]["display"] == "Est. About 1923-06" and rec["date_readonly"] is None
         assert [x["url"] for x in rec["links"]] == ["https://example.org/box-3", "https://example.org/other"]
         assert rec["place"] == {"gramps_id": "P0001", "name": "Chisago Lake",
                                 "hierarchy": ["Chisago Lake", "Minnesota"], "known": True}
 
-    def test_an_unchanged_save_touches_nothing(self, conn):
-        im, gr = self._registered(conn)
-        events = save(gr, im, conn, "a1", {"title": "Old title", "change": 100})
+    def test_an_unchanged_save_touches_nothing(self):
+        im, gr = self._registered()
+        events = save(gr, im, "a1", {"title": "Old title", "change": 100})
         assert gr.updated == [] and im.updated_assets == []
         assert summary_of(events).data["changed"] == {}
 
-    def test_the_first_save_adds_the_photo(self, conn):
+    def test_the_first_save_adds_the_photo(self):
         a = tagged("a1", "Date/Year", desc="Immich title")
         im = VersionsImmich(assets={"a1": a})
         gr = FakeGramps(places=[place()])
         form = {"title": "Farm, 1923", "notes": "n", "place_gramps_id": "P0001",
                 "date": {"value": "1923", "precision": "year"}, "links": ["https://example.org/x"]}
-        events = save(gr, im, conn, "a1", form)
+        events = save(gr, im, "a1", form)
         [created] = gr.created
         gid = created["gramps_id"]
         created = gr.media[gid]
-        assert conn.execute("SELECT gramps_id FROM minted_media WHERE source_id='a1'").fetchone()[0] == gid
+        assert [a["value"] for a in created["attribute_list"] if a["type"] == "Immich ID"] == ["a1"]
         assert (created["desc"], created["date"]) == ("Farm, 1923", gdate(0, 0, 1923))
         assert sync_immich.media_links(created) == ["https://example.org/x"]
         assert gr.places[0]["media_list"][0]["ref"] == created["handle"]
@@ -199,218 +190,192 @@ class TestSave:
         assert im.updated_assets == [("a1", {"description": "Farm, 1923"})]
         assert [e.action for e in events if e.entity == "media"][0] == "created"
         assert summary_of(events).data["created"] is True
-        rec = load(gr, im, conn, "a1")
+        rec = load(gr, im, "a1")
         assert rec["gramps"]["gramps_id"] == gid and rec["title"] == "Farm, 1923"
 
-    def test_a_save_with_a_note_or_link_alone_adds_the_photo(self, conn):
+    def test_a_save_with_a_note_or_link_alone_adds_the_photo(self):
         for form in ({"notes": "just a note"}, {"links": ["https://example.org/x"]}, {"place_gramps_id": "P0001"}):
             im = FakeImmich(assets={"a1": tagged("a1")})
             gr = FakeGramps(places=[place()])
-            save(gr, im, conn, "a1", form)
+            save(gr, im, "a1", form)
             assert len(gr.created) == 1
-            conn.execute("DELETE FROM minted_media")
-            conn.commit()
 
-    def test_a_save_with_nothing_filled_in_adds_nothing(self, conn):
+    def test_a_save_with_nothing_filled_in_adds_nothing(self):
         im = FakeImmich(assets={"a1": tagged("a1", desc="stale")})
         gr = FakeGramps()
-        events = save(gr, im, conn, "a1", {"title": ""})
-        assert gr.created == [] and conn.execute(
-            "SELECT COUNT(*) FROM minted_media WHERE source_system IS NOT NULL").fetchone()[0] == 0
+        events = save(gr, im, "a1", {"title": ""})
+        assert gr.created == []
         assert im.updated_assets == [("a1", {"description": ""})]
         assert summary_of(events).data["gramps_id"] is None
 
-    def test_a_chosen_code_is_taken_from_the_reserved_ones(self, conn):
-        codes.claim(conn, "rsvd-22")
+    def test_a_code_written_on_the_photo_is_used(self):
         im = FakeImmich(assets={"a1": tagged("a1")})
         gr = FakeGramps()
-        assert codes.open_codes(conn, set())[0]["code"] == "RSVD22"
-        save(gr, im, conn, "a1", {"title": "T", "notes": "Mine", "gramps_id": "RSVD22"})
+        save(gr, im, "a1", {"title": "T", "notes": "Mine", "gramps_id": "rsvd-22"})
         assert gr.created[0]["gramps_id"] == "RSVD22"
         assert [n["text"]["string"] for n in gr.notes.values()] == ["Mine"]
-        assert codes.open_codes(conn, set()) == []
-        row = conn.execute("SELECT source_system, source_id FROM minted_media WHERE gramps_id='RSVD22'").fetchone()
-        assert tuple(row) == ("immich", "a1")
+        assert [a["value"] for a in gr.created[0]["attribute_list"] if a["type"] == "Immich ID"] == ["a1"]
+        with pytest.raises(SyncError) as exc:
+            save(gr, FakeImmich(assets={"a2": tagged("a2")}), "a2", {"title": "T", "gramps_id": "RSVD22"})
+        assert exc.value.status == 409 and "already the ID" in exc.value.detail
 
-    def test_the_first_save_adopts_the_rows_bifrost_kept(self, conn):
-        conn.execute("INSERT INTO photo_notes (asset_id, text, updated_at) VALUES ('a1', 'kept note', 't')")
-        conn.execute("INSERT INTO photo_links (asset_id, url, added_at) VALUES ('a1', 'https://kept.example/x', 't')")
-        conn.commit()
-        im = FakeImmich(assets={"a1": tagged("a1", desc="T")})
-        gr = FakeGramps()
-        rec = load(gr, im, conn, "a1")
-        assert (rec["notes"], [x["url"] for x in rec["links"]]) == ("kept note", ["https://kept.example/x"])
-        save(gr, im, conn, "a1", {"title": "T", "notes": "kept note, edited", "links": ["https://kept.example/x"]})
-        assert [n["text"]["string"] for n in gr.notes.values()] == ["kept note, edited"]
-        assert sync_immich.media_links(gr.created[0]) == ["https://kept.example/x"]
-        assert conn.execute("SELECT COUNT(*) FROM photo_notes").fetchone()[0] == 0
-        assert conn.execute("SELECT COUNT(*) FROM photo_links").fetchone()[0] == 0
-
-    def test_the_immich_copy_failing_is_only_a_warning(self, conn):
-        im, gr = self._registered(conn)
+    def test_the_immich_copy_failing_is_only_a_warning(self):
+        im, gr = self._registered()
 
         async def boom(asset_id, **fields):
             raise ImmichError(500, "immich down")
 
         im.update_asset = boom
-        events = save(gr, im, conn, "a1", {"title": "New", "change": 100})
+        events = save(gr, im, "a1", {"title": "New", "change": 100})
         assert gr.media["ABC123"]["desc"] == "New"
         assert summary_of(events).data["warning"] == "Immich description not updated: immich down"
         assert [e.action for e in events if e.kind == "item" and e.entity == "media"] == ["updated", "skipped"]
 
-    def test_a_stale_edit_is_refused(self, conn):
-        im, gr = self._registered(conn)
+    def test_a_stale_edit_is_refused(self):
+        im, gr = self._registered()
         with pytest.raises(SyncError) as exc:
-            save(gr, im, conn, "a1", {"title": "New", "change": 99})
+            save(gr, im, "a1", {"title": "New", "change": 99})
         assert exc.value.status == 409 and "reload" in exc.value.detail
         assert gr.updated == [] and im.updated_assets == []
-        save(gr, im, conn, "a1", {"title": "New", "change": 100})
+        save(gr, im, "a1", {"title": "New", "change": 100})
         assert gr.media["ABC123"]["desc"] == "New"
 
-    def test_an_unreachable_gramps_saves_nothing(self, conn):
+    def test_an_unreachable_gramps_saves_nothing(self):
         class DownGramps(FakeGramps):
-            async def get_media_by_gramps_id(self, gid, backlinks=False):
+            async def get_media_by_gramps_id(self, gid, backlinks=False, notes=False):
                 raise RuntimeError("connection refused")
 
-        mint(conn, "ABC123", "a1")
+        mint("ABC123", "a1")
         im = FakeImmich(assets={"a1": tagged("a1", desc="Old")})
         with pytest.raises(SyncError) as exc:
-            save(DownGramps(), im, conn, "a1", {"title": "New", "change": 100})
+            save(DownGramps({"ABC123": media()}), im, "a1", {"title": "New", "change": 100})
         assert exc.value.status == 502 and im.updated_assets == []
-        rec = load(DownGramps(), im, conn, "a1")
+        rec = load(DownGramps({"ABC123": media()}), im, "a1")
         assert rec["gramps_error"].startswith("Gramps could not be read") and rec["title"] == "Old"
 
-    def test_a_register_row_without_its_media_is_an_error(self, conn):
-        mint(conn, "ABC123", "a1")
-        im = FakeImmich(assets={"a1": tagged("a1")})
-        with pytest.raises(SyncError) as exc:
-            save(FakeGramps(), im, conn, "a1", {"title": "New"})
-        assert exc.value.status == 404 and "not in Gramps" in exc.value.detail
-        assert load(FakeGramps(), im, conn, "a1")["gramps_error"] == "the register points at ABC123, which is not in Gramps"
-
-    def test_clearing_the_notes_removes_the_media_note(self, conn):
-        im, gr = self._registered(conn)
+    def test_clearing_the_notes_removes_the_media_note(self):
+        im, gr = self._registered()
         gr.notes["n-1"] = note("n-1", "old note")
         gr.notes["n-2"] = note("n-2", "second media note", gid="N0002")
         gr.media["ABC123"]["note_list"] = ["n-1", "n-2"]
-        save(gr, im, conn, "a1", {"title": "Old title", "notes": "edited", "change": 100})
+        save(gr, im, "a1", {"title": "Old title", "notes": "edited", "change": 100})
         assert gr.updated_notes[0]["handle"] == "n-1" and gr.updated_notes[0]["text"]["string"] == "edited"
         assert gr.notes["n-2"]["text"]["string"] == "second media note"
-        save(gr, im, conn, "a1", {"title": "Old title", "notes": "", "change": 100})
+        save(gr, im, "a1", {"title": "Old title", "notes": "", "change": 100})
         assert gr.media["ABC123"]["note_list"] == ["n-2"] and gr.deleted_notes == ["n-1"]
 
-    def test_an_empty_title_falls_back_to_the_file_name(self, conn):
-        im, gr = self._registered(conn)
-        save(gr, im, conn, "a1", {"title": "", "notes": "n", "change": 100})
+    def test_an_empty_title_falls_back_to_the_file_name(self):
+        im, gr = self._registered()
+        save(gr, im, "a1", {"title": "", "notes": "n", "change": 100})
         assert gr.media["ABC123"]["desc"] == "img.jpg"
 
-    def test_save_finishes_the_sync_work(self, conn):
-        mint(conn, "ABC123", "a1")
+    def test_save_finishes_the_sync_work(self):
+        mint("ABC123", "a1")
         a = tagged("a1", desc="T")
         a["originalPath"] = "/up/moved.jpg"
         im = FakeImmich(assets={"a1": a})
         gr = FakeGramps({"ABC123": media()})
-        events = save(gr, im, conn, "a1", {"title": "T", "change": 100})
+        events = save(gr, im, "a1", {"title": "T", "change": 100})
         assert gr.media["ABC123"]["path"] == "immich/moved.jpg"
         assert im.upserted == ["ID/ABC123"]
         cols = [e.data["cols"] for e in events if e.entity == "media" and e.action == "updated"]
         assert set(cols[-1]) == {"file", "id tag"}
 
-    def test_stack_variant_is_refused(self, conn):
+    def test_stack_variant_is_refused(self):
         a = tagged("c1")
         a["stack"] = {"id": "s1", "primaryAssetId": "p1"}
         im = FakeImmich(assets={"c1": a})
         with pytest.raises(SyncError, match="stack variant"):
-            save(FakeGramps(), im, conn, "c1", {"title": "x"})
+            save(FakeGramps(), im, "c1", {"title": "x"})
 
 
 class TestPlaces:
-    def _registered(self, conn, holding=("h1",), second=()):
-        mint(conn, "ABC123", "a1")
+    def _registered(self, holding=("h1",), second=()):
+        mint("ABC123", "a1")
         im = FakeImmich(assets={"a1": tagged("a1", "ID/ABC123", desc="T")})
         gr = FakeGramps({"ABC123": media()},
                         places=[place(holding=holding), place("P0002", "Taylors Falls", holding=second)])
         return im, gr
 
-    def test_the_place_is_the_gallery_holding_the_photo(self, conn):
-        im, gr = self._registered(conn)
-        rec = load(gr, im, conn, "a1")
+    def test_the_place_is_the_gallery_holding_the_photo(self):
+        im, gr = self._registered()
+        rec = load(gr, im, "a1")
         assert rec["place"]["gramps_id"] == "P0001" and rec["place"]["name"] == "Chisago Lake"
 
-    def test_changing_the_place_moves_the_photo(self, conn):
-        im, gr = self._registered(conn)
-        events = save(gr, im, conn, "a1", {"title": "T", "place_gramps_id": "P0002", "change": 100})
+    def test_changing_the_place_moves_the_photo(self):
+        im, gr = self._registered()
+        events = save(gr, im, "a1", {"title": "T", "place_gramps_id": "P0002", "change": 100})
         assert gr.places[0]["media_list"] == [] and gr.places[1]["media_list"][0]["ref"] == "h1"
         assert [p["gramps_id"] for p in gr.updated_places] == ["P0001", "P0002"]
         assert events_of(events, "place") == [("updated", {}, "added to the gallery")]
-        assert load(gr, im, conn, "a1")["place"]["gramps_id"] == "P0002"
-        save(gr, im, conn, "a1", {"title": "T", "place_gramps_id": "P0002", "change": 100})
+        assert load(gr, im, "a1")["place"]["gramps_id"] == "P0002"
+        save(gr, im, "a1", {"title": "T", "place_gramps_id": "P0002", "change": 100})
         assert len(gr.updated_places) == 2
 
-    def test_clearing_the_place_takes_the_photo_out(self, conn):
-        im, gr = self._registered(conn)
-        save(gr, im, conn, "a1", {"title": "T", "change": 100})
+    def test_clearing_the_place_takes_the_photo_out(self):
+        im, gr = self._registered()
+        save(gr, im, "a1", {"title": "T", "change": 100})
         assert gr.places[0]["media_list"] == []
-        assert load(gr, im, conn, "a1")["place"] is None
+        assert load(gr, im, "a1")["place"] is None
 
-    def test_an_unknown_place_is_refused_before_anything_is_written(self, conn):
-        im, gr = self._registered(conn)
+    def test_an_unknown_place_is_refused_before_anything_is_written(self):
+        im, gr = self._registered()
         with pytest.raises(SyncError, match="names no Gramps place"):
-            save(gr, im, conn, "a1", {"title": "New", "place_gramps_id": "P0404", "change": 100})
+            save(gr, im, "a1", {"title": "New", "place_gramps_id": "P0404", "change": 100})
         assert gr.updated == []
 
-    def test_a_photo_in_several_galleries_is_left_alone(self, conn):
-        im, gr = self._registered(conn, holding=("h1",), second=("h1",))
-        rec = load(gr, im, conn, "a1")
+    def test_a_photo_in_several_galleries_is_left_alone(self):
+        im, gr = self._registered(holding=("h1",), second=("h1",))
+        rec = load(gr, im, "a1")
         assert rec["place"] is None and [p["gramps_id"] for p in rec["places"]] == ["P0001", "P0002"]
-        save(gr, im, conn, "a1", {"title": "T", "change": 100})
+        save(gr, im, "a1", {"title": "T", "change": 100})
         assert gr.updated_places == []
         assert [len(p["media_list"]) for p in gr.places] == [1, 1]
 
 
 class TestLoad:
-    def test_an_unregistered_photo_opens_with_its_immich_title_and_nothing_else(self, conn):
+    def test_an_unregistered_photo_opens_with_its_immich_title_and_nothing_else(self):
         a = tagged("a1", "Sync/Gramps", desc="Immich title")
         a["exifInfo"].update({"latitude": 45.5, "longitude": -92.9})
-        rec = load(FakeGramps(places=[place()]), FakeImmich(assets={"a1": a}), conn, "a1")
+        rec = load(FakeGramps(places=[place()]), FakeImmich(assets={"a1": a}), "a1")
         assert (rec["title"], rec["date"], rec["gramps"], rec["change"]) == ("Immich title", None, None, None)
         assert (rec["place"], rec["places"]) == (None, [])
         assert (rec["notes"], rec["links"], rec["date_readonly"]) == ("", [], None)
         assert rec["immich_date"] == "1923-06-15"
 
-    def test_a_registered_photo_opens_with_what_gramps_has(self, conn):
-        mint(conn, "ABC123", "a1")
+    def test_a_registered_photo_opens_with_what_gramps_has(self):
+        mint("ABC123", "a1")
         gr = FakeGramps({"ABC123": media(desc="Gramps title", date=gdate(0, 0, 1923, modifier=1), change=7,
                                          note_list=["n-r", "n-1"],
                                          attribute_list=[sync_immich._attr("Source URL", "https://example.org/x")])})
         gr.notes["n-r"] = note("n-r", "research", kind="Research")
         gr.notes["n-1"] = note("n-1", "the media note")
-        rec = load(gr, FakeImmich(assets={"a1": tagged("a1", desc="Immich title")}), conn, "a1")
+        rec = load(gr, FakeImmich(assets={"a1": tagged("a1", desc="Immich title")}), "a1")
         assert (rec["title"], rec["date"]["display"], rec["notes"], rec["change"]) == (
             "Gramps title", "Before 1923", "the media note", 7)
         assert [x["url"] for x in rec["links"]] == ["https://example.org/x"]
         assert rec["gramps"] == {"gramps_id": "ABC123", "url": "https://gramps.example/media/ABC123"}
 
-    def test_a_date_the_form_cannot_hold_is_read_only_until_a_new_one_is_entered(self, conn):
-        mint(conn, "ABC123", "a1")
+    def test_a_date_the_form_cannot_hold_is_read_only_until_a_new_one_is_entered(self):
+        mint("ABC123", "a1")
         textonly = {"_class": "Date", "dateval": [0, 0, 0, False], "modifier": 6, "quality": 0,
                     "text": "the summer Ed left"}
         im = FakeImmich(assets={"a1": tagged("a1", desc="T")})
         gr = FakeGramps({"ABC123": media(date=textonly)})
-        rec = load(gr, im, conn, "a1")
+        rec = load(gr, im, "a1")
         assert (rec["date"], rec["date_readonly"]) == (None, "the summer Ed left")
-        save(gr, im, conn, "a1", {"title": "New", "change": 100})
+        save(gr, im, "a1", {"title": "New", "change": 100})
         assert gr.media["ABC123"]["date"] == textonly
-        save(gr, im, conn, "a1", {"title": "New", "date": {"value": "1923"}, "change": 101})
+        save(gr, im, "a1", {"title": "New", "date": {"value": "1923"}, "change": 101})
         assert gr.media["ABC123"]["date"] == gdate(0, 0, 1923)
 
-    def test_clearing_a_held_date_empties_it(self, conn):
-        mint(conn, "ABC123", "a1")
+    def test_clearing_a_held_date_empties_it(self):
+        mint("ABC123", "a1")
         im = VersionsImmich(assets={"a1": tagged("a1", desc="T")})
         gr = FakeGramps({"ABC123": media(date=gdate(0, 0, 1923))})
-        save(gr, im, conn, "a1", {"title": "T", "change": 100})
+        save(gr, im, "a1", {"title": "T", "change": 100})
         assert gr.media["ABC123"]["date"] == dates.EMPTY_DATE
-        rec = load(gr, im, conn, "a1")
+        rec = load(gr, im, "a1")
         assert rec["date"] is None and rec["date_readonly"] is None and rec["immich_date"] == "1923-06-15"
         assert im.untagged_assets == []
 
@@ -423,69 +388,25 @@ class TestMergedSpelling:
         assert [t["value"] for t in merged["tags"]] == ["Holiday", "ID/ABC123", "Sync/Gramps"]
 
 
-class TestLeftoverRows:
-    def test_a_created_media_takes_the_note_and_links_bifrost_kept(self, conn):
-        conn.execute("INSERT INTO photo_notes (asset_id, text, updated_at) VALUES ('a1', 'Written before', 't')")
-        conn.execute("INSERT INTO photo_links (asset_id, url, added_at) VALUES ('a1', 'https://kept.example/x', 't')")
-        conn.commit()
-        im = FakeImmich(assets={"a1": tagged("a1", "Sync/Gramps", desc="img.jpg")}, tagged={"a1"})
-        gr = FakeGramps()
-        events = run_scan(im, gr, conn, apply=True, cfg=CFG)
-        assert [(e.entity, e.action) for e in events if e.kind == "item" and e.entity != "tag"] == [
-            ("media", "created"), ("note", "created"), ("media", "updated")]
-        [note_obj] = gr.notes.values()
-        assert note_obj["type"] == "Media Note" and note_obj["text"]["string"] == "Written before"
-        assert gr.media[gr.created[0]["gramps_id"]]["note_list"] == [note_obj["handle"]]
-        assert sync_immich.media_links(gr.media[gr.created[0]["gramps_id"]]) == ["https://kept.example/x"]
-        assert conn.execute("SELECT COUNT(*) FROM photo_notes").fetchone()[0] == 0
-        assert conn.execute("SELECT COUNT(*) FROM photo_links").fetchone()[0] == 0
-        assert "notes" not in im.metadata["a1"]["bifrost"]
-        assert summary_of(events).data["notes_synced"] == 1
-        again = run_scan(im, gr, conn, apply=True, cfg=CFG)
-        assert [e for e in again if e.kind == "item"] == []
-
-    def test_a_url_only_note_becomes_a_link(self, conn):
-        conn.execute("INSERT INTO photo_notes (asset_id, text, updated_at) VALUES ('a1', ' https://only.example/y ', 't')")
-        conn.commit()
-        im = FakeImmich(assets={"a1": tagged("a1", "Sync/Gramps")}, tagged={"a1"})
-        gr = FakeGramps()
-        run_scan(im, gr, conn, apply=True, cfg=CFG)
-        assert gr.notes == {}
-        assert sync_immich.media_links(gr.created[0]) == ["https://only.example/y"]
-
-    def test_the_sync_no_longer_pushes_rows_for_registered_media(self, conn):
-        mint(conn, "ABC123", "a1")
-        conn.execute("INSERT INTO photo_notes (asset_id, gramps_id, text, updated_at) VALUES ('a1', 'ABC123', 'kept', 't')")
-        conn.commit()
-        im = FakeImmich(assets={"a1": tagged("a1", "ID/ABC123", desc="T")})
-        gr = FakeGramps({"ABC123": media()})
-        events = run_scan(im, gr, conn, apply=True, cfg=CFG)
-        assert gr.notes == {} and gr.updated == []
-        assert summary_of(events).data["skipped"] == 1
-        assert conn.execute("SELECT COUNT(*) FROM photo_notes").fetchone()[0] == 1
-
-
 class TestPendingSync:
-    def pending(self, im, gr, conn):
-        return run(photos.pending_changes(gr, [im], conn, CFG, "a1"))
+    def pending(self, im, gr):
+        return run(photos.pending_changes(gr, [im], CFG, "a1"))
 
-    def test_in_step_with_gramps(self, conn):
-        mint(conn, "ABC123", "a1")
+    def test_in_step_with_gramps(self):
+        mint("ABC123", "a1")
         im = FakeImmich(assets={"a1": tagged("a1", "ID/ABC123", desc="T")})
-        assert self.pending(im, FakeGramps({"ABC123": media()}), conn) == []
+        assert self.pending(im, FakeGramps({"ABC123": media()})) == []
 
-    def test_title_date_place_and_notes_are_never_pending(self, conn):
-        mint(conn, "ABC123", "a1")
-        conn.execute("INSERT INTO photo_notes (asset_id, gramps_id, text, updated_at) VALUES ('a1', 'ABC123', 'n', 't')")
-        conn.commit()
+    def test_title_date_place_and_notes_are_never_pending(self):
+        mint("ABC123", "a1")
         a = tagged("a1", "ID/ABC123", desc="Easter 1966")
         a["exifInfo"].update({"latitude": 45.5, "longitude": -92.9})
         im = FakeImmich(assets={"a1": a})
         gr = FakeGramps({"ABC123": media()}, places=[place()])
-        assert self.pending(im, gr, conn) == []
+        assert self.pending(im, gr) == []
 
-    def test_file_and_face_changes_are_pending(self, conn):
-        mint(conn, "ABC123", "a1")
+    def test_file_and_face_changes_are_pending(self):
+        mint("ABC123", "a1")
         a = tagged("a1", "ID/ABC123", desc="T")
         a["originalPath"] = "/up/moved.jpg"
         im = FakeImmich(assets={"a1": a}, faces={"a1": [{"person": {"id": "uuid-ed", "name": "Ed"},
@@ -493,30 +414,30 @@ class TestPendingSync:
                                                         "boundingBoxX2": 50, "boundingBoxY2": 50,
                                                         "imageWidth": 100, "imageHeight": 100}]})
         gr = FakeGramps({"ABC123": media()}, people={"h-ed": linked("h-ed", "uuid-ed")})
-        assert self.pending(im, gr, conn) == ["faces", "file"]
+        assert self.pending(im, gr) == ["faces", "file"]
 
-    def test_a_photo_outside_gramps_has_nothing_pending(self, conn):
+    def test_a_photo_outside_gramps_has_nothing_pending(self):
         im = FakeImmich(assets={"a1": tagged("a1", "Sync/Gramps")})
-        assert self.pending(im, FakeGramps(), conn) == []
+        assert self.pending(im, FakeGramps()) == []
 
 
 class TestLinkRecord:
-    def test_create_writes_the_record(self, conn):
+    def test_create_writes_the_record(self):
         im = FakeImmich(assets={"a1": tagged("a1", "Sync/Gramps")}, tagged={"a1"})
         gr = FakeGramps()
-        run_scan(im, gr, conn, apply=True, cfg=CFG)
+        run_scan(im, gr, apply=True, cfg=CFG)
         gid = gr.created[0]["gramps_id"]
         assert im.metadata["a1"]["bifrost"] == {"gramps_id": gid,
                                                 "gramps_url": f"https://gramps.example/media/{gid}"}
 
-    def test_single_asset_update_copies_the_gramps_title_to_immich(self, conn):
-        mint(conn, "ABC123", "a1")
+    def test_single_asset_update_copies_the_gramps_title_to_immich(self):
+        mint("ABC123", "a1")
         im = FakeImmich(assets={"a1": tagged("a1", "ID/ABC123", desc="Immich title")})
         gr = FakeGramps({"ABC123": media(desc="Gramps title")})
 
         async def collect(update):
             return [e async for e in sync_immich.sync_one_asset(
-                gr, [im], conn, CFG, "a1", update=update)]
+                gr, [im], CFG, "a1", update=update)]
 
         events = asyncio.run(collect(False))
         assert im.updated_assets == [] and summary_of(events).data["updated"] == {}
@@ -665,13 +586,13 @@ class TestVersions:
         a.update({"width": 1000, "height": 800, "ownerId": "me-1"})
         return a
 
-    def test_add_version_stacks_and_matches(self, conn):
+    def test_add_version_stacks_and_matches(self):
         a = self._primary()
         n = tagged("n1", "Date/Month", desc="raw scan", when="2020-01-01T12:00:00Z")
         n.update({"width": 1000, "height": 800, "ownerId": "me-1"})
         im = VersionsImmich(assets={"a1": a, "n1": n}, faces={"a1": [face("p-ed", 100, 100, 300, 300)]})
         im.metadata["a1"] = {"bifrost": {"gramps_id": "ABC123"}}
-        rec = run(photos.add_version(FakeGramps(), [im], conn, CFG, "a1", "n1"))
+        rec = run(photos.add_version(FakeGramps(), [im], CFG, "a1", "n1"))
         assert im.created_stacks == [["a1", "n1"]]
         assert im.updated_assets == [("n1", {"latitude": 45.5, "longitude": -92.9})]
         assert n["exifInfo"]["description"] == "raw scan" and n["localDateTime"] == "2020-01-01T12:00:00Z"
@@ -683,9 +604,9 @@ class TestVersions:
             ("a1", True, []), ("n1", False, [])]
         assert sorted(t["value"] for t in n["tags"]) == ["Date/Month", "ID/ABC123", "Sync/Date", "Sync/Gramps"]
 
-    def test_an_upload_joins_as_a_version_with_the_main_tags(self, conn):
+    def test_an_upload_joins_as_a_version_with_the_main_tags(self):
         im = VersionsImmich(assets={"a1": self._primary()})
-        new_id, rec = run(photos.upload_version(FakeGramps(), [im], conn, CFG, "a1", "rescan.tif",
+        new_id, rec = run(photos.upload_version(FakeGramps(), [im], CFG, "a1", "rescan.tif",
                                                 io.BytesIO(b"tif"), "2026-09-22T10:00:00Z"))
         assert new_id == "u1" and im.uploads == [("rescan.tif", b"tif", "2026-09-22T10:00:00Z")]
         assert im.created_stacks == [["a1", "u1"]]
@@ -693,7 +614,7 @@ class TestVersions:
         assert "description" not in im.assets["u1"]["exifInfo"]
         assert sorted(t["value"] for t in im.assets["u1"]["tags"]) == ["ID/ABC123", "Sync/Date", "Sync/Gramps"]
 
-    def test_add_version_refuses_stacked_foreign_or_self(self, conn):
+    def test_add_version_refuses_stacked_foreign_or_self(self):
         a = self._primary()
         other = tagged("o1")
         other.update({"ownerId": "someone-else"})
@@ -702,36 +623,36 @@ class TestVersions:
         im = VersionsImmich(assets={"a1": a, "o1": other, "b1": busy})
         for target, msg in (("o1", "same Immich account"), ("b1", "already in a stack"), ("a1", "main image")):
             with pytest.raises(SyncError, match=msg):
-                run(photos.add_version(FakeGramps(), [im], conn, CFG, "a1", target))
+                run(photos.add_version(FakeGramps(), [im], CFG, "a1", target))
         assert im.created_stacks == []
 
-    def test_drift_is_reported_and_match_fixes_it(self, conn):
+    def test_drift_is_reported_and_match_fixes_it(self):
         a = self._primary()
         v = tagged("v1", "Sync/Gramps", "Date/Month", desc="old title")
         v.update({"width": 1000, "height": 800, "ownerId": "me-1"})
         im = VersionsImmich(assets={"a1": a, "v1": v})
         stacked(im, "a1", "v1")
-        rec = load(FakeGramps(), im, conn, "a1")
+        rec = load(FakeGramps(), im, "a1")
         assert rec["versions"]["members"][1]["drift"] == ["location", "tags (missing ID/ABC123, Sync/Date)"]
-        rec = run(photos.match_member(FakeGramps(), [im], conn, CFG, "a1", "v1"))
+        rec = run(photos.match_member(FakeGramps(), [im], CFG, "a1", "v1"))
         assert rec["versions"]["members"][1]["drift"] == []
         assert im.untagged_assets == [] and v["exifInfo"]["description"] == "old title"
 
-    def test_remove_unstacks_and_strips_identity_tags(self, conn):
+    def test_remove_unstacks_and_strips_identity_tags(self):
         a = self._primary()
         v = tagged("v1", "Sync/Gramps", "ID/ABC123", "Date/Year", "Holiday")
         v.update({"ownerId": "me-1"})
         im = VersionsImmich(assets={"a1": a, "v1": v})
         stacked(im, "a1", "v1")
         with pytest.raises(SyncError, match="make another version the main image"):
-            run(photos.remove_version(FakeGramps(), [im], conn, CFG, "a1", "a1"))
-        rec = run(photos.remove_version(FakeGramps(), [im], conn, CFG, "a1", "v1"))
+            run(photos.remove_version(FakeGramps(), [im], CFG, "a1", "a1"))
+        rec = run(photos.remove_version(FakeGramps(), [im], CFG, "a1", "v1"))
         assert im.removed == [("s1", "v1")]
         assert sorted(t["value"] for t in v["tags"]) == ["Date/Year", "Holiday"]
         assert [m["asset_id"] for m in rec["versions"]["members"]] == ["a1"]
 
-    def test_promote_switches_main_and_the_sync_repoints(self, conn):
-        mint(conn, "ABC123", "a1")
+    def test_promote_switches_main_and_the_sync_repoints(self):
+        mint("ABC123", "a1")
         a = self._primary()
         a["originalPath"] = "/up/old.jpg"
         v = tagged("v1", desc="better scan", name="new.jpg")
@@ -745,23 +666,23 @@ class TestVersions:
                         people={"h-ed": linked("h-ed", "uuid-ed", media_list=[
                             {"_class": "MediaRef", "ref": "h1", "rect": [10, 10, 30, 30]}])})
         stacked(im, "a1", "v1")
-        new_main = run(photos.promote([im], conn, CFG, gr, "a1", "v1", redraw_faces=True))
+        new_main = run(photos.promote([im], CFG, gr, "a1", "v1", redraw_faces=True))
         assert new_main == "v1"
         assert im.primary_changes == [("s1", "v1")]
         assert im.reassigned == [("uuid-ed", "d1")]
         assert gr.updated_people[0]["media_list"][0]["rect"] == []
 
         async def collect():
-            return [e async for e in sync_immich.sync_one_asset(gr, [im], conn, CFG, "v1", update=True)]
+            return [e async for e in sync_immich.sync_one_asset(gr, [im], CFG, "v1", update=True)]
 
         events = asyncio.run(collect())
         assert gr.updated[0]["path"] == "immich/new.jpg"
-        assert conn.execute("SELECT source_id FROM minted_media WHERE gramps_id='ABC123'").fetchone()[0] == "v1"
+        assert [a["value"] for a in gr.media["ABC123"]["attribute_list"] if a["type"] == "Immich ID"] == ["v1"]
         assert gr.updated_people[-1]["media_list"][0]["rect"] == [7, 9, 33, 41]
         assert summary_of(events).data["errors"] == 0
 
-    def test_suggestions_from_duplicates_and_the_id_tag(self, conn):
-        mint(conn, "ABC123", "a1")
+    def test_suggestions_from_duplicates_and_the_id_tag(self):
+        mint("ABC123", "a1")
         a = self._primary()
         a["duplicateId"] = "dup-1"
         dup = tagged("d1", desc="same scan")
@@ -771,14 +692,14 @@ class TestVersions:
         im = VersionsImmich(assets={"a1": a, "d1": dup, "t1": twin})
         im.extra_tags["id/abc123"] = {"id": "t-id", "name": "ABC123", "value": "ID/ABC123"}
         im.duplicates = [{"duplicateId": "dup-1", "assets": [a, dup]}]
-        rec = load(FakeGramps({"ABC123": media()}), im, conn, "a1")
+        rec = load(FakeGramps({"ABC123": media()}), im, "a1")
         assert [(sg["asset_id"], sg["why"], sg["in_stack"]) for sg in rec["suggestions"]] == [
             ("d1", "Immich duplicate", False), ("t1", "tagged ID/ABC123", True)]
 
 
 class TestRegisterFollowsTheMain:
-    def test_sync_of_the_main_repoints_a_register_row_left_on_a_variant(self, conn):
-        mint(conn, "ABC123", "v1")
+    def test_sync_of_the_main_repoints_an_immich_id_left_on_a_variant(self):
+        mint("ABC123", "v1")
         a = tagged("a1", "ID/ABC123")
         a["stack"] = {"id": "s1", "primaryAssetId": "a1"}
         v = tagged("v1")
@@ -790,146 +711,12 @@ class TestRegisterFollowsTheMain:
         gr = FakeGramps({"ABC123": media})
 
         async def collect():
-            return [e async for e in sync_immich.sync_one_asset(gr, [im], conn, CFG, "a1", update=True)]
+            return [e async for e in sync_immich.sync_one_asset(gr, [im], CFG, "a1", update=True)]
 
         events = asyncio.run(collect())
-        assert gr.updated == []
+        assert len(gr.updated) == 1
         assert summary_of(events).data["errors"] == 0
-        assert conn.execute("SELECT source_id FROM minted_media WHERE gramps_id='ABC123'").fetchone()[0] == "a1"
-
-
-from bifrost.modules import photo_collections as pc  # noqa: E402
-
-
-class TestCollections:
-    def test_crud_and_listing(self, conn):
-        c = pc.create(conn, "  Farm album ", "the Lindqvist farm over the years")
-        assert (c["name"], c["description"]) == ("Farm album", "the Lindqvist farm over the years")
-        with pytest.raises(ValueError):
-            pc.create(conn, "   ")
-        pc.update(conn, c["id"], "Farm", "")
-        assert pc.get(conn, c["id"])["name"] == "Farm"
-        assert [x["name"] for x in pc.list_all(conn)] == ["Farm"]
-        assert pc.list_all(conn)[0]["count"] == 0 and pc.list_all(conn)[0]["cover"] is None
-        assert pc.delete(conn, c["id"]) is True
-        assert pc.get(conn, c["id"]) is None and pc.delete(conn, c["id"]) is False
-
-    def test_items_keep_insertion_order_and_dedupe(self, conn):
-        c = pc.create(conn, "Farm")
-        assert pc.add_items(conn, c["id"], ["a1", "b1", "a1", ""]) == 2
-        assert pc.add_items(conn, c["id"], ["b1", "c1"]) == 1
-        assert pc.item_ids(conn, c["id"]) == ["a1", "b1", "c1"]
-        listed = pc.list_all(conn)[0]
-        assert (listed["count"], listed["cover"]) == (3, "a1")
-        assert pc.remove_item(conn, c["id"], "b1") is True
-        assert pc.item_ids(conn, c["id"]) == ["a1", "c1"]
-        assert pc.for_asset(conn, "a1") == [{"id": c["id"], "name": "Farm"}]
-        assert pc.for_asset(conn, "b1") == []
-
-    def test_slots_stay_put(self, conn):
-        c = pc.create(conn, "Farm")
-        pc.add_items(conn, c["id"], ["a1", "b1"])
-        assert pc.slots(conn, c["id"]) == {"a1": 1, "b1": 2}
-        assert pc.move_item(conn, c["id"], "b1", 5) == {"a1": 1, "b1": 5}
-        pc.add_items(conn, c["id"], ["c1"])
-        pc.remove_item(conn, c["id"], "a1")
-        assert pc.slots(conn, c["id"]) == {"b1": 5, "c1": 6}
-        assert pc.item_ids(conn, c["id"]) == ["b1", "c1"]
-
-    def test_moving_onto_a_photo_swaps_the_two(self, conn):
-        c = pc.create(conn, "Farm")
-        pc.add_items(conn, c["id"], ["a1", "b1", "c1"])
-        assert pc.move_item(conn, c["id"], "c1", 1) == {"c1": 1, "b1": 2, "a1": 3}
-
-    def test_move_item_clamps_and_ignores_strangers(self, conn):
-        c = pc.create(conn, "Farm")
-        pc.add_items(conn, c["id"], ["a1", "b1"])
-        assert pc.move_item(conn, c["id"], "a1", 0) == {"a1": 1, "b1": 2}
-        assert pc.move_item(conn, c["id"], "a1", 10_000) == {"b1": 2, "a1": pc.MAX_ITEMS}
-        assert pc.move_item(conn, c["id"], "zz", 1) is None
-
-    def test_new_photos_go_after_the_last_slot_then_into_gaps(self, conn):
-        c = pc.create(conn, "Farm")
-        pc.add_items(conn, c["id"], ["a1"])
-        pc.move_item(conn, c["id"], "a1", pc.MAX_ITEMS)
-        pc.add_items(conn, c["id"], ["b1", "c1"])
-        assert pc.slots(conn, c["id"]) == {"b1": 1, "c1": 2, "a1": pc.MAX_ITEMS}
-
-    def test_migration_turns_the_old_order_into_slots(self, conn):
-        c = pc.create(conn, "Old")
-        conn.executemany("INSERT INTO collection_items (collection_id, asset_id, seq, added_at) VALUES (?, ?, ?, ?)",
-                         [(c["id"], "b1", 2, "t"), (c["id"], "a1", 0, "t"), (c["id"], "c1", 7, "t")])
-        conn.executescript(db.MIGRATIONS[13])
-        assert pc.slots(conn, c["id"]) == {"a1": 1, "b1": 2, "c1": 3}
-
-    def test_cap(self, conn):
-        c = pc.create(conn, "Big")
-        pc.add_items(conn, c["id"], [f"a{i}" for i in range(pc.MAX_ITEMS)])
-        with pytest.raises(ValueError, match="at most"):
-            pc.add_items(conn, c["id"], ["one-more"])
-
-    def test_deleting_a_collection_drops_its_items(self, conn):
-        c = pc.create(conn, "Farm")
-        pc.add_items(conn, c["id"], ["a1"])
-        pc.delete(conn, c["id"])
-        assert conn.execute("SELECT COUNT(*) FROM collection_items").fetchone()[0] == 0
-
-    def test_memberships_follow_the_main_image(self, conn):
-        one = pc.create(conn, "One")
-        two = pc.create(conn, "Two")
-        pc.add_items(conn, one["id"], ["old", "x"])
-        pc.add_items(conn, two["id"], ["new", "old"])
-        assert pc.move_items(conn, "old", "new") == 2
-        assert pc.item_ids(conn, one["id"]) == ["new", "x"]
-        assert pc.item_ids(conn, two["id"]) == ["new"]
-
-    def test_cards_for_marks_missing_assets_and_keeps_order(self, conn):
-        mint(conn, "ABC123", "a1")
-        im = VersionsImmich(assets={"a1": tagged("a1", desc="Farm"), "b1": tagged("b1", name="b.jpg")})
-        cards = run(photos.cards_for([im], conn, ["b1", "gone", "a1"]))
-        assert [(c["asset_id"], c["title"] or c["filename"], c["gramps_id"], c["missing"]) for c in cards] == [
-            ("b1", "b.jpg", None, False), ("gone", "", None, True), ("a1", "Farm", "ABC123", False)]
-
-    def test_a_collection_gives_a_variants_place_to_its_main_image(self, conn):
-        im = VersionsImmich(assets={a: tagged(a) for a in ("a1", "v1", "b1", "w1", "x1")})
-        stacked(im, "a1", "v1")
-        stacked(im, "b1", "w1")
-        one = pc.create(conn, "One")
-        pc.add_items(conn, one["id"], ["x1", "v1", "b1", "w1"])
-        assert run(photos.fold_stacked_items([im], conn, one["id"])) == ["x1", "a1", "b1"]
-
-    def test_a_variant_opens_as_its_main_image_and_brings_its_collections(self, conn):
-        im = VersionsImmich(assets={"a1": tagged("a1", desc="Main"), "v1": tagged("v1", desc="Variant")})
-        stacked(im, "a1", "v1")
-        c = pc.create(conn, "Grund History")
-        pc.add_items(conn, c["id"], ["v1"])
-        rec = load(FakeGramps(), im, conn, "v1")
-        assert (rec["asset_id"], rec["title"]) == ("a1", "Main")
-        assert rec["collections"] == [{"id": c["id"], "name": "Grund History"}]
-        assert pc.item_ids(conn, c["id"]) == ["a1"]
-
-    def test_primaries_of_swaps_variants_for_their_main(self, conn):
-        a, v = tagged("a1"), tagged("v1")
-        im = VersionsImmich(assets={"a1": a, "v1": v})
-        stacked(im, "a1", "v1")
-        assert run(photos.primaries_of([im], ["v1", "z1", "a1"])) == ["a1", "z1"]
-
-    def test_promote_moves_memberships(self, conn):
-        c = pc.create(conn, "Farm")
-        pc.add_items(conn, c["id"], ["a1"])
-        a = tagged("a1", "Sync/Gramps")
-        a.update({"width": 100, "height": 80, "ownerId": "me-1"})
-        v = tagged("v1")
-        v.update({"width": 100, "height": 80, "ownerId": "me-1"})
-        im = VersionsImmich(assets={"a1": a, "v1": v})
-        stacked(im, "a1", "v1")
-        run(photos.promote([im], conn, CFG, FakeGramps(), "a1", "v1", redraw_faces=False))
-        assert pc.item_ids(conn, c["id"]) == ["v1"]
-        rec = load(FakeGramps(), im, conn, "v1")
-        assert rec["collections"] == [{"id": c["id"], "name": "Farm"}]
-
-
-from bifrost.core.config import load_config  # noqa: E402
+        assert [a["value"] for a in gr.media["ABC123"]["attribute_list"] if a["type"] == "Immich ID"] == ["a1"]
 
 
 class TestBrowseAccounts:
@@ -951,25 +738,52 @@ class TestBrowseAccounts:
         with pytest.raises(SyncError, match="names no configured Immich account"):
             photos.browse_accounts([fh, me], SyncImmichConfig(photos_accounts=("nobody",)))
 
-    def test_synced_mode_hides_other_accounts_photos(self, conn):
-        mint(conn, "AAA111", "a1")
-        mint(conn, "BBB222", "b1")
+    def test_synced_mode_hides_other_accounts_photos(self):
+        registered = {"a1": "AAA111", "b1": "BBB222"}
         a = tagged("a1", desc="mine")
         a["ownerId"] = "u-fh"
         b = tagged("b1", desc="theirs")
         b["ownerId"] = "u-me"
         fh = VersionsImmich(assets={"a1": a, "b1": b}, me_id="u-fh")
         fh.label = "fh"
-        rows = run(photos.search([fh], conn, mode="synced", browse=[fh]))["items"]
+        rows = run(photos.search([fh], registered, mode="synced", browse=[fh]))["items"]
         assert [i["asset_id"] for i in rows] == ["a1", "b1"]
         me = VersionsImmich(assets={"a1": a, "b1": b}, me_id="u-me")
         me.label = "me"
-        rows = run(photos.search([fh, me], conn, mode="synced", browse=[fh]))["items"]
+        rows = run(photos.search([fh, me], registered, mode="synced", browse=[fh]))["items"]
         assert [i["asset_id"] for i in rows] == ["a1"]
 
 
+class TestSearchByCode:
+    def _world(self):
+        a, b = tagged("a1", desc="Jeb Bush at TurboCam"), tagged("b1", desc="Other")
+        return {"a1": "82T4QG", "b1": "BBB222"}, VersionsImmich(assets={"a1": a, "b1": b})
+
+    def test_a_code_brings_up_its_photo_in_either_mode(self):
+        registered, im = self._world()
+        for mode in ("recent", "synced"):
+            r = run(photos.search([im], registered, mode=mode, q=" 82t4qg "))
+            assert [(i["asset_id"], i["gramps_id"], i["title"]) for i in r["items"]] == [
+                ("a1", "82T4QG", "Jeb Bush at TurboCam")]
+            assert r["nextPage"] is None
+        assert run(photos.search([im], registered, mode="recent", q="82T4QG", page=2))["items"] == []
+
+    def test_a_code_left_on_a_variant_opens_the_stack_main(self):
+        registered, im = self._world()
+        v = tagged("v1")
+        im.assets["v1"] = v
+        stacked(im, "a1", "v1")
+        r = run(photos.search([im], {"v1": "82T4QG"}, mode="recent", q="82T4QG"))
+        assert [(i["asset_id"], i["gramps_id"]) for i in r["items"]] == [("a1", "82T4QG")]
+
+    def test_an_unknown_code_is_searched_as_text(self):
+        registered, im = self._world()
+        r = run(photos.search([im], registered, mode="recent", q="ZZZ999"))
+        assert [i["asset_id"] for i in r["items"]] == ["a1", "b1"]
+
+
 class TestVersionLabels:
-    def test_the_label_lives_in_the_immich_record_alone(self, conn):
+    def test_the_label_lives_in_the_immich_record_alone(self):
         a = tagged("a1")
         a.update({"ownerId": "me-1"})
         v = tagged("v1")
@@ -979,17 +793,16 @@ class TestVersionLabels:
         im.metadata["v1"] = {"bifrost": {"gramps_id": "ABC123"}}
         run(photos.set_version_label([im], "v1", "  screenshot version "))
         assert im.metadata["v1"]["bifrost"] == {"gramps_id": "ABC123", "version_label": "screenshot version"}
-        rec = load(FakeGramps(), im, conn, "a1")
+        rec = load(FakeGramps(), im, "a1")
         assert [(m["asset_id"], m["label"]) for m in rec["versions"]["members"]] == [("a1", ""), ("v1", "screenshot version")]
         run(photos.set_version_label([im], "a1", "the edited original"))
         assert im.metadata["a1"]["bifrost"] == {"version_label": "the edited original"}
-        assert load(FakeGramps(), im, conn, "a1")["label"] == "the edited original"
+        assert load(FakeGramps(), im, "a1")["label"] == "the edited original"
         run(photos.set_version_label([im], "a1", ""))
         assert im.metadata["a1"] == {}
-        assert load(FakeGramps(), im, conn, "a1")["label"] == ""
-        assert "version_labels" not in {r[0] for r in conn.execute("SELECT name FROM sqlite_master")}
+        assert load(FakeGramps(), im, "a1")["label"] == ""
 
-    def test_match_keeps_the_target_label_and_drops_the_sources(self, conn):
+    def test_match_keeps_the_target_label_and_drops_the_sources(self):
         a = tagged("a1", "Sync/Gramps", desc="T")
         a.update({"width": 100, "height": 80, "ownerId": "me-1"})
         v = tagged("v1", desc="old")
@@ -998,15 +811,15 @@ class TestVersionLabels:
         stacked(im, "a1", "v1")
         im.metadata["a1"] = {"bifrost": {"gramps_id": "ABC123", "version_label": "main scan"}}
         run(photos.set_version_label([im], "v1", "raw"))
-        run(photos.match_member(FakeGramps(), [im], conn, CFG, "a1", "v1"))
+        run(photos.match_member(FakeGramps(), [im], CFG, "a1", "v1"))
         assert im.metadata["v1"]["bifrost"] == {"gramps_id": "ABC123", "version_label": "raw"}
 
-    def test_the_sync_record_carries_the_label_and_no_notes(self, conn):
-        mint(conn, "ABC123", "a1")
+    def test_the_sync_record_carries_the_label_and_no_notes(self):
+        mint("ABC123", "a1")
         a = tagged("a1", "Sync/Gramps", desc="T")
         im = VersionsImmich(assets={"a1": a})
         run(photos.set_version_label([im], "a1", "edited"))
-        save(FakeGramps({"ABC123": media()}), im, conn, "a1", {"title": "T", "notes": "n", "change": 100})
+        save(FakeGramps({"ABC123": media()}), im, "a1", {"title": "T", "notes": "n", "change": 100})
         assert im.metadata["a1"]["bifrost"] == {"gramps_id": "ABC123",
                                                 "gramps_url": "https://gramps.example/media/ABC123",
                                                 "version_label": "edited"}
@@ -1020,8 +833,8 @@ class TestLinks:
         with pytest.raises(ValueError):
             photos.validate_form({"links": [url]})
 
-    def test_links_are_source_url_attributes_on_the_media(self, conn):
-        mint(conn, "ABC123", "a1")
+    def test_links_are_source_url_attributes_on_the_media(self):
+        mint("ABC123", "a1")
         a = tagged("a1", "Sync/Gramps", "ID/ABC123", desc="T")
         a.update({"width": 100, "height": 80, "ownerId": "me-1"})
         v = tagged("v1")
@@ -1029,26 +842,25 @@ class TestLinks:
         im = VersionsImmich(assets={"a1": a, "v1": v})
         stacked(im, "a1", "v1")
         gr = FakeGramps({"ABC123": media()})
-        save(gr, im, conn, "a1", {"title": "T", "change": 100,
+        save(gr, im, "a1", {"title": "T", "change": 100,
                                  "links": [" https://example.org/box-3 ", "http://example.org/other"]})
         assert [(x["type"], x["value"]) for x in gr.media["ABC123"]["attribute_list"]] == [
             ("Immich ID", "a1"), ("Source URL", "https://example.org/box-3"), ("Source URL", "http://example.org/other")]
-        rec = load(gr, im, conn, "a1")
+        rec = load(gr, im, "a1")
         assert [x["url"] for x in rec["links"]] == ["https://example.org/box-3", "http://example.org/other"]
-        run(photos.promote([im], conn, CFG, gr, "a1", "v1", redraw_faces=False))
-        assert [x["url"] for x in load(gr, im, conn, "v1")["links"]] == ["https://example.org/box-3", "http://example.org/other"]
-        save(gr, im, conn, "v1", {"title": "T", "change": 101, "links": ["http://example.org/other"]})
+        run(photos.promote([im], CFG, gr, "a1", "v1", redraw_faces=False))
+        assert [x["url"] for x in load(gr, im, "v1")["links"]] == ["https://example.org/box-3", "http://example.org/other"]
+        save(gr, im, "v1", {"title": "T", "change": 101, "links": ["http://example.org/other"]})
         assert sync_immich.media_links(gr.media["ABC123"]) == ["http://example.org/other"]
 
-    def test_api(self, conn):
+    def test_api(self):
         from types import SimpleNamespace
         import httpx
         from fastapi import FastAPI
         from bifrost.web.routes import photos as photos_routes
-        mint(conn, "ABC123", "a1")
+        mint("ABC123", "a1")
         app = FastAPI()
         app.include_router(photos_routes.router)
-        app.state.conn = conn
         app.state.cfg = SimpleNamespace(sync_immich=CFG)
         app.state.immich_accounts = [VersionsImmich(assets={"a1": tagged("a1", "ID/ABC123", desc="T")})]
         app.state.gramps = FakeGramps({"ABC123": media()})
@@ -1067,7 +879,6 @@ class TestLinks:
         body = r.json()
         assert body["run_id"] and body["summary"]["changed"] == {"links": 1}
         assert [x["url"] for x in body["photo"]["links"]] == ["https://example.org/x"]
-        assert conn.execute("SELECT job, status FROM runs").fetchall()[0][:] == ("photos.save", "ok")
         r = call("PUT", "/photos/api/photo/a1", json={"title": "T", "links": ["x"], "change": 101})
         assert r.status_code == 400 and "http" in r.json()["detail"]
         r = call("PUT", "/photos/api/photo/a1", json={"title": "T", "change": 100})
@@ -1075,29 +886,9 @@ class TestLinks:
         assert call("GET", "/photos/api/photo/a1/pending").json() == {"changes": []}
 
 
-class TestAlbumImport:
-    def test_import_makes_an_ordered_collection_of_main_images(self, conn):
-        a, v, b, c = tagged("a1", desc="A"), tagged("v1"), tagged("b1", desc="B"), tagged("c1", desc="C")
-        im = VersionsImmich(assets={"a1": a, "v1": v, "b1": b, "c1": c})
-        im.label = "fh"
-        stacked(im, "a1", "v1")
-        im.albums = [{"id": "al-1", "name": "Summer 1923", "description": "the farm", "order": "asc",
-                      "asset_ids": ["c1", "v1", "b1"]}]
-        albums = run(photos.list_albums([im]))
-        assert albums == [{"id": "al-1", "name": "Summer 1923", "count": 3, "description": "the farm",
-                           "order": "asc", "account": "fh", "thumb": "/photos/api/thumb/c1"}]
-        cid, added = run(photos.import_album([im], [im], conn, "al-1"))
-        assert added == 3
-        assert pc.get(conn, cid)["name"] == "Summer 1923"
-        assert pc.get(conn, cid)["description"] == "the farm"
-        assert pc.item_ids(conn, cid) == ["b1", "a1", "c1"]
-        with pytest.raises(SyncError, match="no such Immich album"):
-            run(photos.import_album([im], [im], conn, "al-9"))
-
-
 class TestVersionsStayTheirOwn:
-    def test_save_leaves_the_versions_title_and_date_alone(self, conn):
-        mint(conn, "ABC123", "a1")
+    def test_save_leaves_the_versions_title_and_date_alone(self):
+        mint("ABC123", "a1")
         a = tagged("a1", "Sync/Gramps", "ID/ABC123", desc="old")
         a.update({"width": 100, "height": 80, "ownerId": "me-1"})
         v = tagged("v1", "Sync/Gramps", desc="raw scan", when="2020-01-01T12:00:00Z")
@@ -1105,31 +896,29 @@ class TestVersionsStayTheirOwn:
         im = VersionsImmich(assets={"a1": a, "v1": v})
         stacked(im, "a1", "v1")
         gr = FakeGramps({"ABC123": media(desc="old")})
-        save(gr, im, conn, "a1", {"title": "new title", "date": {"value": "1923"}, "change": 100})
+        save(gr, im, "a1", {"title": "new title", "date": {"value": "1923"}, "change": 100})
         assert gr.media["ABC123"]["desc"] == "new title"
         assert a["exifInfo"]["description"] == "new title"
         assert v["exifInfo"]["description"] == "raw scan" and v["localDateTime"] == "2020-01-01T12:00:00Z"
         assert sorted(t["value"] for t in v["tags"]) == ["ID/ABC123", "Sync/Gramps"]
-        rec = load(gr, im, conn, "a1")
+        rec = load(gr, im, "a1")
         assert rec["versions"]["members"][1]["drift"] == []
 
 
 class TestSyncedVersionLeads:
-    def _pair(self, conn):
-        mint(conn, "ABC123", "s1")
+    def _pair(self):
+        mint("ABC123", "s1")
         unsynced = tagged("u1", "Sync/Gramps", desc="unsynced title")
         unsynced.update({"width": 100, "height": 80, "ownerId": "me-1"})
         synced = tagged("s1", "Sync/Gramps", "Sync/Date", "Date/Year", "ID/ABC123", desc="synced title")
         synced.update({"width": 100, "height": 80, "ownerId": "me-1"})
         return unsynced, synced
 
-    def test_the_gramps_photo_becomes_the_main(self, conn):
-        unsynced, synced = self._pair(conn)
-        c = pc.create(conn, "Album")
-        pc.add_items(conn, c["id"], ["u1"])
+    def test_the_gramps_photo_becomes_the_main(self):
+        unsynced, synced = self._pair()
         im = VersionsImmich(assets={"u1": unsynced, "s1": synced})
         gr = FakeGramps({"ABC123": media(desc="synced title")})
-        rec = run(photos.add_version(gr, [im], conn, CFG, "u1", "s1"))
+        rec = run(photos.add_version(gr, [im], CFG, "u1", "s1"))
         assert im.created_stacks == [["s1", "u1"]]
         assert rec["asset_id"] == "s1" and rec["gramps"]["gramps_id"] == "ABC123"
         assert [(m["asset_id"], m["is_primary"], m["drift"]) for m in rec["versions"]["members"]] == [
@@ -1137,12 +926,12 @@ class TestSyncedVersionLeads:
         assert unsynced["exifInfo"]["description"] == "unsynced title"
         assert sorted(t["value"] for t in unsynced["tags"]) == ["ID/ABC123", "Sync/Date", "Sync/Gramps"]
         assert rec["title"] == "synced title"
-        assert pc.item_ids(conn, c["id"]) == ["s1"]
 
-    def test_two_gramps_photos_cannot_share_a_stack(self, conn):
-        unsynced, synced = self._pair(conn)
-        mint(conn, "XYZ789", "u1")
+    def test_two_gramps_photos_cannot_share_a_stack(self):
+        unsynced, synced = self._pair()
+        mint("XYZ789", "u1")
         im = VersionsImmich(assets={"u1": unsynced, "s1": synced})
+        gr = FakeGramps({"ABC123": media(desc="synced title"), "XYZ789": media(gid="XYZ789", handle="h2")})
         with pytest.raises(SyncError, match="both photos are already in Gramps"):
-            run(photos.add_version(FakeGramps(), [im], conn, CFG, "u1", "s1"))
+            run(photos.add_version(gr, [im], CFG, "u1", "s1"))
         assert im.created_stacks == []

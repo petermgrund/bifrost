@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import logging
-import sqlite3
 from typing import AsyncIterator
 
 from ..core.clients import GrampsClient, ImmichClient
@@ -19,9 +17,8 @@ from .sync_immich import (
     load_person_map,
     new_face_results,
     owner_client,
+    registered_map,
 )
-
-log = logging.getLogger("bifrost.faces")
 
 
 def _person_name(person: dict) -> str:
@@ -74,28 +71,6 @@ async def set_link(gramps: GrampsClient, linked: dict[str, str], handle: str,
 
 async def delete_link(gramps: GrampsClient, handle: str) -> bool:
     return await _unlink(gramps, handle, None)
-
-
-async def adopt_person_links(conn: sqlite3.Connection, gramps: GrampsClient) -> int:
-    """Move the rows of the old person_links table onto the Gramps people, then drop the table"""
-    if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='person_links'").fetchone():
-        return 0
-    moved = 0
-    for r in conn.execute("SELECT gramps_handle, immich_person_id FROM person_links").fetchall():
-        person = await gramps.get_person(r["gramps_handle"], ok_404=True)
-        if person is None:
-            log.warning("person link for %s dropped: no such Gramps person", r["gramps_handle"])
-            continue
-        if r["immich_person_id"] in person_ids(person):
-            continue
-        person.setdefault("attribute_list", []).append(_attr(PERSON_ATTR, r["immich_person_id"]))
-        await gramps.update_person(r["gramps_handle"], person)
-        moved += 1
-    with conn:
-        conn.execute("DROP TABLE person_links")
-    if moved:
-        log.info("moved %d person link(s) onto the Gramps people", moved)
-    return moved
 
 
 async def resolve_person(accounts, person_id: str) -> dict | None:
@@ -180,20 +155,21 @@ async def person_thumbnail_bytes(accounts, person_id: str) -> tuple[bytes, str]:
 async def apply_links(
     gramps: GrampsClient,
     accounts: list[ImmichClient],
-    conn: sqlite3.Connection,
     apply: bool,
     selected: set[str] | None = None,
+    registered: dict[str, str] | None = None,
 ) -> AsyncIterator[SyncEvent]:
+    """Every synced photo's recognized faces as face boxes on the linked Gramps people"""
     person_map = await load_person_map(gramps)
     counts = {"faces_linked": 0, "boxes_added": 0, "unreadable": 0, "errors": 0}
     if not person_map:
-        yield SyncEvent(kind="error", detail="no person links yet")
+        yield SyncEvent(kind="started", detail="no Immich people linked to Gramps people yet")
         yield SyncEvent(kind="summary", data=counts)
         return
 
-    rows = conn.execute(
-        "SELECT gramps_id, source_id FROM minted_media WHERE source_system='immich' AND withdrawn_at IS NULL"
-    ).fetchall()
+    if registered is None:
+        registered = await registered_map(gramps)
+    rows = [{"gramps_id": gid, "source_id": aid} for aid, gid in registered.items()]
     if selected is not None:
         rows = [r for r in rows if f"face:{r['source_id']}" in selected]
     yield SyncEvent(

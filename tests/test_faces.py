@@ -2,19 +2,11 @@ import asyncio
 
 import pytest
 
-from bifrost.core import db
 from bifrost.core.clients.gramps import GrampsError
 from bifrost.core.clients.immich import ImmichError
 from bifrost.modules import faces
 
-from test_sync_immich import FakeGramps, FakeImmich, asset, linked, mint
-
-
-@pytest.fixture
-def conn(tmp_path):
-    c = db.connect(tmp_path / "t.db")
-    yield c
-    c.close()
+from test_sync_immich import FakeGramps, FakeImmich, _fresh_register, asset, linked, mint  # noqa: F401
 
 
 def run(coro):
@@ -25,11 +17,6 @@ def named(handle, first, surname, *person_ids, gramps_id="I0001", media_list=())
     """A linked Gramps person with a display name"""
     return {**linked(handle, *person_ids, media_list=media_list), "gramps_id": gramps_id,
             "primary_name": {"first_name": first, "surname_list": [{"surname": surname}]}}
-
-
-def table_exists(conn, name):
-    return bool(conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone())
 
 
 class TestPeopleIndex:
@@ -96,48 +83,6 @@ class TestLinks:
         assert run(faces.delete_link(gr, "h1")) is False
         assert run(faces.delete_link(gr, "h-gone")) is False
         assert gr.updated_people == []
-
-
-class TestAdoptPersonLinks:
-    def _seed(self, conn, *rows):
-        with conn:
-            conn.executemany(
-                "INSERT INTO person_links (gramps_handle, immich_person_id, label, created_at) "
-                "VALUES (?, ?, ?, '2026-01-01')", rows)
-
-    def test_moves_rows_onto_the_people_and_drops_the_table(self, conn):
-        self._seed(conn, ("h1", "p1", "Ed"), ("h1", "p2", "Ed"), ("h2", "p3", None))
-        gr = FakeGramps(people={"h1": linked("h1"), "h2": linked("h2", "p3")})
-        assert run(faces.adopt_person_links(conn, gr)) == 2
-        assert faces.person_ids(gr.people["h1"]) == ["p1", "p2"]
-        assert faces.person_ids(gr.people["h2"]) == ["p3"]
-        assert [p["handle"] for p in gr.updated_people] == ["h1", "h1"]
-        assert not table_exists(conn, "person_links")
-
-    def test_without_the_table_nothing_is_asked_of_gramps(self, conn):
-        with conn:
-            conn.execute("DROP TABLE person_links")
-        gr = FakeGramps(people={"h1": linked("h1")})
-        assert run(faces.adopt_person_links(conn, gr)) == 0
-        assert gr.updated_people == []
-
-    def test_a_missing_person_is_skipped(self, conn):
-        self._seed(conn, ("h-gone", "p1", "Ghost"), ("h1", "p2", "Ed"))
-        gr = FakeGramps(people={"h1": linked("h1")})
-        assert run(faces.adopt_person_links(conn, gr)) == 1
-        assert faces.person_ids(gr.people["h1"]) == ["p2"]
-        assert not table_exists(conn, "person_links")
-
-    def test_a_raising_gramps_leaves_the_table(self, conn):
-        class Down(FakeGramps):
-            async def get_person(self, handle, ok_404=False):
-                raise GrampsError("GET /people → 502")
-
-        self._seed(conn, ("h1", "p1", "Ed"))
-        with pytest.raises(GrampsError):
-            run(faces.adopt_person_links(conn, Down()))
-        assert table_exists(conn, "person_links")
-        assert conn.execute("SELECT COUNT(*) FROM person_links").fetchone()[0] == 1
 
 
 class ResolvingImmich(FakeImmich):
@@ -273,9 +218,9 @@ class TestResolution:
         assert exc.value.status == 404
 
 
-def apply_links(gramps, immich, conn, apply, selected=None):
+def apply_links(gramps, immich, apply, selected=None):
     async def collect():
-        return [e async for e in faces.apply_links(gramps, [immich], conn, apply=apply, selected=selected)]
+        return [e async for e in faces.apply_links(gramps, [immich], apply=apply, selected=selected)]
     return run(collect())
 
 
@@ -288,16 +233,16 @@ def face_of(pid, name):
 
 
 class TestApplyLinks:
-    def _world(self, conn):
-        mint(conn, "K1", "a1")
+    def _world(self):
+        mint("K1", "a1")
         im = FakeImmich(assets={"a1": asset("a1")}, faces={"a1": [face_of("uuid-ed", "Ed")]})
         gr = FakeGramps(media={"K1": {"gramps_id": "K1", "handle": "mh1"}},
                         people={"h-ed": linked("h-ed", "uuid-ed")})
         return im, gr
 
-    def test_preview_writes_nothing(self, conn):
-        im, gr = self._world(conn)
-        events = apply_links(gr, im, conn, apply=False)
+    def test_preview_writes_nothing(self):
+        im, gr = self._world()
+        events = apply_links(gr, im, apply=False)
         rows = items(events)
         assert len(rows) == 1
         assert (rows[0].action, rows[0].entity, rows[0].source_id, rows[0].gramps_id) == (
@@ -308,111 +253,109 @@ class TestApplyLinks:
         assert events[-1].kind == "summary"
         assert events[-1].data == {"faces_linked": 1, "boxes_added": 0, "unreadable": 0, "errors": 0}
 
-    def test_links_are_read_from_gramps_once(self, conn):
-        im, gr = self._world(conn)
-        apply_links(gr, im, conn, apply=False)
+    def test_links_are_read_from_gramps_once(self):
+        im, gr = self._world()
+        apply_links(gr, im, apply=False)
         assert gr.list_people_calls == 1
 
-    def test_row_title_is_the_gramps_media_desc(self, conn):
-        im, gr = self._world(conn)
+    def test_row_title_is_the_gramps_media_desc(self):
+        im, gr = self._world()
         gr.media["K1"]["desc"] = "Ed at the lake"
-        assert items(apply_links(gr, im, conn, apply=False))[0].title == "Ed at the lake"
+        assert items(apply_links(gr, im, apply=False))[0].title == "Ed at the lake"
 
-    def test_progress_events_bracket_the_scan(self, conn):
-        im, gr = self._world(conn)
-        progress = [e for e in apply_links(gr, im, conn, apply=False) if e.kind == "progress"]
+    def test_progress_events_bracket_the_scan(self):
+        im, gr = self._world()
+        progress = [e for e in apply_links(gr, im, apply=False) if e.kind == "progress"]
         assert progress and progress[0].data["done"] == 0
         assert progress[-1].data["done"] == progress[-1].data["total"] == 1
 
-    def test_apply_links_the_face_and_a_second_run_is_quiet(self, conn):
-        im, gr = self._world(conn)
-        events = apply_links(gr, im, conn, apply=True)
+    def test_apply_links_the_face_and_a_second_run_is_quiet(self):
+        im, gr = self._world()
+        events = apply_links(gr, im, apply=True)
         assert [e.action for e in items(events)] == ["created"]
         assert gr.updated_people[0]["media_list"][0]["ref"] == "mh1"
         assert gr.people["h-ed"]["media_list"][0]["ref"] == "mh1"
         gr.updated_people.clear()
-        events = apply_links(gr, im, conn, apply=True)
+        events = apply_links(gr, im, apply=True)
         assert items(events) == [] and gr.updated_people == []
         assert events[-1].data["faces_linked"] == 0
 
-    def test_a_face_box_is_added_to_an_existing_ref(self, conn):
-        im, gr = self._world(conn)
+    def test_a_face_box_is_added_to_an_existing_ref(self):
+        im, gr = self._world()
         im.faces["a1"] = [{**face_of("uuid-ed", "Ed"), "imageWidth": 100, "imageHeight": 100,
                            "boundingBoxX1": 10, "boundingBoxY1": 10, "boundingBoxX2": 30, "boundingBoxY2": 30}]
         gr.people["h-ed"]["media_list"] = [{"ref": "mh1", "rect": []}]
-        events = apply_links(gr, im, conn, apply=True)
+        events = apply_links(gr, im, apply=True)
         assert [e.action for e in items(events)] == ["updated"]
         assert items(events)[0].data == {"cols": {"Ed": "face box"}}
         assert gr.people["h-ed"]["media_list"][0]["rect"] == [7, 7, 33, 33]
         assert events[-1].data["boxes_added"] == 1
 
-    def test_selected_limits_an_apply(self, conn):
-        im, gr = self._world(conn)
-        mint(conn, "K2", "a2")
+    def test_selected_limits_an_apply(self):
+        im, gr = self._world()
+        mint("K2", "a2")
         im.assets["a2"] = asset("a2")
         im.faces["a2"] = [face_of("uuid-ed", "Ed")]
         gr.media["K2"] = {"gramps_id": "K2", "handle": "mh2"}
-        events = apply_links(gr, im, conn, apply=True, selected={"face:a2"})
+        events = apply_links(gr, im, apply=True, selected={"face:a2"})
         assert [e.source_id for e in items(events)] == ["a2"]
         assert [p["media_list"][0]["ref"] for p in gr.updated_people] == ["mh2"]
         assert im.faces_requested == ["a2"]
 
-    def test_unknown_people_and_other_persons_do_not_link(self, conn):
-        im, gr = self._world(conn)
+    def test_unknown_people_and_other_persons_do_not_link(self):
+        im, gr = self._world()
         im.faces["a1"] = [face_of("uuid-stranger", "Stranger"), {"person": None}]
-        events = apply_links(gr, im, conn, apply=True)
+        events = apply_links(gr, im, apply=True)
         assert items(events) == [] and gr.updated_people == []
 
-    def test_no_links_errors(self, conn):
-        im, gr = self._world(conn)
+    def test_no_links_ends_after_the_start(self):
+        im, gr = self._world()
         gr.people["h-ed"] = linked("h-ed")
-        events = apply_links(gr, im, conn, apply=True)
-        assert events[0].kind == "error" and events[0].detail == "no person links yet"
+        events = apply_links(gr, im, apply=True)
+        assert events[0].kind == "started" and "no Immich people linked" in events[0].detail
         assert events[-1].kind == "summary" and len(events) == 2
 
-    def test_withdrawn_and_paperless_rows_are_not_scanned(self, conn):
-        im, gr = self._world(conn)
-        mint(conn, "K2", "a2")
-        mint(conn, "K3", "7", system="paperless")
-        with conn:
-            conn.execute("UPDATE minted_media SET withdrawn_at='2026-02-01' WHERE gramps_id='K2'")
-        events = apply_links(gr, im, conn, apply=False)
+    def test_media_without_an_immich_id_are_not_scanned(self):
+        im, gr = self._world()
+        gr.media["K3"] = {"gramps_id": "K3", "handle": "mh3",
+                          "attribute_list": [{"type": "Paperless ID", "value": "7"}]}
+        events = apply_links(gr, im, apply=False)
         assert events[0].detail == "1 synced media to scan against 1 link(s)"
         assert [e.source_id for e in items(events)] == ["a1"]
 
-    def test_no_rows_ends_after_the_start(self, conn):
-        im, gr = self._world(conn)
-        events = apply_links(gr, im, conn, apply=True, selected=set())
+    def test_no_rows_ends_after_the_start(self):
+        im, gr = self._world()
+        events = apply_links(gr, im, apply=True, selected=set())
         assert [e.kind for e in events] == ["started", "summary"]
         assert im.faces_requested == []
 
-    def test_unreadable_asset_counted(self, conn):
-        im, gr = self._world(conn)
-        mint(conn, "K2", "a2")
-        events = apply_links(gr, im, conn, apply=True)
+    def test_unreadable_asset_counted(self):
+        im, gr = self._world()
+        gr.media["K2"] = {"gramps_id": "K2", "handle": "mh2"}
+        mint("K2", "a2")
+        events = apply_links(gr, im, apply=True)
         failed = [e for e in items(events) if e.action == "failed"]
         assert [(e.source_id, e.gramps_id, e.title, e.detail) for e in failed] == [
             ("a2", "K2", "a2", "asset detail unreadable")]
         assert events[-1].data["unreadable"] == 1
         assert events[-1].data["faces_linked"] == 1
 
-    def test_missing_gramps_media_counted(self, conn):
-        im, gr = self._world(conn)
+    def test_a_media_deleted_from_gramps_is_not_scanned(self):
+        im, gr = self._world()
         del gr.media["K1"]
-        events = apply_links(gr, im, conn, apply=True)
-        assert items(events)[0].detail == "no Gramps media with this id"
-        assert items(events)[0].title == "img.jpg"
-        assert events[-1].data["unreadable"] == 1 and gr.updated_people == []
+        events = apply_links(gr, im, apply=True)
+        assert items(events) == [] and gr.updated_people == []
+        assert events[-1].data["unreadable"] == 0 and im.faces_requested == []
 
-    def test_a_failing_person_write_is_an_error_row(self, conn):
+    def test_a_failing_person_write_is_an_error_row(self):
         class Failing(FakeGramps):
             async def update_person(self, handle, person_obj):
                 raise GrampsError("PUT /people → 500")
 
-        im, _ = self._world(conn)
+        im, _ = self._world()
         gr = Failing(media={"K1": {"gramps_id": "K1", "handle": "mh1"}},
                      people={"h-ed": linked("h-ed", "uuid-ed")})
-        events = apply_links(gr, im, conn, apply=True)
+        events = apply_links(gr, im, apply=True)
         failed = items(events)[0]
         assert failed.action == "failed" and failed.detail.startswith("Ed: ")
         assert events[-1].data["errors"] == 1

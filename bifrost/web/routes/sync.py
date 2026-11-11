@@ -1,4 +1,4 @@
-"""Sync page + API"""
+"""Sync check + the Paperless webhook"""
 
 from __future__ import annotations
 
@@ -13,11 +13,11 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
-from ...modules import ocr, sync_immich, sync_paperless
-from ...modules.sync_paperless import _doc_gramps_id
+from ...core.clients import PaperlessError
+from ...modules import check, ocr, sync_paperless
 from ..runs import record_run
 
-log = logging.getLogger("bifrost.sync.paperless")
+log = logging.getLogger("bifrost.sync")
 
 router = APIRouter(prefix="/sync", tags=["sync"])
 
@@ -26,69 +26,44 @@ def _state(request: Request):
     return request.app.state
 
 
+def _accounts_or_503(request: Request) -> list:
+    accounts = getattr(_state(request), "immich_accounts", [])
+    if not accounts:
+        raise HTTPException(503, "Immich is not configured in bifrost (immich.base_url/accounts)")
+    return accounts
+
+
 @router.get("")
 async def sync_page(request: Request):
     return RedirectResponse(url="/#sync")
 
 
-@router.get("/paperless")
-async def paperless_page(request: Request):
-    return RedirectResponse(url="/#sync")
+@router.get("/api/config")
+async def config(request: Request) -> dict:
+    return {"enabled": True}
 
 
-@router.get("/api/paperless/config")
-async def paperless_config(request: Request):
-    cfg = _state(request).cfg.sync_paperless
-    return {
-        "sync_tags": list(cfg.sync_tags),
-        "public_url": cfg.public_url,
-        "gramps_public_url": cfg.gramps_public_url,
-        "transcription_tag_id": cfg.transcription_tag_id,
-        "ocr_tag": cfg.ocr_tag,
-    }
-
-
-class PaperlessBody(BaseModel):
-    force_transcriptions: bool = False
-    transcriptions_only: bool = False
-    versions_only: bool = False
+class CheckBody(BaseModel):
     selected: list[str] | None = None
 
 
-def _paperless_job(body: PaperlessBody, preview: bool) -> str:
-    if body.transcriptions_only:
-        name = "sync.paperless.transcriptions"
-    elif body.versions_only:
-        name = "sync.paperless.versions"
-    else:
-        name = "sync.paperless"
-    return f"{name}.preview" if preview else name
+def _check(st, apply: bool, selected: set[str] | None = None):
+    return check.run(st.gramps, st.paperless, st.gemini, getattr(st, "immich_accounts", []),
+                     st.cfg, apply, selected)
 
 
-@router.post("/api/paperless/preview")
-async def paperless_preview(request: Request, body: PaperlessBody):
+@router.post("/api/preview")
+async def preview(request: Request, body: CheckBody = CheckBody()) -> dict:
     st = _state(request)
-    gen = sync_paperless.sync(
-        st.paperless, st.gramps, st.conn, st.cfg.sync_paperless,
-        apply=False, force_transcriptions=body.force_transcriptions,
-        transcriptions_only=body.transcriptions_only,
-        versions_only=body.versions_only,
-    )
-    run_id, events = await record_run(st.conn, _paperless_job(body, True), gen)
+    run_id, events = await record_run("sync.check.preview", _check(st, apply=False))
     return {"run_id": run_id, "apply": False, "events": [e.__dict__ for e in events]}
 
 
-@router.post("/api/paperless/apply")
-async def paperless_apply(request: Request, body: PaperlessBody):
+@router.post("/api/apply")
+async def apply(request: Request, body: CheckBody = CheckBody()) -> dict:
     st = _state(request)
-    gen = sync_paperless.sync(
-        st.paperless, st.gramps, st.conn, st.cfg.sync_paperless,
-        apply=True, force_transcriptions=body.force_transcriptions,
-        transcriptions_only=body.transcriptions_only,
-        versions_only=body.versions_only,
-        selected=set(body.selected) if body.selected is not None else None,
-    )
-    run_id, events = await record_run(st.conn, _paperless_job(body, False), gen)
+    selected = set(body.selected) if body.selected is not None else None
+    run_id, events = await record_run("sync.check", _check(st, apply=True, selected=selected))
     st.caches.clear()
     return {"run_id": run_id, "apply": True, "events": [e.__dict__ for e in events]}
 
@@ -115,6 +90,19 @@ async def _webhook_fields(request: Request) -> dict:
     return {**fields, **request.query_params}
 
 
+async def _ocr_tagged(st, doc_id: int) -> dict | None:
+    """The document when it carries the OCR tag"""
+    cfg = st.cfg.sync_paperless
+    if not cfg.ocr_tag:
+        return None
+    try:
+        doc = await st.paperless.get_document(doc_id)
+    except PaperlessError:
+        return None
+    tag_id = await st.paperless.resolve_tag_id(cfg.ocr_tag)
+    return doc if tag_id and tag_id in (doc.get("tags") or []) else None
+
+
 def _queue_webhook(st, doc_id: int) -> None:
     """Sync the one document after the response, one webhook at a time"""
     if not hasattr(st, "webhook_lock"):
@@ -124,10 +112,14 @@ def _queue_webhook(st, doc_id: int) -> None:
     async def job():
         async with st.webhook_lock:
             try:
-                gen = sync_paperless.sync(
-                    st.paperless, st.gramps, st.conn, st.cfg.sync_paperless,
-                    apply=True, single_doc_id=doc_id)
-                await record_run(st.conn, "sync.paperless.webhook", gen)
+                gen = sync_paperless.sync(st.paperless, st.gramps, st.cfg.sync_paperless,
+                                          apply=True, doc_ids=[doc_id])
+                await record_run("sync.paperless.webhook", gen)
+                doc = await _ocr_tagged(st, doc_id)
+                if doc is not None:
+                    gen = ocr.run_with_sync(st.paperless, st.gramps, st.gemini, st.cfg.sync_paperless,
+                                            st.cfg.gemini, docs=[doc])
+                    await record_run("ocr.webhook", gen)
                 st.caches.clear()
             except Exception:
                 log.exception("webhook sync of Paperless #%d failed", doc_id)
@@ -154,158 +146,3 @@ async def paperless_webhook(request: Request):
     doc_id = int(raw)
     _queue_webhook(st, doc_id)
     return {"doc_id": doc_id, "queued": True}
-
-
-class ResyncMediaBody(BaseModel):
-    media_id: str
-    apply: bool = False
-
-
-@router.post("/api/paperless/resync-media")
-async def paperless_resync_media(request: Request, body: ResyncMediaBody):
-    st = _state(request)
-    media_id = body.media_id.strip()
-    if not media_id:
-        raise HTTPException(400, "media id required")
-    doc_id = await sync_paperless.paperless_id_for_media(st.gramps, media_id)
-    if doc_id is None:
-        raise HTTPException(
-            404, f"no Gramps media '{media_id}', or it has no Paperless ID attribute")
-    gen = sync_paperless.sync(
-        st.paperless, st.gramps, st.conn, st.cfg.sync_paperless,
-        apply=body.apply, force_transcriptions=True,
-        transcriptions_only=True, single_doc_id=doc_id,
-    )
-    job = "sync.paperless.resync-media" + ("" if body.apply else ".preview")
-    run_id, events = await record_run(st.conn, job, gen)
-    if body.apply:
-        st.caches.clear()
-    return {"run_id": run_id, "apply": body.apply, "media_id": media_id,
-            "doc_id": doc_id, "events": [e.__dict__ for e in events]}
-
-
-class ImmichSyncBody(BaseModel):
-    selected: list[str] | None = None
-
-
-def _accounts_or_503(request: Request) -> list:
-    accounts = getattr(_state(request), "immich_accounts", [])
-    if not accounts:
-        raise HTTPException(503, "Immich is not configured in bifrost (immich.base_url/accounts)")
-    return accounts
-
-
-@router.get("/api/immich/config")
-async def immich_config(request: Request):
-    cfg = _state(request).cfg
-    return {
-        "enabled": cfg.sync_immich.enabled and bool(getattr(_state(request), "immich_accounts", [])),
-        "sync_tag": cfg.sync_immich.sync_tag,
-        "public_url": cfg.sync_immich.public_url,
-        # reuse paperless public link
-        "gramps_public_url": cfg.sync_paperless.gramps_public_url,
-    }
-
-
-@router.post("/api/immich/preview")
-async def immich_preview(request: Request, body: ImmichSyncBody = ImmichSyncBody()):
-    st = _state(request)
-    accounts = _accounts_or_503(request)
-    gen = sync_immich.sync_assets(
-        st.gramps, accounts, st.conn, st.cfg.sync_immich, apply=False,
-    )
-    try:
-        run_id, events = await record_run(st.conn, "sync.immich.preview", gen)
-    except sync_immich.SyncError as exc:
-        raise HTTPException(exc.status, exc.detail)
-    return {"run_id": run_id, "apply": False, "events": [e.__dict__ for e in events]}
-
-
-@router.post("/api/immich/apply")
-async def immich_apply(request: Request, body: ImmichSyncBody = ImmichSyncBody()):
-    st = _state(request)
-    if not st.cfg.sync_immich.enabled:
-        raise HTTPException(503, "the Immich sync is disabled in this instance (sync.immich.enabled)")
-    accounts = _accounts_or_503(request)
-    gen = sync_immich.sync_assets(
-        st.gramps, accounts, st.conn, st.cfg.sync_immich, apply=True,
-        selected=set(body.selected) if body.selected is not None else None,
-    )
-    try:
-        run_id, events = await record_run(st.conn, "sync.immich", gen)
-    except sync_immich.SyncError as exc:
-        raise HTTPException(exc.status, exc.detail)
-    st.caches.clear()
-    return {"run_id": run_id, "apply": True, "events": [e.__dict__ for e in events]}
-
-
-class ImmichAssetBody(BaseModel):
-    asset_id: str
-    gramps_id: str | None = None
-
-
-@router.post("/immich/asset")
-async def immich_sync_asset(request: Request, body: ImmichAssetBody):
-    """Initial sync of ONE Immich asset into Gramps"""
-    st = _state(request)
-    if not st.cfg.sync_immich.enabled:
-        raise HTTPException(503, "the Immich sync is disabled in this instance (sync.immich.enabled)")
-    accounts = _accounts_or_503(request)
-    asset_id = body.asset_id.strip()
-    if not asset_id:
-        raise HTTPException(400, "asset_id required")
-    gen = sync_immich.sync_one_asset(
-        st.gramps, accounts, st.conn, st.cfg.sync_immich,
-        asset_id, gramps_id=body.gramps_id,
-    )
-    try:
-        run_id, events = await record_run(st.conn, "sync.immich.asset", gen)
-    except sync_immich.SyncError as exc:
-        raise HTTPException(exc.status, exc.detail)
-    st.caches.clear()
-    summary = next((e for e in reversed(events) if e.kind == "summary"), None)
-    return {"run_id": run_id, **((summary.data or {}) if summary else {})}
-
-
-class OcrBody(BaseModel):
-    single_doc_id: int | None = None
-
-
-@router.post("/api/ocr/preview")
-async def ocr_preview(request: Request, body: OcrBody = OcrBody()):
-    st = _state(request)
-    gen = ocr.run(st.paperless, st.gemini, st.conn, st.cfg.sync_paperless,
-                  st.cfg.gemini, apply=False, single_doc_id=body.single_doc_id)
-    run_id, events = await record_run(st.conn, "ocr.gemini.preview", gen)
-    return {"run_id": run_id, "apply": False, "events": [e.__dict__ for e in events]}
-
-
-@router.post("/api/ocr/apply")
-async def ocr_apply(request: Request, body: OcrBody = OcrBody()):
-    st = _state(request)
-    gen = ocr.run(st.paperless, st.gemini, st.conn, st.cfg.sync_paperless,
-                  st.cfg.gemini, apply=True, single_doc_id=body.single_doc_id)
-    run_id, events = await record_run(st.conn, "ocr.gemini", gen)
-    st.caches.clear()
-    return {"run_id": run_id, "apply": True, "events": [e.__dict__ for e in events]}
-
-
-@router.get("/api/ocr/pending")
-async def ocr_pending(request: Request):
-    st = _state(request)
-    return {"count": await ocr.pending_count(st.paperless, st.conn, st.cfg.sync_paperless)}
-
-
-@router.get("/api/paperless/pending")
-async def paperless_pending(request: Request):
-    """Tagged documents with no gramps_id yet"""
-    st = _state(request)
-    cfg = st.cfg.sync_paperless
-    tag_ids = []
-    for name in cfg.sync_tags:
-        tid = await st.paperless.resolve_tag_id(name)
-        if tid is not None:
-            tag_ids.append(tid)
-    docs = await st.paperless.list_documents_by_tags(tag_ids)
-    pending = [d for d in docs if not _doc_gramps_id(d, cfg.gramps_id_field_id)]
-    return {"count": len(pending), "total_tagged": len(docs)}

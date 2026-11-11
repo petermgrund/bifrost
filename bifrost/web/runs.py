@@ -1,68 +1,41 @@
 from __future__ import annotations
 
-import sqlite3
+import itertools
+import logging
+from datetime import datetime, timezone
 from typing import AsyncIterator
 
-from ..core.db import now
 from ..core.events import SyncEvent
 
+log = logging.getLogger("bifrost.runs")
+
 ACTIVE: dict[int, dict] = {}
+_run_ids = itertools.count(1)
 
 
-def sweep(conn: sqlite3.Connection) -> int:
-    """Close every run a restart left 'running' as interrupted; how many there were"""
-    with conn:
-        cur = conn.execute(
-            "UPDATE runs SET status='interrupted', finished_at=? WHERE status='running'",
-            (now(),),
-        )
-    return cur.rowcount
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-async def record_run(
-    conn: sqlite3.Connection, job: str, events: AsyncIterator[SyncEvent]
-) -> tuple[int, list[SyncEvent]]:
-    with conn:
-        cur = conn.execute(
-            "INSERT INTO runs (job, status, started_at) VALUES (?, 'running', ?)",
-            (job, now()),
-        )
-        run_id = cur.lastrowid
-
-    ACTIVE[run_id] = {"run_id": run_id, "job": job, "started_at": now()}
+async def record_run(job: str, events: AsyncIterator[SyncEvent]) -> tuple[int, list[SyncEvent]]:
+    """Collect a scan's events, publishing its progress while it runs"""
+    run_id = next(_run_ids)
+    ACTIVE[run_id] = {"run_id": run_id, "job": job, "started_at": _now()}
     collected: list[SyncEvent] = []
-    status = "ok"
-    summary = None
     try:
-        seq = 0
         async for ev in events:
             if ev.kind == "progress":
                 ACTIVE[run_id].update({"detail": ev.detail, **(ev.data or {})})
                 continue
             collected.append(ev)
-            with conn:
-                conn.execute(
-                    "INSERT INTO run_events (run_id, seq, ts, payload) VALUES (?, ?, ?, ?)",
-                    (run_id, seq, now(), ev.to_json()),
-                )
-            seq += 1
-            if ev.kind == "summary":
-                summary = ev.to_json()
-            if ev.kind == "error" or ev.action == "failed":
-                status = "error"
     except Exception:
-        with conn:
-            conn.execute(
-                "UPDATE runs SET status='error', finished_at=? WHERE id=?",
-                (now(), run_id),
-            )
+        log.exception("%s failed", job)
         raise
     finally:
         ACTIVE.pop(run_id, None)
-
-    with conn:
-        conn.execute(
-            "UPDATE runs SET status=?, finished_at=?, summary=? WHERE id=?",
-            (status, now(), summary, run_id),
-        )
+    summary = next((e.data for e in collected if e.kind == "summary"), None)
+    failed = [e for e in collected if e.kind == "error" or e.action == "failed"]
+    log.info("%s: %s%s", job, summary or "done", f", {len(failed)} failed" if failed else "")
+    for e in failed:
+        log.warning("%s: %s %s", job, e.gramps_id or e.source_id or "", e.detail)
     return run_id, collected

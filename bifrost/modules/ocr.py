@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import io
-import sqlite3
 from typing import AsyncIterator
 
 from pypdf import PdfReader, PdfWriter
 
 from ..core.clients import GeminiClient, GeminiError, PaperlessClient
 from ..core.config import GeminiConfig, SyncPaperlessConfig
-from ..core.db import now
 from ..core.events import SyncEvent
 from .sync_paperless import _doc_gramps_id
 
@@ -80,35 +78,6 @@ async def transcribe_document(
     return "\n\n".join(p for p in parts if p)
 
 
-def _ocr_done(conn: sqlite3.Connection, doc_id: int) -> bool:
-    return _ocr_row(conn, doc_id) is not None
-
-
-def _ocr_row(conn: sqlite3.Connection, doc_id: int) -> sqlite3.Row | None:
-    return conn.execute(
-        "SELECT model, chars, ocr_at FROM ocr_state WHERE paperless_id = ?", (doc_id,)).fetchone()
-
-
-def _set_ocr(conn: sqlite3.Connection, doc_id: int, model: str, chars: int) -> None:
-    with conn:
-        conn.execute(
-            "INSERT OR REPLACE INTO ocr_state (paperless_id, model, chars, ocr_at)"
-            " VALUES (?, ?, ?, ?)",
-            (doc_id, model, chars, now()))
-
-
-async def pending_count(
-    paperless: PaperlessClient, conn: sqlite3.Connection, cfg: SyncPaperlessConfig
-) -> int:
-    if not cfg.ocr_tag:
-        return 0
-    tag_id = await paperless.resolve_tag_id(cfg.ocr_tag)
-    if not tag_id:
-        return 0
-    docs = await paperless.list_documents_by_tag(tag_id)
-    return sum(1 for d in docs if not _ocr_done(conn, d["id"]))
-
-
 def _current_text(doc: dict) -> str:
     return (doc.get("content") or "").strip()
 
@@ -121,14 +90,13 @@ def _no_transcript(text: str) -> bool:
 async def run(
     paperless: PaperlessClient,
     gemini: GeminiClient,
-    conn: sqlite3.Connection,
     cfg: SyncPaperlessConfig,
     gem_cfg: GeminiConfig,
     apply: bool,
-    single_doc_id: int | None = None,
+    docs: list[dict] | None = None,
     selected: set[str] | None = None,
 ) -> AsyncIterator[SyncEvent]:
-    """OCR tagged docs: Create when empty, Replace otherwise"""
+    """OCR the documents carrying the OCR tag: Create when empty, Replace otherwise"""
     counts = {"transcribed": 0, "replaced": 0, "errors": 0}
 
     if not cfg.ocr_tag:
@@ -146,9 +114,10 @@ async def run(
         yield SyncEvent(kind="summary", data=counts)
         return
 
-    docs = await paperless.list_documents_by_tag(tag_id)
-    if single_doc_id is not None:
-        docs = [d for d in docs if d["id"] == single_doc_id]
+    if docs is None:
+        docs = await paperless.list_documents_by_tag(tag_id)
+    else:
+        docs = [d for d in docs if tag_id in (d.get("tags") or [])]
     yield SyncEvent(kind="started", detail=f"{len(docs)} document(s) tagged '{cfg.ocr_tag}'")
 
     for doc in docs:
@@ -159,16 +128,13 @@ async def run(
         text = _current_text(doc)
         create = _no_transcript(text)
         gid = _doc_gramps_id(doc, cfg.gramps_id_field_id)
-        cols = {} if create else {"current text": f"{len(text)} chars"}
-        done = _ocr_row(conn, doc_id)
-        if done is not None:
-            cols["transcribed"] = f"{done['ocr_at'][:10]} ({done['model']})"
+        cols = {"transcribe": "no text yet" if create else f"replace {len(text)} chars"}
         row = dict(kind="item", entity="doc", source_id=str(doc_id), gramps_id=gid, title=title)
 
         if not apply:
             counts["transcribed" if create else "replaced"] += 1
             yield SyncEvent(**row, action="would_create" if create else "would_replace",
-                            data={"cols": cols} if cols else None)
+                            data={"cols": cols})
             continue
 
         try:
@@ -202,9 +168,7 @@ async def run(
             yield SyncEvent(**row, action="failed", detail=f"content write-back failed: {exc}")
             continue
 
-        _set_ocr(conn, doc_id, gem_cfg.model, len(new_text))
         cols["new text"] = f"{len(new_text)} chars"
-
         cur_tags = set(doc.get("tags") or [])
         tt = cfg.transcription_tag_id
         wanted = (cur_tags | ({tt} if tt else set())) - {tag_id}
@@ -227,28 +191,26 @@ async def run_with_sync(
     paperless: PaperlessClient,
     gramps,
     gemini: GeminiClient,
-    conn: sqlite3.Connection,
     cfg: SyncPaperlessConfig,
     gem_cfg: GeminiConfig,
-    selected: set[str] | None,
+    docs: list[dict] | None = None,
+    selected: set[str] | None = None,
 ) -> AsyncIterator[SyncEvent]:
-    """OCR selected docs, push notes to Gramps"""
+    """OCR, then the transcription notes of what got new text"""
     from . import sync_paperless
 
     counts: dict[str, int] = {}
-    transcribed: set[str] = set()
-    async for ev in run(paperless, gemini, conn, cfg, gem_cfg, apply=True, selected=selected):
+    transcribed: list[int] = []
+    async for ev in run(paperless, gemini, cfg, gem_cfg, apply=True, docs=docs, selected=selected):
         if ev.kind == "summary":
             for key, n in (ev.data or {}).items():
                 counts[key] = counts.get(key, 0) + n
             continue
         if ev.kind == "item" and ev.action in ("created", "replaced") and ev.source_id:
-            transcribed.add(f"doc:{ev.source_id}")
+            transcribed.append(int(ev.source_id))
         yield ev
     if transcribed:
-        async for ev in sync_paperless.sync(
-                paperless, gramps, conn, cfg, apply=True, force_transcriptions=True,
-                transcriptions_only=True, selected=transcribed):
+        async for ev in sync_paperless.sync(paperless, gramps, cfg, apply=True, doc_ids=transcribed):
             if ev.kind == "summary":
                 for key, n in (ev.data or {}).items():
                     counts[key] = counts.get(key, 0) + n

@@ -76,7 +76,6 @@ class GeminiConfig:
 class Config:
     gramps: GrampsConfig
     paperless: PaperlessConfig
-    db_path: Path
     config_path: Path
     immich: ImmichConfig = ImmichConfig()
     sync_immich: SyncImmichConfig = SyncImmichConfig()
@@ -156,9 +155,6 @@ def load_config(path: str | Path | None = None) -> Config:
                 f"(or null), got {val!r}"
             )
 
-    db = Path(raw.get("database") or "data/bifrost.db")
-    if not db.is_absolute():
-        db = cfg_path.parent / db
     sp_raw = (raw.get("sync") or {}).get("paperless") or {}
     sync_paperless = SyncPaperlessConfig(
         sync_tags=tuple(sp_raw.get("sync_tags") or ("doc", "img")),
@@ -232,7 +228,6 @@ def load_config(path: str | Path | None = None) -> Config:
     return Config(
         gramps=GrampsConfig(**section("gramps", ["base_url", "username", "password"])),
         paperless=PaperlessConfig(**section("paperless", ["base_url", "api_token"])),
-        db_path=db,
         config_path=cfg_path,
         immich=ImmichConfig(
             base_url=(im_raw.get("base_url") or "").rstrip("/"),

@@ -3,24 +3,47 @@
 from __future__ import annotations
 
 import re
-import sqlite3
 from datetime import datetime, timezone
 from typing import AsyncIterator
 
 from ..core import ids
-from ..core import settings as ui_settings
 from ..core.clients import GrampsClient, ImmichClient
+from ..core.clients.gramps import note_obj as build_note_obj
 from ..core.clients.immich import ImmichError
 from ..core.config import SyncImmichConfig
-from ..core.db import now as _now
 from ..core.events import SyncEvent, progress
-from .sync_paperless import build_note_obj
+from . import codes
 
 METADATA_KEY = "bifrost"
 NOTE_TYPE = "Media Note"
 LINK_ATTR = "Source URL"
 PERSON_ATTR = "Immich Person ID"
+IMMICH_ATTR = "Immich ID"
 _URL_LINE_RE = re.compile(r"^https?://\S+$")
+
+
+async def registered_map(gramps: GrampsClient) -> dict[str, str]:
+    """{Immich asset id: Gramps media id} from the media objects' Immich ID attributes, last changed first"""
+    rows = []
+    for m in await gramps.list_media(keys="gramps_id,attribute_list,change"):
+        gid = m.get("gramps_id")
+        if not gid:
+            continue
+        for a in m.get("attribute_list") or []:
+            if a.get("type") == IMMICH_ATTR and (a.get("value") or "").strip():
+                rows.append((m.get("change") or 0, a["value"].strip(), gid))
+    rows.sort(key=lambda r: (-r[0], r[2]))
+    out: dict[str, str] = {}
+    for _change, aid, gid in rows:
+        out.setdefault(aid, gid)
+    return out
+
+
+def registered_gid(registered: dict[str, str], asset_id: str, member_ids: list[str] = ()) -> str | None:
+    """The Gramps id of the asset or of any of its stack members"""
+    if asset_id in registered:
+        return registered[asset_id]
+    return next((registered[m] for m in member_ids if m in registered), None)
 
 
 def tag_values(asset: dict) -> set[str]:
@@ -340,7 +363,6 @@ async def link_asset_faces(
 async def sync_one_asset(
     gramps: GrampsClient,
     accounts: list[ImmichClient],
-    conn: sqlite3.Connection,
     cfg: SyncImmichConfig,
     asset_id: str,
     gramps_id: str | None = None,
@@ -348,6 +370,7 @@ async def sync_one_asset(
     description: bool = True,
     person_map: dict[str, str] | None = None,
     live_ids: set[str] | None = None,
+    registered: dict[str, str] | None = None,
 ) -> AsyncIterator[SyncEvent]:
     """Create the Gramps media for one Immich asset, titled by its file name; re-runs finish links idempotently"""
     yield SyncEvent(kind="started", detail=f"immich asset {asset_id}")
@@ -359,11 +382,10 @@ async def sync_one_asset(
     if stack.get("primaryAssetId") and stack["primaryAssetId"] != asset_id:
         raise SyncError(400, "this asset is a stack variant. sync the stack's main image instead")
 
-    row = conn.execute(
-        "SELECT gramps_id FROM minted_media WHERE source_system='immich' AND source_id=? "
-        "AND withdrawn_at IS NULL", (asset_id,),
-    ).fetchone()
-    if row is None and stack.get("primaryAssetId"):
+    if registered is None:
+        registered = await registered_map(gramps)
+    known = registered.get(asset_id)
+    if known is None and stack.get("primaryAssetId"):
         try:
             stacks = [s for client in accounts for s in await client.list_stacks()]
         except ImmichError as exc:
@@ -375,19 +397,11 @@ async def sync_one_asset(
                 member_ids = aids
                 break
         if member_ids:
-            rows = conn.execute(
-                "SELECT gramps_id FROM minted_media WHERE source_system='immich' AND withdrawn_at IS NULL "
-                f"AND source_id IN ({','.join('?' * len(member_ids))})",
-                member_ids,
-            ).fetchall()
-            if len(rows) > 1:
-                raise SyncError(
-                    400,
-                    "two synced media resolve to the same stack main, "
-                    "unstack them or fix the register before syncing",
-                )
-            row = rows[0] if rows else None
-    existing = await gramps.get_media_by_gramps_id(row[0]) if row else None
+            found = sorted({registered[m] for m in member_ids if m in registered})
+            if len(found) > 1:
+                raise SyncError(400, "two synced media resolve to the same stack main, unstack them first")
+            known = found[0] if found else None
+    existing = await gramps.get_media_by_gramps_id(known) if known else None
 
     counts = new_counts()
     updated_cols: dict = {}
@@ -404,7 +418,7 @@ async def sync_one_asset(
             gramps_id=gid, title=title, detail="already in Gramps",
         )
         if update:
-            async for ev in update_synced(gramps, accounts, conn, cfg, gid, asset, existing,
+            async for ev in update_synced(gramps, accounts, cfg, gid, asset, existing,
                                           True, None, counts, description):
                 if ev.kind == "item" and ev.entity == "media" and ev.action == "updated":
                     updated_cols.update((ev.data or {}).get("cols") or {})
@@ -414,18 +428,14 @@ async def sync_one_asset(
     else:
         if live_ids is None:
             live_ids = await gramps.list_media_gramps_ids()
+        withdrawn = await codes.withdrawn(gramps)
         if gramps_id:
-            gid = gramps_id.strip().upper()
-            if not ids.MANUAL_ID_RE.match(gid):
-                raise SyncError(400, f"invalid gramps_id {gramps_id!r} (6 chars, safe alphabet)")
-            if why := ids.guard_reason(gid):
-                raise SyncError(400, f"gramps_id {gid} {why}, so it is never issued")
-            if gid in live_ids:
-                raise SyncError(400, f"gramps_id {gid} already exists in Gramps")
-            if gid in ids.all_ids_ever_seen(conn, open_reservations=False):
-                raise SyncError(400, f"gramps_id {gid} was issued before and can't be reused")
+            try:
+                gid = codes.check_code(gramps_id, live_ids, withdrawn)
+            except codes.CodeError as exc:
+                raise SyncError(exc.status, exc.detail)
         else:
-            gid = ids.generate_gramps_id(ids.all_ids_ever_seen(conn, live_ids))
+            gid = ids.generate_gramps_id(ids.taken_ids(live_ids, withdrawn))
 
         gramps_path, mime = gramps_file(asset, cfg, await preview_of(accounts, asset, cfg))
         title = wanted_title(asset) or gid
@@ -448,11 +458,8 @@ async def sync_one_asset(
             await gramps.create_media(media_obj)
         except Exception as exc:
             raise SyncError(502, f"Gramps create failed: {exc}")
-        with conn:
-            try:
-                ids.register_minted(conn, gid, "immich", asset_id, _now())
-            except ids.IdReused as exc:
-                raise SyncError(409, f"media {gid} created in Gramps but not registered: {exc}")
+        registered[asset_id] = gid
+        live_ids.add(gid)
         created = True
         yield SyncEvent(
             kind="item", entity="media", action="created", source_id=asset_id,
@@ -503,17 +510,6 @@ async def sync_one_asset(
     people_unmatched = face_results["people_unmatched"]
     people_failed = face_results["people_failed"]
 
-    note_synced = None
-    if not refreshed:
-        try:
-            async for ev in adopt_rows(gramps, conn, asset_id, media_obj):
-                if ev.entity == "note":
-                    note_synced = ev.action
-                yield ev
-        except Exception as exc:
-            yield SyncEvent(kind="item", entity="note", action="failed", source_id=asset_id,
-                            gramps_id=gid, title=title, detail=str(exc)[:200])
-
     yield SyncEvent(
         kind="summary", entity="media", gramps_id=gid, title=title,
         detail="created" if created else "already synced",
@@ -526,7 +522,6 @@ async def sync_one_asset(
             "people_unmatched": people_unmatched,
             "people_failed": people_failed,
             "updated": updated_cols,
-            "note": note_synced,
             "errors": counts["errors"],
         },
     )
@@ -562,9 +557,9 @@ def gramps_url(cfg: SyncImmichConfig, gramps_id: str | None) -> str | None:
     return f"{cfg.gramps_public_url}/media/{gramps_id}" if gramps_id and cfg.gramps_public_url else None
 
 
-def wanted_description(media: dict, cfg: SyncImmichConfig, link_on: bool) -> str:
-    """The Immich description that mirrors a media object: its title, plus the Gramps link when that is on"""
-    return compose_description(media.get("desc") or "", gramps_url(cfg, media.get("gramps_id")) if link_on else None)
+def wanted_description(media: dict) -> str:
+    """The Immich description that mirrors a media object: its title"""
+    return compose_description(media.get("desc") or "", None)
 
 
 def wanted_title(asset: dict) -> str:
@@ -724,44 +719,6 @@ def set_media_links(media: dict, urls: list[str]) -> bool:
     return True
 
 
-def leftover_rows(conn: sqlite3.Connection, asset_id: str) -> tuple[str, list[str]]:
-    """The note and links Bifrost's own tables still hold for a photo not in Gramps"""
-    row = conn.execute("SELECT text FROM photo_notes WHERE asset_id=?", (asset_id,)).fetchone()
-    links = [r["url"] for r in conn.execute(
-        "SELECT url FROM photo_links WHERE asset_id=? ORDER BY id", (asset_id,))]
-    return (row["text"] if row else "").strip(), links
-
-
-def delete_leftover_rows(conn: sqlite3.Connection, asset_id: str) -> None:
-    with conn:
-        conn.execute("DELETE FROM photo_notes WHERE asset_id=?", (asset_id,))
-        conn.execute("DELETE FROM photo_links WHERE asset_id=?", (asset_id,))
-
-
-async def adopt_rows(gramps: GrampsClient, conn: sqlite3.Connection, asset_id: str,
-                     media: dict) -> AsyncIterator[SyncEvent]:
-    """A created media takes the note and links Bifrost kept for the photo, and the rows go"""
-    text, links = leftover_rows(conn, asset_id)
-    gid = media.get("gramps_id")
-    if text:
-        if is_url_line(text):
-            links = links + [text] if text not in links else links
-        else:
-            action = await append_media_note(gramps, media, text)
-            if action:
-                yield SyncEvent(kind="item", entity="note", action=action, source_id=asset_id,
-                                gramps_id=gid, title=media.get("desc"),
-                                data={"cols": {"note": f"{len(text)} chars"}})
-    if links:
-        wanted = list(dict.fromkeys(media_links(media) + links))
-        if set_media_links(media, wanted):
-            await gramps.update_media(media["handle"], media)
-            yield SyncEvent(kind="item", entity="media", action="updated", source_id=asset_id,
-                            gramps_id=gid, title=media.get("desc"),
-                            data={"cols": {"links": f"{len(links)} added"}})
-    delete_leftover_rows(conn, asset_id)
-
-
 def place_label(place: dict) -> str:
     return (place.get("name") or {}).get("value") or place.get("gramps_id") or "?"
 
@@ -819,7 +776,6 @@ async def _tagged_scope(immich: ImmichClient, tag_id: str) -> tuple[list[dict], 
 async def update_synced(
     gramps: GrampsClient,
     accounts: list[ImmichClient],
-    conn: sqlite3.Connection,
     cfg: SyncImmichConfig,
     gid: str,
     asset: dict,
@@ -849,12 +805,6 @@ async def update_synced(
                             title=wanted_title(asset),
                             detail=f"the register points at {gid}, which is not in Gramps")
             return
-    if apply:
-        with conn:
-            conn.execute(
-                "UPDATE minted_media SET source_id=? WHERE gramps_id=? AND source_system='immich' "
-                "AND source_id<>?", (asset_id, gid, asset_id))
-
     try:
         preview = await preview_of(accounts, asset, cfg)
         cols = update_plan(asset, media, cfg, preview)
@@ -866,7 +816,7 @@ async def update_synced(
                         detail=str(exc)[:200])
         return
     tag_cols = id_tag_plan(asset, gid, cfg)
-    wanted = wanted_description(media, cfg, ui_settings.get_description_link(conn))
+    wanted = wanted_description(media)
     current = ((asset.get("exifInfo") or {}).get("description") or "").strip()
     desc_cols = {"description": f"{current!r} → {wanted!r}"} if description and wanted != current else {}
     pending = {**cols, **tag_cols, **desc_cols}
@@ -910,12 +860,6 @@ async def update_synced(
             return
         if "file" in cols:
             counts["versions_updated"] += 1
-            with conn:
-                conn.execute(
-                    "UPDATE minted_media SET source_id=? "
-                    "WHERE gramps_id=? AND source_system='immich'",
-                    (asset_id, gid),
-                )
             try:
                 await gramps.store_checksum(media)
             except Exception as exc:
@@ -962,7 +906,6 @@ async def update_synced(
 async def sync_assets(
     gramps: GrampsClient,
     accounts: list[ImmichClient],
-    conn: sqlite3.Connection,
     cfg: SyncImmichConfig,
     apply: bool = False,
     selected: set[str] | None = None,
@@ -1002,17 +945,12 @@ async def sync_assets(
                 tagged_ids.add(a["id"])
                 tagged.append(a)
 
-    rows = conn.execute(
-        "SELECT gramps_id, source_id FROM minted_media WHERE source_system='immich' AND withdrawn_at IS NULL"
-    ).fetchall()
-    minted_ids = {r["source_id"] for r in rows}
-    update_targets = [
-        (r["gramps_id"], primary_of.get(r["source_id"]) or r["source_id"])
-        for r in rows
-    ]
+    registered = await registered_map(gramps)
+    minted_ids = set(registered)
+    update_targets = [(gid, primary_of.get(aid) or aid) for aid, gid in registered.items()]
     update_ids = {aid for _, aid in update_targets}
 
-    scope = f"{len(tagged)} asset(s) tagged {cfg.sync_tag!r}; {len(rows)} synced media"
+    scope = f"{len(tagged)} asset(s) tagged {cfg.sync_tag!r}; {len(registered)} synced media"
     if capped:
         scope += f" -- CAPPED at {_TAG_ASSET_CAP}, results are incomplete!"
     yield SyncEvent(kind="started", detail=scope)
@@ -1080,8 +1018,8 @@ async def sync_assets(
         if live_ids is None:
             live_ids = await gramps.list_media_gramps_ids()
         try:
-            async for ev in sync_one_asset(gramps, accounts, conn, cfg, asset_id,
-                                           person_map=people, live_ids=live_ids):
+            async for ev in sync_one_asset(gramps, accounts, cfg, asset_id, person_map=people,
+                                           live_ids=live_ids, registered=registered):
                 if ev.kind == "item":
                     if ev.action == "failed":
                         counts["errors"] += 1
@@ -1131,7 +1069,7 @@ async def sync_assets(
                             title=asset.get("originalFileName"),
                             detail="asset is in the Immich trash")
             continue
-        async for ev in update_synced(gramps, accounts, conn, cfg, gid, asset, None,
+        async for ev in update_synced(gramps, accounts, cfg, gid, asset, None,
                                       apply, selected, counts):
             yield ev
 

@@ -1,9 +1,8 @@
-const VIEWS = ['recent', 'synced', 'collections', 'faces'];
+const VIEWS = ['recent', 'synced', 'faces'];
 
 function parse() {
-  const [name, id] = window.location.hash.replace(/^#\/?/, '').split('/');
-  const view = VIEWS.includes(name) ? name : 'recent';
-  return { view, collection: view === 'collections' && id ? Number(id) : null };
+  const [name] = window.location.hash.replace(/^#\/?/, '').split('/');
+  return { view: VIEWS.includes(name) ? name : 'recent' };
 }
 
 export const route = $state(parse());

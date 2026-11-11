@@ -1,14 +1,6 @@
 import { get, qs } from './api.svelte.js';
 
-export const store = $state({ config: null, error: '', people: null, places: null, collections: null });
-
-export async function loadCollections() {
-  try {
-    store.collections = await get('/photos/api/collections');
-  } catch {
-    store.collections ??= [];
-  }
-}
+export const store = $state({ config: null, error: '', people: null, places: null });
 
 export async function init() {
   try {
@@ -21,7 +13,6 @@ export async function init() {
   if (!store.config.enabled) return;
   get('/photos/api/people').then((p) => (store.people = p)).catch(() => (store.people = []));
   get('/photos/api/places').then((p) => (store.places = p)).catch(() => (store.places = []));
-  loadCollections();
 }
 
 export async function searchAssets(q, skip = new Set()) {

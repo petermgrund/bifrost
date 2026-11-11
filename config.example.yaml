@@ -9,9 +9,6 @@ paperless:
   base_url: "http://{device}:{port}"
   api_token: "REPLACE_ME"
 
-# Bifrost resolved relative to this file's dir
-database: data/bifrost.db
-
 sync:
   immich:
     enabled: true

@@ -1,35 +1,22 @@
 import { BifrostElement, html, nothing } from './core.js';
-import './paperless-sync-page.js';
-import './immich-sync-page.js';
-import './transcribe-page.js';
+import './sync-check-page.js';
 import './reprocess-page.js';
-import './faces-backfill-page.js';
 import './codes-page.js';
-import './reconcile-page.js';
 
 const SECTIONS = [
-  { id: 'sync', title: 'Sync',
-    desc: 'Sync Paperless docs and Immich photos to Gramps media objects',
-    body: html`<paperless-sync-page></paperless-sync-page>
-      <div class="large-space"></div>
-      <immich-sync-page></immich-sync-page>
-      <div class="large-space"></div>
-      <faces-backfill-page></faces-backfill-page>` },
+  { id: 'sync', title: 'Sync', desc: 'Check Paperless docs, Immich photos and faces against Gramps',
+    body: html`<sync-check-page></sync-check-page>` },
   { id: 'photos', title: 'Photos', desc: 'Curate Immich photos for Gramps',
     body: html`<a class="button" href="/photos"><span>Open Photos</span></a>` },
-  { id: 'transcribe', title: 'Transcribe', desc: 'Run OCR on Paperless docs',
-    body: html`<transcribe-page></transcribe-page>` },
   { id: 'codes', title: 'Codes', desc: 'Manage PID codes',
-    body: html`<codes-page></codes-page>
-      <div class="large-space"></div>
-      <reconcile-page></reconcile-page>` },
+    body: html`<codes-page></codes-page>` },
   { id: 'other', title: 'Other tools', desc: 'Other tools for managing your data',
     body: html`<reprocess-page></reprocess-page>` },
 ];
 
 class BifrostApp extends BifrostElement {
   static properties = {
-    opened: { state: true }, 
+    opened: { state: true },
   };
 
   constructor() {

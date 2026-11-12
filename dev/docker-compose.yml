@@ -20,6 +20,7 @@ x-gramps-volumes: &gramps-volumes
   - ./data/paperless/media/documents/originals:/app/media/paperless:ro
   - ./data/immich/library/upload:/app/media/immich:ro
   - ./data/immich/library/thumbs:/app/media/immich-previews:ro
+  - ./data/copyparty/files:/app/media/copyparty:ro
 
 x-bifrost: &bifrost
   build:
@@ -52,14 +53,17 @@ services:
       GRAMPS_URL: http://grampsweb:5000
       PAPERLESS_URL: http://paperless:8000
       IMMICH_URL: http://immich-server:2283
+      COPYPARTY_URL: http://copyparty:3923
       GRAMPS_PUBLIC_URL: http://${PUBLIC_HOST:-localhost}:${GRAMPS_PORT:-5555}
       PAPERLESS_PUBLIC_URL: http://${PUBLIC_HOST:-localhost}:${PAPERLESS_PORT:-8000}
       IMMICH_PUBLIC_URL: http://${PUBLIC_HOST:-localhost}:${IMMICH_PORT:-2283}
+      COPYPARTY_PUBLIC_URL: http://${PUBLIC_HOST:-localhost}:${COPYPARTY_PORT:-3923}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
     depends_on:
       grampsweb: {condition: service_healthy}
       paperless: {condition: service_healthy}
       immich-server: {condition: service_healthy}
+      copyparty: {condition: service_started}
 
   # ---------------------------------------------------------------- Gramps Web
   grampsweb:
@@ -91,6 +95,20 @@ services:
   grampsweb-redis:
     image: docker.io/valkey/valkey:8-alpine
     restart: unless-stopped
+
+  # ----------------------------------------------------------------- copyparty
+  copyparty:
+    image: copyparty/ac:${COPYPARTY_VERSION:-latest}
+    restart: unless-stopped
+    environment:
+      PYTHONUNBUFFERED: "1"
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${COPYPARTY_PORT:-3923}:3923"
+    volumes:
+      - ./data/copyparty/files:/w
+      - ./data/copyparty/cfg:/cfg
+      - ./copyparty/copyparty.conf:/cfg/copyparty.conf:ro
+      - ./copyparty/bifrost-hook.py:/cfg/bifrost-hook.py:ro
 
   # ------------------------------------------------------------- Paperless-ngx
   paperless:

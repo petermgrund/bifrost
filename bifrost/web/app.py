@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .. import __version__
-from ..core.clients import GeminiClient, GrampsClient, ImmichClient, PaperlessClient
+from ..core.clients import CopypartyClient, GeminiClient, GrampsClient, ImmichClient, PaperlessClient
 from ..core.clients.immich import ImmichError
 from ..core.config import load_config
 
@@ -29,6 +29,8 @@ async def lifespan(app: FastAPI):
     app.state.gramps = GrampsClient(cfg.gramps.base_url, cfg.gramps.username, cfg.gramps.password)
     app.state.paperless = PaperlessClient(cfg.paperless.base_url, cfg.paperless.api_token)
     app.state.gemini = GeminiClient(cfg.gemini.api_key, cfg.gemini.model)
+    app.state.copyparty = (CopypartyClient(cfg.copyparty.base_url, cfg.copyparty.username, cfg.copyparty.password)
+                           if cfg.copyparty.base_url else None)
     # Immich sync endpoints answer 503 with no accounts configured
     app.state.immich_accounts = []
     if cfg.immich.base_url:
@@ -41,6 +43,8 @@ async def lifespan(app: FastAPI):
     await app.state.gramps.close()
     await app.state.paperless.close()
     await app.state.gemini.close()
+    if app.state.copyparty is not None:
+        await app.state.copyparty.close()
     for client in app.state.immich_accounts:
         await client.close()
 

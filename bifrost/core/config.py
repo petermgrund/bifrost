@@ -67,6 +67,21 @@ class SyncPaperlessConfig:
 
 
 @dataclass(frozen=True)
+class CopypartyConfig:
+    base_url: str = ""
+    username: str = ""
+    password: str = ""
+
+
+@dataclass(frozen=True)
+class SyncCopypartyConfig:
+    public_url: str = ""
+    # (copyparty folder, where Gramps sees that folder inside its media folder)
+    path_mappings: tuple[tuple[str, str], ...] = ()
+    webhook_token: str = ""
+
+
+@dataclass(frozen=True)
 class GeminiConfig:
     api_key: str = ""
     model: str = "gemini-3-flash-preview"
@@ -81,6 +96,8 @@ class Config:
     immich: ImmichConfig = ImmichConfig()
     sync_immich: SyncImmichConfig = SyncImmichConfig()
     sync_paperless: SyncPaperlessConfig = SyncPaperlessConfig()
+    copyparty: CopypartyConfig = CopypartyConfig()
+    sync_copyparty: SyncCopypartyConfig = SyncCopypartyConfig()
     gemini: GeminiConfig = GeminiConfig()
 
 
@@ -119,6 +136,27 @@ def parse_attribute_fields(block: dict) -> tuple[tuple[int, str], ...]:
         if any(f == fid or n == text for f, n in out):
             raise ConfigError(f"sync.paperless.attribute_fields: field {fid} or {text!r} is listed twice")
         out.append((fid, text))
+    return tuple(out)
+
+
+def parse_copyparty_mappings(block: dict) -> tuple[tuple[str, str], ...]:
+    """sync.copyparty.path_mappings as (copyparty folder, Gramps prefix) pairs: folders without
+    slashes at either end ('' is the root), prefixes ending in one, no folder inside another"""
+    out: list[tuple[str, str]] = []
+    for m in block.get("path_mappings") or []:
+        if not isinstance(m, dict) or "copyparty_prefix" not in m or "gramps_prefix" not in m:
+            raise ConfigError(
+                "Each sync.copyparty.path_mappings entry needs 'copyparty_prefix' "
+                f"and 'gramps_prefix' keys, got: {m!r}")
+        folder = str(m["copyparty_prefix"] or "").strip().strip("/")
+        prefix = str(m["gramps_prefix"] or "").strip().strip("/")
+        if not prefix:
+            raise ConfigError("sync.copyparty.path_mappings: gramps_prefix names the folder "
+                              "inside Gramps' media folder where the copyparty folder is mounted")
+        for other, _ in out:
+            if not folder or not other or f"{folder}/".startswith(f"{other}/") or f"{other}/".startswith(f"{folder}/"):
+                raise ConfigError(f"sync.copyparty.path_mappings: /{folder} and /{other} overlap")
+        out.append((folder, f"{prefix}/"))
     return tuple(out)
 
 
@@ -226,6 +264,9 @@ def load_config(path: str | Path | None = None) -> Config:
                 immich_accounts.append(
                     ImmichAccount(api_key=im_raw["partner_api_key"], label="partner"))
 
+    cp_raw = raw.get("copyparty") or {}
+    sc_raw = (raw.get("sync") or {}).get("copyparty") or {}
+    cp_base = str(cp_raw.get("base_url") or "").rstrip("/")
     gem_raw = raw.get("gemini") or {}
     return Config(
         gramps=GrampsConfig(**section("gramps", ["base_url", "username", "password"])),
@@ -237,6 +278,16 @@ def load_config(path: str | Path | None = None) -> Config:
         ),
         sync_immich=sync_immich,
         sync_paperless=sync_paperless,
+        copyparty=CopypartyConfig(
+            base_url=cp_base,
+            username=str(cp_raw.get("username") or "").strip(),
+            password=str(cp_raw.get("password") or ""),
+        ),
+        sync_copyparty=SyncCopypartyConfig(
+            public_url=str(sc_raw.get("public_url") or cp_base).rstrip("/"),
+            path_mappings=parse_copyparty_mappings(sc_raw),
+            webhook_token=str(sc_raw.get("webhook_token") or "").strip(),
+        ),
         gemini=GeminiConfig(
             api_key=gem_raw.get("api_key") or "",
             model=gem_raw.get("model") or "gemini-3-flash-preview",

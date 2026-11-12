@@ -36,6 +36,13 @@ sync:
     attribute_fields: {}
     #   11: "Record URL"
     #   18: "Record URL access"
+  copyparty:
+    public_url: "https://your-copyparty-public-url"
+    # copyparty folder -> the folder inside Gramps' media folder where it is mounted
+    path_mappings:
+      - copyparty_prefix: "/"
+        gramps_prefix: "copyparty/"
+    webhook_token: ""
 
 gemini:
   api_key: "REPLACE_ME"
@@ -49,3 +56,8 @@ immich:
       label: "person-1"
     # - api_key: "REPLACE_ME"
     #   label: "person-2"
+
+copyparty:
+  base_url: "http://{device}:3923"
+  username: ""  # only when copyparty runs with usernames
+  password: "REPLACE_ME"

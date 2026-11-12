@@ -15,6 +15,7 @@ Then open `http://<PUBLIC_HOST>:8800` from any machine on the LAN.
 | Gramps Web | `http://<PUBLIC_HOST>:5555` | `owner` / `bifrost-dev` |
 | Paperless-ngx | `http://<PUBLIC_HOST>:8000` | `admin` / `bifrost-dev` |
 | Immich | `http://<PUBLIC_HOST>:2283` | `owner@bifrost.dev` or `partner@bifrost.dev` / `bifrost-dev` |
+| copyparty | `http://<PUBLIC_HOST>:3923` | `owner` / `bifrost-dev` |
 
 | `dev/.env` | |
 | --- | --- |
@@ -28,11 +29,11 @@ Then open `http://<PUBLIC_HOST>:8800` from any machine on the LAN.
 | Command | What it does |
 | --- | --- |
 | `up` | `docker compose up -d --build`, then waits for health and prints the URLs |
-| `seed [--example-tree] [--no-immich] [--no-paperless]` | Seeds the services (re-runnable) and rewrites `dev/config.yaml`, then restarts Bifrost |
+| `seed [--example-tree] [--no-immich] [--no-paperless] [--no-copyparty]` | Seeds the services (re-runnable) and rewrites `dev/config.yaml`, then restarts Bifrost |
 | `status` | Container health plus an HTTP probe of every service |
 | `doctor` | `python -m bifrost.cli doctor` inside the Bifrost container |
 | `test` | `pytest` inside the Bifrost container |
-| `logs [service]` | Follow logs (`bifrost`, `grampsweb`, `paperless`, `immich-server`, ...) |
+| `logs [service]` | Follow logs (`bifrost`, `grampsweb`, `paperless`, `immich-server`, `copyparty`, ...) |
 | `shell` | Bash in the Bifrost container |
 | `down` | Stop; all data is kept |
 | `reset` | Stop and delete every volume and `dev/data` (asks first) |
@@ -50,11 +51,13 @@ dev/
   .env.example          -> .env
   config.yaml           
   seed/seed.py          the seeding script
-  seed/samples.py       generates the sample documents and photos
+  seed/samples.py       generates the sample documents, photos and recordings
+  copyparty/            copyparty's config and the hook that calls Bifrost
   samples/photos/       your real photos for Immich
   data/                 all persistent bind mounts:
     gramps/media/                     Gramps media base dir
     paperless/media/documents/originals -> Gramps /app/media/paperless (ro)
     immich/library/upload/            -> Gramps /app/media/immich (ro)
+    copyparty/files/                  -> Gramps /app/media/copyparty (ro)
     samples/                          the generated documents and photos
 ```

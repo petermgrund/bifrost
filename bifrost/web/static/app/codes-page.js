@@ -10,7 +10,7 @@ const STATUS_CHIP = {
   'in use': ['primary-container', 'In use'],
   withdrawn: ['surface-variant', 'Withdrawn'],
 };
-const TYPES = { image: 'Image', document: 'Document' };
+const TYPES = { image: 'Image', document: 'Document', audio: 'Audio', video: 'Video', file: 'File' };
 
 const pad = (n) => String(n).padStart(2, '0');
 
@@ -111,7 +111,8 @@ class CodesPage extends BifrostElement {
     if (!q) return true;
     const code = bare(q);
     if (code && r.code.includes(code)) return true;
-    const hay = [r.title, r.withdrawn_reason, ...r.paperless.map((d) => d.id), ...r.immich.map((a) => a.id)];
+    const hay = [r.title, r.withdrawn_reason, ...r.paperless.map((d) => d.id), ...r.immich.map((a) => a.id),
+      ...r.files.map((f) => f.name)];
     return hay.some((v) => v && String(v).toLowerCase().includes(q));
   }
 
@@ -278,6 +279,8 @@ class CodesPage extends BifrostElement {
       (r.type || r.title) && ['Title', r.title || 'No title'],
       r.paperless.length && ['Paperless', r.paperless.map((d, i) => html`${i ? ', ' : ''}${d.url
         ? html`<a class="link" href=${d.url} target="_blank" rel="noopener">${d.id}</a>` : d.id}`)],
+      r.files.length && ['Files', r.files.map((f, i) => html`${i ? ', ' : ''}<a class="link"
+        href=${f.url} target="_blank" rel="noopener">${f.name}</a>`)],
       r.gramps_url && ['Gramps', html`<a class="link mono" href=${r.gramps_url} target="_blank" rel="noopener">${r.code}</a>`],
       r.withdrawn && ['Withdrawn', `${r.withdrawn}${r.withdrawn_reason ? `: ${r.withdrawn_reason}` : ''}`],
     ].filter(Boolean);

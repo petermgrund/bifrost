@@ -8,7 +8,7 @@ import sqlite3
 import sys
 
 from .core import health
-from .core.clients import GrampsClient, ImmichClient, PaperlessClient
+from .core.clients import CopypartyClient, GrampsClient, ImmichClient, PaperlessClient
 from .core.config import Config, ConfigError, load_config
 from .modules import codes
 
@@ -34,10 +34,16 @@ async def _close(gramps, paperless, accounts) -> None:
 
 async def _doctor(cfg: Config) -> int:
     gramps, paperless, accounts = _clients(cfg)
+    copyparty = (CopypartyClient(cfg.copyparty.base_url, cfg.copyparty.username, cfg.copyparty.password)
+                 if cfg.copyparty.base_url else None)
+    folders = cfg.sync_copyparty.path_mappings
     try:
-        rows = await health.probe_services(gramps, paperless, accounts)
+        rows = await health.probe_services(gramps, paperless, accounts, copyparty,
+                                           folders[0][0] if folders else "")
     finally:
         await _close(gramps, paperless, accounts)
+        if copyparty is not None:
+            await copyparty.close()
     width = max(len(r["name"]) for r in rows)
     for r in rows:
         print(f"  {r['name'].ljust(width)}  {'ok  ' if r['ok'] else 'FAIL'}  {r['detail']}")

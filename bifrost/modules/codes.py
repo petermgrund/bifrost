@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import posixpath
 import re
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from typing import Iterable, Mapping
+from urllib.parse import unquote
 
 from ..core import ids
 from ..core.clients import GrampsClient
@@ -17,6 +19,7 @@ ATTENTION = "attention"
 STATUSES = (IN_USE, WITHDRAWN)
 
 SOURCE_ATTRS = {"Immich ID": "immich", "Paperless ID": "paperless"}
+FILE_ATTR = "Copyparty URL"
 LINE_RE = re.compile(r"^([A-Z0-9]{4,6})\s+(\d{4}-\d{2}-\d{2})(?:\s+(.*))?$")
 
 
@@ -160,9 +163,11 @@ def _row(code: str, media: dict | None, entry: dict | None, urls: Urls,
         attention = "Withdrawn but still in Gramps"
     elif media and documents is not None and any(d not in documents for d in paperless):
         attention = "Deleted from Paperless"
-    mime = (media or {}).get("mime") or ""
+    files = [a["value"] for a in (media or {}).get("attribute_list") or []
+             if a.get("type") == FILE_ATTR and a.get("value")]
+    family = ((media or {}).get("mime") or "").split("/")[0]
     kind = ("image" if system == "immich" else "document" if system == "paperless"
-            else "image" if mime.startswith("image/") else None)
+            else family if family in ("image", "audio", "video") else "file" if files else None)
     return {
         "code": code,
         "status": status,
@@ -174,6 +179,7 @@ def _row(code: str, media: dict | None, entry: dict | None, urls: Urls,
         "paperless": [{"id": d, "url": f"{urls.paperless}/documents/{d}/details" if urls.paperless else None}
                       for d in paperless],
         "immich": [{"id": a, "url": f"{urls.immich}/photos/{a}" if urls.immich else None} for a in immich],
+        "files": [{"name": posixpath.basename(unquote(url)), "url": url} for url in files],
         "updated": _iso(media.get("change")) if media else entry["withdrawn"],
         "withdrawn": entry["withdrawn"] if entry else None,
         "withdrawn_reason": entry["reason"] if entry else None,
@@ -203,8 +209,8 @@ def search(items: list[dict], q: str | None) -> list[dict]:
     def hit(r: dict) -> bool:
         if code_q and code_q in r["code"]:
             return True
-        hay = [r["title"], r["withdrawn_reason"],
-               *(d["id"] for d in r["paperless"]), *(a["id"] for a in r["immich"])]
+        hay = [r["title"], r["withdrawn_reason"], *(d["id"] for d in r["paperless"]),
+               *(a["id"] for a in r["immich"]), *(f["name"] for f in r["files"])]
         return any(text in str(v).casefold() for v in hay if v)
 
     return [r for r in items if hit(r)]

@@ -68,7 +68,7 @@ ensure_env() {
 ensure_dirs() {
   mkdir -p data/gramps/media \
            data/paperless/media/documents/originals data/paperless/export data/paperless/consume \
-           data/immich/library/upload samples/photos
+           data/immich/library/upload data/copyparty/files data/copyparty/cfg samples/photos
 }
 
 ensure_config() {
@@ -117,15 +117,17 @@ probe() { # probe URL -> http status or 000
 
 status() {
   docker compose ps --format 'table {{.Service}}\t{{.Status}}\t{{.Ports}}'
-  local bind gp pp ip bp pw
+  local bind gp pp ip cp bp pw
   bind="$(env_get PUBLIC_HOST localhost)"
   gp="$(env_get GRAMPS_PORT 5555)"; pp="$(env_get PAPERLESS_PORT 8000)"
-  ip="$(env_get IMMICH_PORT 2283)"; bp="$(env_get BIFROST_PORT 8800)"; pw="$(env_get DEV_PASSWORD bifrost-dev)"
+  ip="$(env_get IMMICH_PORT 2283)"; cp="$(env_get COPYPARTY_PORT 3923)"
+  bp="$(env_get BIFROST_PORT 8800)"; pw="$(env_get DEV_PASSWORD bifrost-dev)"
   echo
   printf '  %-14s %-28s http %s   login %s\n' "Bifrost"   "http://$bind:$bp"  "$(probe "http://$bind:$bp/healthz")" "(none)"
   printf '  %-14s %-28s http %s   login %s\n' "Gramps Web" "http://$bind:$gp" "$(probe "http://$bind:$gp/api/metadata/")" "owner / $pw"
   printf '  %-14s %-28s http %s   login %s\n' "Paperless"  "http://$bind:$pp" "$(probe "http://$bind:$pp/api/")" "admin / $pw"
   printf '  %-14s %-28s http %s   login %s\n' "Immich"     "http://$bind:$ip" "$(probe "http://$bind:$ip/api/server/ping")" "owner@bifrost.dev / $pw  (also partner@bifrost.dev)"
+  printf '  %-14s %-28s http %s   login %s\n' "copyparty"  "http://$bind:$cp" "$(probe "http://$bind:$cp/?ls")" "owner / bifrost-dev"
   echo
   if grep -q not-seeded-yet config.yaml 2>/dev/null; then
     echo "dev/config.yaml is the placeholder: run '$(basename "$0") seed' to create users, tags, fields and sample data"

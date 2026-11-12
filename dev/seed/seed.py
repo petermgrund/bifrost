@@ -12,6 +12,7 @@ import secrets
 import sys
 import time
 from pathlib import Path
+from urllib.parse import quote, unquote
 
 import httpx
 import yaml
@@ -29,11 +30,13 @@ URLS = {
     "paperless": os.environ.get("PAPERLESS_URL", "http://paperless:8000"),
     "bifrost": os.environ.get("BIFROST_URL", "http://bifrost:8800"),
     "immich": os.environ.get("IMMICH_URL", "http://immich-server:2283"),
+    "copyparty": os.environ.get("COPYPARTY_URL", "http://copyparty:3923"),
 }
 PUBLIC = {
     "gramps": os.environ.get("GRAMPS_PUBLIC_URL", "http://localhost:5555"),
     "paperless": os.environ.get("PAPERLESS_PUBLIC_URL", "http://localhost:8000"),
     "immich": os.environ.get("IMMICH_PUBLIC_URL", "http://localhost:2283"),
+    "copyparty": os.environ.get("COPYPARTY_PUBLIC_URL", "http://localhost:3923"),
 }
 
 GRAMPS_USER = "owner"
@@ -806,7 +809,37 @@ def link_people(people: dict[str, tuple[str, str]]) -> None:
 
 # ------------------------------------------------------------------- config
 
-def write_config(gramps: dict, paperless: dict | None, immich: dict | None) -> None:
+class Copyparty:
+    def __init__(self, base: str, user: str, password: str) -> None:
+        self.http = httpx.Client(base_url=base, timeout=60, headers={"PW": f"{user}:{password}"})
+
+    def ping(self) -> bool:
+        return "read" in self.http.get("/?ls").json().get("perms", [])
+
+    def names(self, folder: str) -> set[str]:
+        r = self.http.get(f"/{quote(folder)}/?ls" if folder else "/?ls")
+        return {unquote(f["href"]) for f in r.json().get("files", [])} if r.status_code == 200 else set()
+
+    def put(self, path: str, data: bytes) -> None:
+        r = self.http.put(f"/{quote(path)}", content=data)
+        if r.status_code >= 400:
+            die(f"copyparty PUT {path} -> {r.status_code}: {r.text[:300]}")
+
+
+def seed_copyparty(audio: list[dict]) -> dict:
+    cp = Copyparty(URLS["copyparty"], "owner", PASSWORD)
+    wait_for("copyparty", cp.ping)
+    for item in audio:
+        folder, _, name = item["name"].rpartition("/")
+        if name in cp.names(folder):
+            continue
+        cp.put(item["name"], item["path"].read_bytes())
+        log(f"copyparty: uploaded {item['name']}")
+    return {"username": "bifrost"}
+
+
+def write_config(gramps: dict, paperless: dict | None, immich: dict | None,
+                 copyparty: dict | None = None) -> None:
     cfg: dict = {
         "gramps": {"base_url": f"{URLS['gramps']}/api", "username": GRAMPS_USER, "password": PASSWORD},
         "paperless": {"base_url": URLS["paperless"],
@@ -841,6 +874,13 @@ def write_config(gramps: dict, paperless: dict | None, immich: dict | None) -> N
         cfg["immich"] = {"base_url": URLS["immich"],
                          "accounts": [{"api_key": immich["keys"]["owner"], "label": "owner"},
                                       {"api_key": immich["keys"]["partner"], "label": "partner"}]}
+    if copyparty:
+        cfg["copyparty"] = {"base_url": URLS["copyparty"], "username": copyparty["username"], "password": PASSWORD}
+        cfg["sync"]["copyparty"] = {
+            "public_url": PUBLIC["copyparty"],
+            "path_mappings": [{"copyparty_prefix": "/", "gramps_prefix": "copyparty/"}],
+            "webhook_token": WEBHOOK_TOKEN,
+        }
     header = ("# Bifrost dev config, written by dev/seed/seed.py. Re-running the seed rewrites it.\n"
               "# Service URLs are the compose-network names; public_url values are what your browser uses.\n")
     CONFIG_OUT.write_text(header + yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True))
@@ -852,6 +892,7 @@ def main() -> None:
     ap.add_argument("--example-tree", action="store_true", help="also import Gramps' example.gramps")
     ap.add_argument("--no-immich", action="store_true")
     ap.add_argument("--no-paperless", action="store_true")
+    ap.add_argument("--no-copyparty", action="store_true")
     ap.add_argument("--photos-dir", type=Path, default=DEV / "samples" / "photos",
                     help="real photos to upload to Immich (default dev/samples/photos)")
     args = ap.parse_args()
@@ -862,13 +903,15 @@ def main() -> None:
     gramps = seed_gramps(args)
     paperless = None if args.no_paperless else seed_paperless(generated["documents"])
     immich = None if args.no_immich else seed_immich(generated["photos"], args.photos_dir)
-    write_config(gramps, paperless, immich)
+    copyparty = None if args.no_copyparty else seed_copyparty(generated["audio"])
+    write_config(gramps, paperless, immich, copyparty)
 
     print(f"""
 [seed] done. Logins (password '{PASSWORD}' everywhere):
     Gramps Web  {PUBLIC['gramps']}     owner
     Paperless   {PUBLIC['paperless']}  admin
     Immich      {PUBLIC['immich']}     owner@bifrost.dev / partner@bifrost.dev
+    copyparty   {PUBLIC['copyparty']}  owner
 [seed] Bifrost picks up dev/config.yaml on its next start (bifrost-dev.sh seed restarts it).
 [seed] In Bifrost, open Config to see all services green, then Sync -> Paperless / Immich preview.
 """)

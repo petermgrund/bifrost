@@ -23,9 +23,11 @@ async def config_page(request: Request):
 @router.get("/api/status")
 async def status(request: Request) -> dict:
     st = request.app.state
+    folders = st.cfg.sync_copyparty.path_mappings
     return {
         "services": await health.probe_services(
-            st.gramps, st.paperless, getattr(st, "immich_accounts", [])),
+            st.gramps, st.paperless, getattr(st, "immich_accounts", []),
+            getattr(st, "copyparty", None), folders[0][0] if folders else ""),
         "version": __version__,
         "config_path": str(st.cfg.config_path),
     }

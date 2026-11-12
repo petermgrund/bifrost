@@ -3,7 +3,10 @@
 
 from __future__ import annotations
 
+import math
 import random
+import struct
+import wave
 from pathlib import Path
 
 import piexif
@@ -355,6 +358,19 @@ def exif_bytes(when: str, description: str | None, gps: tuple[float, float] | No
 
 # --------------------------------------------------------------------- specs
 
+def tone(path: Path, seconds: int, hz: int) -> Path:
+    """A plain sine tone as a WAV file, standing in for a recording"""
+    if not path.exists():
+        rate = 8000
+        with wave.open(str(path), "w") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(rate)
+            w.writeframes(b"".join(struct.pack("<h", int(9000 * math.sin(2 * math.pi * hz * i / rate)))
+                                   for i in range(rate * seconds)))
+    return path
+
+
 def generate(out: Path) -> dict:
     out.mkdir(parents=True, exist_ok=True)
 
@@ -454,4 +470,10 @@ def generate(out: Path) -> dict:
         img = spec.pop("image")()
         spec["path"] = (save_heic(img, spec["name"], exif=exif) if spec["name"].endswith(".heic")
                         else save_jpeg(img, spec["name"], quality=86, exif=exif))
-    return {"documents": documents, "photos": photos}
+    audio = [
+        dict(path=tone(out / "interview-maria-1962.wav", 3, 330),
+             name="Interview with Maria Lindqvist, 1962.wav"),
+        dict(path=tone(out / "anders-on-the-farm.wav", 2, 220),
+             name="oral history/Anders on the farm.wav"),
+    ]
+    return {"documents": documents, "photos": photos, "audio": audio}

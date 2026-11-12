@@ -1,4 +1,4 @@
-"""One scan of Paperless, Immich and faces against Gramps"""
+"""One scan of Paperless, copyparty, Immich and faces against Gramps"""
 
 from __future__ import annotations
 
@@ -6,11 +6,11 @@ from typing import AsyncIterator
 
 from ..core.config import Config
 from ..core.events import SyncEvent
-from . import faces, ocr, sync_immich, sync_paperless
+from . import faces, ocr, sync_copyparty, sync_immich, sync_paperless
 
 
 async def run(gramps, paperless, gemini, accounts: list, cfg: Config, apply: bool,
-              selected: set[str] | None = None) -> AsyncIterator[SyncEvent]:
+              selected: set[str] | None = None, copyparty=None) -> AsyncIterator[SyncEvent]:
     counts: dict[str, int] = {}
 
     async def part(gen):
@@ -27,6 +27,9 @@ async def run(gramps, paperless, gemini, accounts: list, cfg: Config, apply: boo
         gen = (ocr.run_with_sync(paperless, gramps, gemini, cfg.sync_paperless, cfg.gemini, selected=selected)
                if apply else ocr.run(paperless, gemini, cfg.sync_paperless, cfg.gemini, apply=False))
         async for ev in part(gen):
+            yield ev
+    if copyparty is not None and cfg.sync_copyparty.path_mappings:
+        async for ev in part(sync_copyparty.sync(copyparty, gramps, cfg.sync_copyparty, apply, selected)):
             yield ev
     if accounts and cfg.sync_immich.enabled:
         try:

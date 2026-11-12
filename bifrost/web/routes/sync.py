@@ -1,4 +1,4 @@
-"""Sync check + the Paperless webhook"""
+"""Sync check + the Paperless and copyparty webhooks"""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 from ...core.clients import PaperlessError
-from ...modules import check, ocr, sync_paperless
+from ...modules import check, ocr, sync_copyparty, sync_paperless
 from ..runs import record_run
 
 log = logging.getLogger("bifrost.sync")
@@ -49,7 +49,7 @@ class CheckBody(BaseModel):
 
 def _check(st, apply: bool, selected: set[str] | None = None):
     return check.run(st.gramps, st.paperless, st.gemini, getattr(st, "immich_accounts", []),
-                     st.cfg, apply, selected)
+                     st.cfg, apply, selected, copyparty=getattr(st, "copyparty", None))
 
 
 @router.post("/api/preview")
@@ -103,10 +103,17 @@ async def _ocr_tagged(st, doc_id: int) -> dict | None:
     return doc if tag_id and tag_id in (doc.get("tags") or []) else None
 
 
+def _background(st, job) -> None:
+    task = asyncio.create_task(job())
+    st.webhook_tasks.add(task)
+    task.add_done_callback(st.webhook_tasks.discard)
+
+
 def _queue_webhook(st, doc_id: int) -> None:
     """Sync the one document after the response, one webhook at a time"""
     if not hasattr(st, "webhook_lock"):
         st.webhook_lock = asyncio.Lock()
+    if not hasattr(st, "webhook_tasks"):
         st.webhook_tasks = set()
 
     async def job():
@@ -124,21 +131,22 @@ def _queue_webhook(st, doc_id: int) -> None:
             except Exception:
                 log.exception("webhook sync of Paperless #%d failed", doc_id)
 
-    task = asyncio.create_task(job())
-    st.webhook_tasks.add(task)
-    task.add_done_callback(st.webhook_tasks.discard)
+    _background(st, job)
+
+
+def _token_or_refuse(request: Request, token: str) -> None:
+    if not token:
+        raise HTTPException(404)
+    given = request.headers.get("X-Bifrost-Token", "")
+    if not hmac.compare_digest(given.encode(), token.encode()):
+        raise HTTPException(403, "bad X-Bifrost-Token")
 
 
 @router.post("/api/paperless/webhook", status_code=202)
 async def paperless_webhook(request: Request):
     """Paperless's workflow webhook: one document changed"""
     st = _state(request)
-    token = st.cfg.sync_paperless.webhook_token
-    if not token:
-        raise HTTPException(404)
-    given = request.headers.get("X-Bifrost-Token", "")
-    if not hmac.compare_digest(given.encode(), token.encode()):
-        raise HTTPException(403, "bad X-Bifrost-Token")
+    _token_or_refuse(request, st.cfg.sync_paperless.webhook_token)
     fields = await _webhook_fields(request)
     raw = str(fields.get("doc_id", fields.get("id", ""))).strip()
     if not raw.isdecimal():
@@ -146,3 +154,37 @@ async def paperless_webhook(request: Request):
     doc_id = int(raw)
     _queue_webhook(st, doc_id)
     return {"doc_id": doc_id, "queued": True}
+
+
+def _queue_copyparty(st) -> None:
+    """Sync the copyparty folders after the response; hooks arriving before it starts share that run"""
+    if getattr(st, "copyparty_queued", False):
+        return
+    st.copyparty_queued = True
+    if not hasattr(st, "copyparty_lock"):
+        st.copyparty_lock = asyncio.Lock()
+    if not hasattr(st, "webhook_tasks"):
+        st.webhook_tasks = set()
+
+    async def job():
+        async with st.copyparty_lock:
+            st.copyparty_queued = False
+            try:
+                gen = sync_copyparty.sync(st.copyparty, st.gramps, st.cfg.sync_copyparty, apply=True)
+                await record_run("sync.copyparty.webhook", gen)
+                st.caches.clear()
+            except Exception:
+                log.exception("webhook sync of copyparty failed")
+
+    _background(st, job)
+
+
+@router.post("/api/copyparty/webhook", status_code=202)
+async def copyparty_webhook(request: Request):
+    """copyparty's event hook: a file was uploaded, moved or deleted"""
+    st = _state(request)
+    if getattr(st, "copyparty", None) is None or not st.cfg.sync_copyparty.path_mappings:
+        raise HTTPException(404)
+    _token_or_refuse(request, st.cfg.sync_copyparty.webhook_token)
+    _queue_copyparty(st)
+    return {"queued": True}

@@ -38,11 +38,21 @@ async def _immich_row(client) -> dict:
     return {**row, "ok": True, "detail": f"v{version or '?'}"}
 
 
-async def probe_services(gramps, paperless, immich_accounts) -> list[dict]:
+async def _copyparty_row(copyparty, folder: str) -> dict:
+    row = {"key": "copyparty", "name": "copyparty"}
+    try:
+        acct = await copyparty.account(folder)
+    except Exception as exc:  # noqa: BLE001
+        return {**row, "ok": False, "detail": str(exc)[:200]}
+    return {**row, "ok": True, "detail": "open to everyone" if acct == "*" else f"account {acct}"}
+
+
+async def probe_services(gramps, paperless, immich_accounts, copyparty=None, folder: str = "") -> list[dict]:
     immich = list(immich_accounts or [])
     rows = await asyncio.gather(
         _gramps_row(gramps),
         _paperless_row(paperless),
+        *([_copyparty_row(copyparty, folder)] if copyparty is not None else []),
         *(_immich_row(c) for c in immich),
     )
     out = list(rows)

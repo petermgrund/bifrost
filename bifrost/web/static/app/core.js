@@ -103,6 +103,8 @@ const ACTION_WORDS = {
   pages_scaled: ['scale', 'scaled', 'page'],
   uploaded: ['upload', 'uploaded', 'new version', 'new versions'],
   id_tags_written: ['write', 'wrote', 'ID tag', 'ID tags'],
+  files_moved: ['follow', 'followed', 'moved file', 'moved files'],
+  files_linked: ['link', 'linked', 'file'],
   faces_linked: ['link', 'linked', 'face'],
   boxes_added: ['add', 'added', 'face box', 'face boxes'],
 };

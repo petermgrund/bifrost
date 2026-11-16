@@ -1,0 +1,5 @@
+__pycache__/
+!/config.example.yaml
+
+## system files
+.DS_Store

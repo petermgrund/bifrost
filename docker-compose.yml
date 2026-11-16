@@ -1,0 +1,10 @@
+services:
+  bifrost:
+    image: ghcr.io/petermgrund/bifrost:latest
+    build: .
+    container_name: bifrost
+    restart: unless-stopped
+    ports:
+      - "8800:8800"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro

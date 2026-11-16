@@ -1,0 +1,304 @@
+"""Gramps Web API client"""
+
+from __future__ import annotations
+
+import asyncio
+import hashlib
+from datetime import datetime, timezone
+
+import httpx
+
+
+# keys Gramps 6 stores on a place, the only ones the API accepts back
+PLACE_KEYS = frozenset({
+    "_class", "alt_loc", "alt_names", "change", "citation_list", "code", "gramps_id", "handle",
+    "lat", "long", "media_list", "name", "note_list", "place_type", "placeref_list", "private",
+    "tag_list", "title", "urls"})
+
+
+class GrampsError(Exception):
+    """Wraps non-2xx response from Gramps Web"""
+
+
+class GrampsClient:
+    def __init__(self, base_url: str, username: str, password: str) -> None:
+        self._base = base_url.rstrip("/")
+        self._user = username
+        self._pass = password
+        self._client = httpx.AsyncClient(timeout=30.0, follow_redirects=True)
+        self._token: str | None = None
+        self._auth_lock = asyncio.Lock()
+
+    async def __aenter__(self) -> "GrampsClient":
+        return self
+
+    async def __aexit__(self, *_exc) -> None:
+        await self.close()
+
+    async def close(self) -> None:
+        await self._client.aclose()
+
+    async def _ensure_token(self) -> None:
+        if self._token:
+            return
+        async with self._auth_lock:
+            if self._token:
+                return
+            for attempt in range(4):
+                resp = await self._client.post(
+                    f"{self._base}/token/",
+                    json={"username": self._user, "password": self._pass},
+                )
+                if resp.status_code == 429 and attempt < 3:
+                    wait = float(resp.headers.get("Retry-After", 2))
+                    await asyncio.sleep(wait)
+                    continue
+                if resp.status_code >= 400:
+                    raise GrampsError(f"Auth failed: {resp.status_code} {resp.text[:200]}")
+                break
+            data = resp.json()
+            token = data.get("access_token") or data.get("access")
+            if not token:
+                raise GrampsError(f"No token in auth response {data}")
+            self._token = token
+
+    async def _request(
+        self, method: str, path: str, ok_404: bool = False, **kwargs
+    ) -> httpx.Response:
+        await self._ensure_token()
+        headers = kwargs.pop("headers", {}) or {}
+        headers["Authorization"] = f"Bearer {self._token}"
+        resp = await self._client.request(
+            method, f"{self._base}{path}", headers=headers, **kwargs
+        )
+        if resp.status_code == 401:
+            #token expired
+            self._token = None
+            await self._ensure_token()
+            headers["Authorization"] = f"Bearer {self._token}"
+            resp = await self._client.request(
+                method, f"{self._base}{path}", headers=headers, **kwargs
+            )
+        if resp.status_code == 404 and ok_404:
+            return resp
+        if resp.status_code >= 400:
+            raise GrampsError(f"{method} {path} → {resp.status_code}: {resp.text[:500]}")
+        return resp
+
+    async def _paged(self, path: str, page_size: int = 200, **params) -> list[dict]:
+        items: list[dict] = []
+        page = 1
+        while True:
+            resp = await self._request(
+                "GET", path, params={"pagesize": page_size, "page": page, **params}
+            )
+            batch = resp.json()
+            if not isinstance(batch, list) or not batch:
+                break
+            items.extend(batch)
+            if len(batch) < page_size:
+                break
+            page += 1
+        return items
+
+    # --- endpoints ---
+
+    async def get_metadata(self) -> dict:
+        """Tree/server info"""
+        resp = await self._request("GET", "/metadata/")
+        return resp.json()
+
+    async def list_people(self, keys: str | None = None) -> list[dict]:
+        return await self._paged("/people/", **({"keys": keys} if keys else {}))
+
+    async def get_person(self, handle: str, ok_404: bool = False) -> dict | None:
+        resp = await self._request("GET", f"/people/{handle}", ok_404=ok_404)
+        return None if resp.status_code == 404 else resp.json()
+
+    async def update_person(self, handle: str, person_obj: dict) -> dict:
+        resp = await self._request(
+            "PUT", f"/people/{handle}",
+            json=person_obj, headers={"Content-Type": "application/json"},
+        )
+        return resp.json()
+
+    async def list_media(self, keys: str | None = None) -> list[dict]:
+        return await self._paged("/media/", **({"keys": keys} if keys else {}))
+
+    async def list_media_gramps_ids(self) -> set[str]:
+        items = await self._paged("/media/", keys="gramps_id")
+        return {m["gramps_id"] for m in items if m.get("gramps_id")}
+
+    async def create_media(self, media_obj: dict) -> dict:
+        resp = await self._request(
+            "POST", "/objects",
+            json=[media_obj], headers={"Content-Type": "application/json"},
+        )
+        return resp.json()
+
+    async def update_media(self, handle: str, media_obj: dict) -> dict:
+        resp = await self._request(
+            "PUT", f"/media/{handle}",
+            json=media_obj, headers={"Content-Type": "application/json"},
+        )
+        return resp.json()
+
+    async def delete_media(self, handle: str) -> None:
+        """Gramps drops the references to the media object along with it"""
+        try:
+            await self._request("DELETE", f"/media/{handle}")
+        except GrampsError:
+            resp = await self._request("GET", f"/media/{handle}", ok_404=True)
+            if resp.status_code != 404:
+                raise
+
+    async def media_md5(self, handle: str) -> str:
+        """MD5 of the file Gramps serves for a media object, the value Gramps keeps as its checksum"""
+        for fresh in (False, True):
+            if fresh:
+                self._token = None
+            await self._ensure_token()
+            async with self._client.stream(
+                    "GET", f"{self._base}/media/{handle}/file",
+                    headers={"Authorization": f"Bearer {self._token}"},
+                    timeout=httpx.Timeout(30.0, read=300.0)) as resp:
+                if resp.status_code == 401 and not fresh:
+                    continue
+                if resp.status_code >= 400:
+                    body = (await resp.aread()).decode(errors="replace")[:300]
+                    raise GrampsError(f"GET /media/{handle}/file → {resp.status_code}: {body}")
+                digest = hashlib.md5(usedforsecurity=False)
+                async for chunk in resp.aiter_bytes():
+                    digest.update(chunk)
+                return digest.hexdigest()
+        raise GrampsError(f"GET /media/{handle}/file → 401")
+
+    async def store_checksum(self, media: dict) -> bool:
+        """Set a media object's checksum to the MD5 of its file; True when it changed"""
+        checksum = await self.media_md5(media["handle"])
+        if checksum == (media.get("checksum") or ""):
+            return False
+        media["checksum"] = checksum
+        await self.update_media(media["handle"], media)
+        return True
+
+    async def update_place(self, handle: str, place_obj: dict) -> dict:
+        """Save a place, minus keys outside the Place schema (a stray 'type' would make Gramps refuse it)"""
+        resp = await self._request(
+            "PUT", f"/places/{handle}",
+            json={k: v for k, v in place_obj.items() if k in PLACE_KEYS},
+            headers={"Content-Type": "application/json"},
+        )
+        return resp.json()
+
+    async def list_places_full(self) -> list[dict]:
+        return await self._paged("/places/")
+
+    async def get_media_by_gramps_id(self, gramps_id: str, backlinks: bool = False,
+                                     notes: bool = False) -> dict | None:
+        """One media object; backlinks ride along under 'backlinks', its notes under 'extended'"""
+        params = {"gramps_id": gramps_id}
+        if backlinks:
+            params["backlinks"] = "true"
+        if notes:
+            params["extend"] = "note_list"
+        resp = await self._request("GET", "/media/", ok_404=True, params=params)
+        if resp.status_code == 404:
+            return None
+        items = resp.json()
+        if items and isinstance(items, list):
+            for m in items:
+                if m.get("gramps_id") == gramps_id:
+                    return m
+        return None
+
+    async def get_note(self, handle: str) -> dict | None:
+        resp = await self._request("GET", f"/notes/{handle}", ok_404=True)
+        return None if resp.status_code == 404 else resp.json()
+
+    async def delete_note(self, handle: str) -> None:
+        """Gramps Web answers a DELETE with 500 after deleting, so the result is checked, not the status"""
+        try:
+            await self._request("DELETE", f"/notes/{handle}")
+        except GrampsError:
+            if await self.get_note(handle) is not None:
+                raise
+
+    async def create_note(self, note_obj: dict) -> dict:
+        resp = await self._request(
+            "POST", "/objects",
+            json=[note_obj], headers={"Content-Type": "application/json"},
+        )
+        return resp.json()
+
+    async def update_note(self, handle: str, note_obj: dict) -> dict:
+        resp = await self._request(
+            "PUT", f"/notes/{handle}",
+            json=note_obj, headers={"Content-Type": "application/json"},
+        )
+        return resp.json()
+
+    async def media_thumbnail(self, handle: str, size: int = 64) -> tuple[bytes, str]:
+        resp = await self._request("GET", f"/media/{handle}/thumbnail/{size}")
+        return resp.content, resp.headers.get("Content-Type", "image/jpeg")
+
+    async def get_media_backlinks(self, handle: str) -> dict:
+        """Objects referencing a media object"""
+        resp = await self._request(
+            "GET", f"/media/{handle}", params={"backlinks": "true"}
+        )
+        return resp.json().get("backlinks", {})
+
+    async def get_object(self, api_path: str, handle: str, **params) -> dict:
+        resp = await self._request(
+            "GET", f"/{api_path}/{handle}", params=params or None)
+        return resp.json()
+
+    async def update_object(self, api_path: str, handle: str, obj: dict) -> dict:
+        resp = await self._request(
+            "PUT", f"/{api_path}/{handle}",
+            json=obj, headers={"Content-Type": "application/json"},
+        )
+        return resp.json()
+
+    async def get_place_by_gramps_id(self, gramps_id: str) -> dict | None:
+        resp = await self._request(
+            "GET", "/places/", ok_404=True, params={"gramps_id": gramps_id})
+        if resp.status_code == 404:
+            return None
+        items = resp.json()
+        if isinstance(items, list):
+            for p in items:
+                if p.get("gramps_id") == gramps_id:
+                    return p
+        return None
+
+    async def get_place(self, handle: str, **params) -> dict:
+        resp = await self._request("GET", f"/places/{handle}", params=params or None)
+        return resp.json()
+
+
+
+def note_obj(handle: str, gramps_id: str, text: str, note_type: str) -> dict:
+    return {
+        "_class": "Note",
+        "handle": handle,
+        "gramps_id": gramps_id,
+        "text": {"_class": "StyledText", "string": text, "tags": []},
+        "type": note_type,
+        "format": 0,
+        "change": int(datetime.now(timezone.utc).timestamp()),
+        "tag_list": [],
+        "private": False,
+    }
+
+
+def person_display_name(person: dict) -> str:
+    """Extract display name from a Gramps person"""
+    name = person.get("primary_name")
+    if not name:
+        return "(unknown)"
+    first = name.get("first_name", "")
+    surnames = name.get("surname_list", [])
+    surname = surnames[0].get("surname", "") if surnames else ""
+    return f"{first} {surname}".strip() or "(unknown)"

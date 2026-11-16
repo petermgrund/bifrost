@@ -1,0 +1,221 @@
+<script>
+  import { Alert, Badge, Button, ContextMenuButton, IconButton, Input, MenuItemType, Text } from '@immich/ui';
+  import {
+    mdiCheck,
+    mdiClose,
+    mdiImagePlusOutline,
+    mdiImageRemoveOutline,
+    mdiRenameOutline,
+    mdiStarOutline,
+    mdiSync,
+    mdiTrayArrowUp,
+  } from '@mdi/js';
+  import { plural, sizeText } from '../lib/format.js';
+  import { searchAssets } from '../lib/store.svelte.js';
+  import ListCard from './ListCard.svelte';
+  import ListRow from './ListRow.svelte';
+  import PickerPopover from './PickerPopover.svelte';
+
+  let { rec, busy, onAdd, onMatch, onPromote, onRemove, onLabel, onView, onError } = $props();
+
+  let verQ = $state('');
+  let found = $state([]);
+  let editLabel = $state(null);
+  let labelDraft = $state('');
+  let labelRef = $state(null);
+  let fileInput = $state(null);
+  let timer;
+
+  const UPLOAD = { id: '__upload', label: 'Upload a new image', icon: mdiTrayArrowUp };
+
+  const members = $derived(rec.versions?.members || []);
+  const suggestions = $derived(rec.suggestions || []);
+  const verItems = $derived(verQ.trim() ? found.map(candidate) : [UPLOAD]);
+
+  $effect(() => {
+    if (editLabel && labelRef) labelRef.select();
+  });
+
+  function blocker(c) {
+    if (c.in_stack || c.versions > 1) return 'Already stacked with other photos';
+    if (c.owner_id && rec.owner_id && c.owner_id !== rec.owner_id) return 'Belongs to another Immich account';
+    if (rec.gramps && c.gramps_id && c.gramps_id !== rec.gramps.gramps_id) return `Also in Gramps, as ${c.gramps_id}`;
+    return '';
+  }
+
+  function candidate(card) {
+    const why = blocker(card);
+    const sub = [card.title && card.filename, card.gramps_id && `in Gramps as ${card.gramps_id}`];
+    return {
+      id: card.asset_id,
+      label: card.title || card.filename,
+      sub: why || sub.filter(Boolean).join(' · '),
+      thumb: card.thumb,
+      disabled: !!why,
+      card,
+    };
+  }
+
+  function onQuery(value) {
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      const q = value.trim();
+      if (!q) {
+        found = [];
+        return;
+      }
+      try {
+        const skip = new Set([rec.asset_id, ...members.map((m) => m.asset_id)]);
+        const results = await searchAssets(q, skip);
+        if (verQ.trim() === q) found = results.slice(0, 8);
+      } catch (e) {
+        onError(e.message);
+      }
+    }, 250);
+  }
+
+  function picked(it) {
+    if (it.id === UPLOAD.id) fileInput.click();
+    else onAdd(it.card);
+  }
+
+  function chosen(e) {
+    const file = e.currentTarget.files?.[0];
+    e.currentTarget.value = '';
+    if (!file) return;
+    onAdd({ asset_id: UPLOAD.id, filename: file.name, title: '', thumb: URL.createObjectURL(file), size: file.size, file });
+  }
+
+  function startLabel(m) {
+    setTimeout(() => {
+      editLabel = m.asset_id;
+      labelDraft = m.label || m.filename;
+    }, 150);
+  }
+
+  function saveLabel(m) {
+    if (editLabel !== m.asset_id) return;
+    editLabel = null;
+    const name = labelDraft.trim();
+    const label = name === m.filename ? '' : name;
+    if (label !== (m.label || '')) onLabel(m, label);
+  }
+
+  function menu(m) {
+    const rename = { title: 'Rename', icon: mdiRenameOutline, onAction: () => startLabel(m) };
+    if (m.is_primary) return [rename];
+    return [
+      { title: 'Make main', icon: mdiStarOutline, onAction: () => onPromote(m) },
+      m.drift?.length ? { title: 'Match to main', icon: mdiSync, onAction: () => onMatch(m) } : undefined,
+      rename,
+      MenuItemType.Divider,
+      { title: 'Remove from versions', icon: mdiImageRemoveOutline, color: 'danger', onAction: () => onRemove(m) },
+    ];
+  }
+</script>
+
+<div class="flex flex-col gap-3">
+  <div class="flex items-center gap-2">
+    <Text size="small" color="muted" class="grow">
+      {members.length > 1 ? plural(members.length, 'version') : 'No other versions'}
+    </Text>
+    <PickerPopover
+      label="Add version"
+      icon={mdiImagePlusOutline}
+      items={verItems}
+      bind:query={verQ}
+      {onQuery}
+      placeholder="Search titles and file names"
+      empty={verQ.trim() ? 'No photo matches' : ''}
+      disabled={!!busy}
+      align="end"
+      onPick={picked}
+    />
+    <input bind:this={fileInput} type="file" accept="image/*" class="hidden" onchange={chosen} />
+  </div>
+
+  {#if rec.versions?.error}
+    <Alert color="danger" size="small" title={rec.versions.error} />
+  {/if}
+
+  {#if members.length}
+    <ListCard>
+      {#each members as m (m.asset_id)}
+        <ListRow thumb={m.thumb} onView={() => onView(m)}>
+          {#snippet trailing()}
+            <ContextMenuButton aria-label="Actions for {m.label || m.filename}" items={menu(m)} disabled={!!busy} />
+          {/snippet}
+              <div class="flex items-center gap-2">
+                {#if editLabel === m.asset_id}
+                  <div class="max-w-72 min-w-0 flex-1">
+                    <Input
+                      bind:ref={labelRef}
+                      bind:value={labelDraft}
+                      size="tiny"
+                      placeholder={m.filename}
+                      aria-label="Name of this version"
+                      onkeydown={(e) => {
+                        if (e.key === 'Enter') saveLabel(m);
+                        else if (e.key === 'Escape') {
+                          e.stopPropagation();
+                          editLabel = null;
+                        }
+                      }}
+                      onblur={() => saveLabel(m)}
+                    />
+                  </div>
+                  <IconButton
+                    icon={mdiCheck}
+                    size="small"
+                    shape="round"
+                    variant="ghost"
+                    aria-label="Save the name"
+                    onmousedown={(e) => e.preventDefault()}
+                    onclick={() => saveLabel(m)}
+                  />
+                  <IconButton
+                    icon={mdiClose}
+                    size="small"
+                    shape="round"
+                    variant="ghost"
+                    color="secondary"
+                    aria-label="Keep the old name"
+                    onmousedown={(e) => e.preventDefault()}
+                    onclick={() => (editLabel = null)}
+                  />
+                {:else}
+                  <p class="truncate text-sm font-medium" title={m.label ? m.filename : undefined}>
+                    {m.label || m.filename}
+                  </p>
+                {/if}
+                {#if m.is_primary}<Badge size="tiny" color="primary" shape="round">Main</Badge>{/if}
+              </div>
+              <p class="truncate font-mono text-xs text-gray-600 dark:text-gray-400">{sizeText(m)}</p>
+              {#if !m.is_primary && m.drift?.length}
+                <p class="text-warning-700 truncate text-xs" title="Compared with the main image">
+                  Differs: {m.drift.join(', ')}
+                </p>
+              {/if}
+        </ListRow>
+      {/each}
+    </ListCard>
+  {/if}
+
+  {#if suggestions.length}
+    <Text size="small" color="muted" class="mt-1">Suggestions</Text>
+    <ListCard>
+      {#each suggestions as sg (sg.asset_id)}
+        {@const why = blocker(sg)}
+        <ListRow thumb={sg.thumb} onView={() => onView(sg)}>
+          {#snippet trailing()}
+            <Button size="small" variant="outline" color="secondary" disabled={!!busy || !!why} onclick={() => onAdd(sg)}>
+              Add
+            </Button>
+          {/snippet}
+          <p class="truncate text-sm font-medium">{sg.title || sg.filename}</p>
+          <p class="truncate text-xs text-gray-600 dark:text-gray-400">{why || sg.why}</p>
+        </ListRow>
+      {/each}
+    </ListCard>
+  {/if}
+</div>

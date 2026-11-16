@@ -1,0 +1,114 @@
+"""OCR scan and apply"""
+
+import asyncio
+
+
+from bifrost.core.config import GeminiConfig, SyncPaperlessConfig
+from bifrost.modules import ocr
+
+CFG = SyncPaperlessConfig(ocr_tag="Gemini OCR", transcription_tag_id=9,
+                          gramps_id_field_id=1, gramps_url_field_id=2)
+GEM = GeminiConfig(model="gemini-test")
+
+
+class FakePaperless:
+    def __init__(self, docs):
+        self.docs = docs
+        self.patched = {}
+        self.tags_set = {}
+
+    async def resolve_tag_id(self, name):
+        return 5 if name == "Gemini OCR" else None
+
+    async def list_documents_by_tag(self, tag_id):
+        return [d for d in self.docs if tag_id in d["tags"]]
+
+    async def download_original(self, doc_id):
+        return b"not really a pdf", "application/pdf"
+
+    async def patch_content(self, doc_id, content):
+        self.patched[doc_id] = content
+        for d in self.docs:
+            if d["id"] == doc_id:
+                d["content"] = content
+
+    async def patch_tags(self, doc_id, tag_ids):
+        self.tags_set[doc_id] = tag_ids
+        for d in self.docs:
+            if d["id"] == doc_id:
+                d["tags"] = list(tag_ids)
+
+
+class FakeGemini:
+    configured = True
+
+    def __init__(self):
+        self.calls = []
+
+    async def transcribe(self, data, mime, prompt, thinking_budget):
+        self.calls.append(mime)
+        return "Transcribed text"
+
+
+class NoGramps:
+    """Raises on any Gramps call"""
+
+    def __getattr__(self, name):
+        raise AssertionError(f"Gramps touched via {name}")
+
+
+def _docs():
+    return [{"id": 1, "title": "One", "content": "abc", "tags": [5],
+             "custom_fields": [{"field": 1, "value": "ABC123"}]},
+            {"id": 2, "title": "Two", "content": "", "tags": [5, 9], "custom_fields": []},
+            {"id": 3, "title": "Dash", "content": " - ", "tags": [5], "custom_fields": []}]
+
+
+def _events(gen):
+    async def collect():
+        return [e async for e in gen]
+    return asyncio.run(collect())
+
+
+def _rows(events):
+    return [e for e in events if e.kind == "item"]
+
+
+def test_scan_lists_every_tagged_doc_as_create_or_replace():
+    rows = _rows(_events(ocr.run(FakePaperless(_docs()), FakeGemini(), CFG, GEM, apply=False)))
+    assert [(e.source_id, e.action) for e in rows] == [
+        ("1", "would_replace"), ("2", "would_create"), ("3", "would_create")]
+    assert rows[0].data["cols"] == {"transcribe": "replace 3 chars"}
+    assert rows[1].data["cols"] == {"transcribe": "no text yet"}
+    assert rows[0].gramps_id == "ABC123" and rows[1].gramps_id is None
+
+
+def test_selected_limits_an_apply_and_transcribed_docs_lose_the_ocr_tag():
+    pl, gem = FakePaperless(_docs()), FakeGemini()
+    events = _events(ocr.run(pl, gem, CFG, GEM, apply=True, selected={"doc:2", "doc:1"}))
+    assert sorted(pl.patched) == [1, 2] and gem.calls == ["application/pdf"] * 2
+    rows = _rows(events)
+    assert [(e.source_id, e.action) for e in rows] == [("1", "replaced"), ("2", "created")]
+    assert rows[0].data["cols"]["new text"] == "16 chars"
+    assert rows[0].data["cols"]["transcription tag"] == "added"
+    assert rows[1].data["cols"]["transcription tag"] == "already set"
+    assert all(e.data["cols"]["OCR tag"] == "removed" for e in rows)
+    assert pl.tags_set == {1: [9], 2: [9]}
+    assert events[-1].data == {"transcribed": 1, "replaced": 1, "errors": 0}
+    rows = _rows(_events(ocr.run(pl, gem, CFG, GEM, apply=False)))
+    assert [e.source_id for e in rows] == ["3"]
+
+
+def test_run_with_sync_skips_the_note_sync_when_nothing_was_transcribed():
+    events = _events(ocr.run_with_sync(FakePaperless(_docs()), NoGramps(), FakeGemini(),
+                                       CFG, GEM, selected=set()))
+    assert [e.kind for e in events] == ["started", "summary"]
+    assert events[-1].data == {"transcribed": 0, "replaced": 0, "errors": 0}
+
+
+def test_run_without_gemini_key_is_an_error_event():
+    class Unconfigured(FakeGemini):
+        configured = False
+
+    events = _events(ocr.run(FakePaperless(_docs()), Unconfigured(), CFG, GEM, apply=True))
+    assert events[0].kind == "error" and "Gemini" in events[0].detail

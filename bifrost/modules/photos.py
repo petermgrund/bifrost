@@ -1,0 +1,814 @@
+"""Immich photos curated for Gramps"""
+
+from __future__ import annotations
+
+import asyncio
+import re
+from datetime import datetime, timezone
+from typing import AsyncIterator
+
+from ..core import dates
+from ..core.clients import GrampsClient, ImmichClient
+from ..core.clients.immich import ImmichError
+from ..core.config import SyncImmichConfig
+from ..core.events import SyncEvent
+from . import codes
+from . import sync_immich as si
+from .sync_immich import SyncError, compose_description, registered_gid
+
+PAGE_SIZE = 24
+_LINK_RE = re.compile(r"^https?://\S+$", re.IGNORECASE)
+LINK_MAX = 2000
+
+
+def validate_link(url: str) -> str:
+    url = (url or "").strip()
+    if not _LINK_RE.match(url):
+        raise ValueError("Link must start with http:// or https://.")
+    if len(url) > LINK_MAX:
+        raise ValueError(f"Too long")
+    return url
+
+
+def validate_form(form: dict) -> dict:
+    change = form.get("change")
+    out = {
+        "title": (form.get("title") or "").strip(),
+        "notes": (form.get("notes") or "").strip(),
+        "place_gramps_id": (form.get("place_gramps_id") or "").strip() or None,
+        "links": list(dict.fromkeys(validate_link(u) for u in form.get("links") or [])),
+        "change": int(change) if change is not None else None,
+        "gramps_id": (form.get("gramps_id") or "").strip() or None,
+        "date": None,
+    }
+    d = form.get("date")
+    if d:
+        parsed = dates.parse_date_value(d.get("value") or "")
+        if not parsed:
+            raise ValueError(f"unreadable date {d.get('value')!r}")
+        picked = {"precision": d.get("precision") or parsed[1],
+                  "modifier": d.get("modifier") or "regular",
+                  "quality": d.get("quality") or "regular"}
+        for key, allowed in (("precision", dates.PRECISIONS), ("modifier", dates.FORM_MODIFIERS),
+                             ("quality", tuple(dates.QUALITIES))):
+            if picked[key] not in allowed:
+                raise ValueError(f"bad {key} {picked[key]!r}")
+        if picked["modifier"] in dates.RANGES:
+            picked["precision"] = "year"
+        if picked["modifier"] == "span":
+            for key in ("minus", "plus"):
+                value = d.get(key) or 0
+                if not isinstance(value, int) or not 0 <= value <= dates.SPAN_MAX:
+                    raise ValueError(f"bad {key} {value!r}")
+                picked[key] = value
+        out["date"] = {"value": parsed[0], **picked}
+    return out
+
+
+async def apply_tags(client: ImmichClient, asset_id: str, add: dict[str, str],
+                     remove: set[str]) -> None:
+    """add maps lower-cased values to their spelling, remove holds lower-cased values"""
+    index = {(t.get("value") or "").lower(): t for t in await client.list_tags()}
+    tag_ids = []
+    for low, spelling in add.items():
+        tag = index.get(low) or await client.upsert_tag(spelling)
+        tag_ids.append(tag["id"])
+    if tag_ids:
+        await client.tag_assets(tag_ids, [asset_id])
+    for low in sorted(remove):
+        tag = index.get(low)
+        if tag:
+            await client.untag_asset(tag["id"], asset_id)
+
+
+def browse_accounts(accounts: list[ImmichClient], label: str = "") -> list[ImmichClient]:
+    if not label.strip():
+        return list(accounts)
+    chosen = [c for c in accounts if (getattr(c, "label", "") or "").lower() == label.strip().lower()]
+    if not chosen:
+        labels = ", ".join(getattr(c, "label", "") or "?" for c in accounts) or "none"
+        raise SyncError(400, f"'{label}' is not a configured Immich account (configured labels: {labels})")
+    return chosen
+
+
+async def labels_for(client: ImmichClient, asset_ids: list[str]) -> dict[str, str]:
+    async def one(aid: str) -> tuple[str, str]:
+        try:
+            record = (await client.get_asset_metadata(aid)).get(si.METADATA_KEY) or {}
+        except ImmichError:
+            record = {}
+        return aid, (record.get("version_label") or "").strip()
+    found = await asyncio.gather(*(one(aid) for aid in dict.fromkeys(asset_ids)))
+    return {aid: label for aid, label in found if label}
+
+
+async def set_version_label(accounts: list[ImmichClient], asset_id: str, label: str) -> None:
+    label = (label or "").strip()
+    asset = await si._merged_one(accounts, asset_id)
+    client, _err = await si.owner_client(accounts, asset)
+    record = dict((await client.get_asset_metadata(asset_id)).get(si.METADATA_KEY) or {})
+    record.pop("version_label", None)
+    if label:
+        record["version_label"] = label
+    if record:
+        await client.upsert_asset_metadata(asset_id, si.METADATA_KEY, record)
+    else:
+        await client.delete_asset_metadata(asset_id, si.METADATA_KEY)
+
+
+def _member(m: dict, primary: str | None) -> dict:
+    return {"asset_id": m["id"], "filename": m.get("originalFileName") or "",
+            "is_primary": m["id"] == primary, "width": m.get("width"), "height": m.get("height"),
+            "size": (m.get("exifInfo") or {}).get("fileSizeInByte"),
+            "date": (m.get("localDateTime") or "")[:10],
+            "title": si.split_description((m.get("exifInfo") or {}).get("description") or "")[0],
+            "thumb": f"/photos/api/thumb/{m['id']}"}
+
+
+def managed_tags(asset: dict, cfg: SyncImmichConfig) -> dict[str, str]:
+    """lower-cased value -> spelling of the tags Bifrost keeps identical across versions"""
+    prefixes = ["sync/"]
+    if cfg.id_tag_prefix:
+        prefixes.append(cfg.id_tag_prefix.lower() + "/")
+    out = {}
+    for t in asset.get("tags") or []:
+        value = t.get("value") or ""
+        if any(value.lower().startswith(p) for p in prefixes):
+            out[value.lower()] = value
+    return out
+
+
+def version_fields(asset: dict, cfg: SyncImmichConfig) -> dict:
+    return {"coords": si.asset_coords(asset), "tags": managed_tags(asset, cfg)}
+
+
+def drift(primary: dict, member: dict) -> list[str]:
+    out = []
+    if primary["coords"] and primary["coords"] != member["coords"]:
+        out.append("location")
+    missing = sorted(v for k, v in primary["tags"].items() if k not in member["tags"])
+    extra = sorted(v for k, v in member["tags"].items() if k not in primary["tags"])
+    if missing or extra:
+        parts = []
+        if missing:
+            parts.append("missing " + ", ".join(missing))
+        if extra:
+            parts.append("extra " + ", ".join(extra))
+        out.append("tags (" + "; ".join(parts) + ")")
+    return out
+
+
+def _norm_box(face: dict) -> tuple[float, float, float, float] | None:
+    w, h = face.get("imageWidth") or 0, face.get("imageHeight") or 0
+    coords = [face.get("boundingBoxX1"), face.get("boundingBoxY1"),
+              face.get("boundingBoxX2"), face.get("boundingBoxY2")]
+    if not w or not h or any(c is None for c in coords) or coords[2] <= coords[0] or coords[3] <= coords[1]:
+        return None
+    return (coords[0] / w, coords[1] / h, coords[2] / w, coords[3] / h)
+
+
+def _iou(a: tuple, b: tuple) -> float:
+    ix = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
+    iy = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+    inter = ix * iy
+    union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
+    return inter / union if union > 0 else 0.0
+
+
+FACE_MATCH_IOU = 0.3
+
+
+async def copy_faces(client: ImmichClient, source: dict, target: dict) -> int:
+    named = [f for f in await client.get_faces(source["id"]) if (f.get("person") or {}).get("id")]
+    if not named:
+        return 0
+    target_faces = await client.get_faces(target["id"])
+    width, height = target.get("width") or 0, target.get("height") or 0
+    have = {f["person"]["id"] for f in target_faces if (f.get("person") or {}).get("id")}
+    copied = 0
+    for face in named:
+        pid = face["person"]["id"]
+        box = _norm_box(face)
+        if pid in have or box is None:
+            continue
+        best, best_iou = None, 0.0
+        for candidate in target_faces:
+            if (candidate.get("person") or {}).get("id"):
+                continue
+            cbox = _norm_box(candidate)
+            if cbox is None:
+                continue
+            iou = _iou(box, cbox)
+            if iou > best_iou:
+                best, best_iou = candidate, iou
+        if best is not None and best_iou >= FACE_MATCH_IOU:
+            await client.reassign_face(pid, best["id"])
+            best["person"] = {"id": pid}
+        elif width and height:
+            x1, y1, x2, y2 = box
+            await client.create_face(target["id"], pid, width, height,
+                                    round(x1 * width), round(y1 * height),
+                                    round((x2 - x1) * width), round((y2 - y1) * height))
+        else:
+            continue
+        have.add(pid)
+        copied += 1
+    return copied
+
+
+async def match_version(client: ImmichClient, cfg: SyncImmichConfig, source: dict,
+                        target: dict) -> list[str]:
+    before = drift(version_fields(source, cfg), version_fields(target, cfg))
+    src, dst = version_fields(source, cfg), version_fields(target, cfg)
+    if src["coords"] and src["coords"] != dst["coords"]:
+        await client.update_asset(target["id"], latitude=src["coords"][0], longitude=src["coords"][1])
+    add = {k: v for k, v in src["tags"].items() if k not in dst["tags"]}
+    remove = {k for k in dst["tags"] if k not in src["tags"]}
+    await apply_tags(client, target["id"], add, remove)
+    record = dict((await client.get_asset_metadata(source["id"])).get(si.METADATA_KEY) or {})
+    own_label = (await client.get_asset_metadata(target["id"])).get(si.METADATA_KEY, {}).get("version_label")
+    record.pop("version_label", None)
+    if own_label:
+        record["version_label"] = own_label
+    if record:
+        await client.upsert_asset_metadata(target["id"], si.METADATA_KEY, record)
+    if await copy_faces(client, source, target):
+        before.append("faces")
+    return before
+
+
+async def _primary_and_client(accounts: list[ImmichClient], asset_id: str) -> tuple[dict, ImmichClient]:
+    asset = await si._merged_one(accounts, asset_id)
+    stack = asset.get("stack") or {}
+    if stack.get("primaryAssetId") and stack["primaryAssetId"] != asset_id:
+        raise SyncError(400, "this asset is a stack variant, open the stack's main image")
+    client, _err = await si.owner_client(accounts, asset)
+    return asset, client
+
+
+async def add_version(gramps: GrampsClient, accounts: list[ImmichClient], cfg: SyncImmichConfig,
+                      asset_id: str, new_id: str, place_rows: dict | None = None,
+                      registered: dict[str, str] | None = None) -> dict:
+    if registered is None:
+        registered = await si.registered_map(gramps)
+    primary, client = await _primary_and_client(accounts, asset_id)
+    if new_id == asset_id:
+        raise SyncError(400, "that is this photo's main image")
+    new = await si._merged_one(accounts, new_id)
+    if new.get("stack"):
+        raise SyncError(400, "that photo is already in a stack; remove it from that stack first")
+    if new.get("ownerId") != primary.get("ownerId"):
+        raise SyncError(400, "versions must belong to the same Immich account as the main image")
+    _versions, member_ids = await _stack_members(client, primary)
+    others = [m for m in member_ids if m != asset_id]
+    main_gid = registered_gid(registered, asset_id, member_ids)
+    new_gid = registered_gid(registered, new_id)
+    if main_gid and new_gid and new_gid != main_gid:
+        raise SyncError(400, f"both already in Gramps as {main_gid} and {new_gid})")
+    if new_gid and not main_gid:
+        await client.create_stack([new_id, asset_id] + others)
+        main_id = new_id
+    else:
+        await client.create_stack([asset_id] + others + [new_id])
+        main_id = asset_id
+    await match_all(accounts, client, cfg, main_id, [asset_id, *others, new_id])
+    return await load(gramps, accounts, cfg, main_id, place_rows, registered=registered)
+
+
+async def upload_version(gramps: GrampsClient, accounts: list[ImmichClient], cfg: SyncImmichConfig,
+                         asset_id: str, filename: str, data, modified_at: str,
+                         place_rows: dict | None = None,
+                         registered: dict[str, str] | None = None) -> tuple[str, dict]:
+    _primary, client = await _primary_and_client(accounts, asset_id)
+    when = modified_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
+    new_id = (await client.upload_asset(filename, data, when))["id"]
+    await _wait_for_thumbnail(client, new_id)
+    return new_id, await add_version(gramps, accounts, cfg, asset_id, new_id, place_rows, registered)
+
+
+async def _wait_for_thumbnail(client: ImmichClient, asset_id: str,
+                              tries: int = 120, pause: float = 0.5) -> None:
+    for _ in range(tries):
+        if (await client.get_asset(asset_id)).get("thumbhash"):
+            return
+        await asyncio.sleep(pause)
+
+
+async def match_member(gramps: GrampsClient, accounts: list[ImmichClient], cfg: SyncImmichConfig,
+                       asset_id: str, member_id: str, place_rows: dict | None = None,
+                       registered: dict[str, str] | None = None) -> dict:
+    primary, client = await _primary_and_client(accounts, asset_id)
+    _versions, member_ids = await _stack_members(client, primary)
+    if member_id not in member_ids or member_id == asset_id:
+        raise SyncError(404, "that is not a version of this photo")
+    member = await si._merged_one(accounts, member_id)
+    await match_version(client, cfg, primary, member)
+    return await load(gramps, accounts, cfg, asset_id, place_rows, registered=registered)
+
+
+async def remove_version(gramps: GrampsClient, accounts: list[ImmichClient], cfg: SyncImmichConfig,
+                         asset_id: str, member_id: str, place_rows: dict | None = None,
+                         registered: dict[str, str] | None = None) -> dict:
+    primary, client = await _primary_and_client(accounts, asset_id)
+    if member_id == asset_id:
+        raise SyncError(400, "make another version the main image before removing this")
+    _versions, member_ids = await _stack_members(client, primary)
+    if member_id not in member_ids:
+        raise SyncError(404, "that is not a version of this photo")
+    member = await si._merged_one(accounts, member_id)
+    await client.remove_stack_asset(primary["stack"]["id"], member_id)
+    strip = {k for k in managed_tags(member, cfg)
+             if k == cfg.sync_tag.lower()
+             or (cfg.id_tag_prefix and k.startswith(cfg.id_tag_prefix.lower() + "/"))}
+    await apply_tags(client, member_id, {}, strip)
+    return await load(gramps, accounts, cfg, asset_id, place_rows, registered=registered)
+
+
+async def clear_face_rects(gramps: GrampsClient, gramps_id: str) -> int:
+    media = await gramps.get_media_by_gramps_id(gramps_id)
+    if media is None:
+        return 0
+    cleared = 0
+    backlinks = await gramps.get_media_backlinks(media["handle"])
+    for handle in backlinks.get("person") or []:
+        person = await gramps.get_person(handle)
+        touched = False
+        for ref in person.get("media_list") or []:
+            if ref.get("ref") == media["handle"] and ref.get("rect"):
+                ref["rect"] = []
+                touched = True
+        if touched:
+            await gramps.update_person(handle, person)
+            cleared += 1
+    return cleared
+
+
+async def promote(accounts: list[ImmichClient], cfg: SyncImmichConfig, gramps: GrampsClient,
+                  asset_id: str, member_id: str, redraw_faces: bool,
+                  registered: dict[str, str] | None = None) -> str:
+    if registered is None:
+        registered = await si.registered_map(gramps)
+    primary, client = await _primary_and_client(accounts, asset_id)
+    _versions, member_ids = await _stack_members(client, primary)
+    if member_id not in member_ids or member_id == asset_id:
+        raise SyncError(404, "that is not a version of this photo")
+    member = await si._merged_one(accounts, member_id)
+    await match_version(client, cfg, primary, member)
+    await client.update_stack(primary["stack"]["id"], member_id)
+    gid = registered_gid(registered, asset_id, member_ids)
+    if redraw_faces and gid:
+        await clear_face_rects(gramps, gid)
+    return member_id
+
+
+async def _suggestions(client: ImmichClient, cfg: SyncImmichConfig, asset: dict,
+                       member_ids: list[str], gramps_id: str | None) -> list[dict]:
+    found: dict[str, tuple[dict, str]] = {}
+    skip = set(member_ids) | {asset["id"]}
+    if asset.get("duplicateId"):
+        try:
+            for group in await client.list_duplicates():
+                if group.get("duplicateId") != asset["duplicateId"]:
+                    continue
+                for a in group.get("assets") or []:
+                    if a["id"] not in skip:
+                        found[a["id"]] = (a, "Immich duplicate")
+        except ImmichError:
+            pass
+    if gramps_id and cfg.id_tag_prefix:
+        path = si.id_tag_path(cfg, gramps_id)
+        try:
+            tag = await client.find_tag(path)
+            items = (await client.search_assets(page=1, size=50, tag_id=tag["id"]))["items"] if tag else []
+        except ImmichError:
+            items = []
+        for a in items:
+            if a["id"] not in skip:
+                found.setdefault(a["id"], (a, f"tagged {path}"))
+    return [{**_member(a, None), "why": why, "in_stack": bool(a.get("stack"))}
+            for a, why in found.values()]
+
+
+async def _stack_members(client: ImmichClient, asset: dict) -> tuple[dict | None, list[str]]:
+    stack = asset.get("stack") or {}
+    if not stack.get("id"):
+        return None, []
+    try:
+        members = (await client.get_stack(stack["id"])).get("assets") or []
+        error = None
+    except ImmichError as exc:
+        members, error = [], exc.message
+    primary = stack.get("primaryAssetId")
+    versions = {"stack_id": stack["id"], "primary_asset_id": primary,
+                "members": [_member(m, primary) for m in members]}
+    if error:
+        versions["error"] = error
+    return versions, [m["id"] for m in members]
+
+
+def _place_info(gid: str, place_rows: dict | None, place: dict | None = None) -> dict:
+    known = (place_rows or {}).get(gid)
+    name = known["name"] if known else si.place_label(place) if place else gid
+    return {"gramps_id": gid, "name": name, "hierarchy": known["hierarchy"] if known else [],
+            "known": bool(known)}
+
+
+async def _gramps_side(gramps: GrampsClient, gid: str) -> tuple[dict | None, list[dict], list[dict], str | None]:
+    try:
+        media = await gramps.get_media_by_gramps_id(gid, backlinks=True)
+        if media is None:
+            return None, [], [], f"the register points at {gid}, which is not in Gramps"
+        backlinks = media.pop("backlinks", None) or {}
+        notes = await si.media_notes(gramps, media)
+        places = [await gramps.get_place(h) for h in backlinks.get("place") or []]
+    except Exception as exc:  # noqa: BLE001
+        return None, [], [], f"Gramps could not be read: {str(exc)[:200]}"
+    return media, notes, places, None
+
+
+async def load(gramps: GrampsClient, accounts: list[ImmichClient], cfg: SyncImmichConfig,
+               asset_id: str, place_rows: dict[str, dict] | None = None,
+               person_map: dict[str, str] | None = None,
+               registered: dict[str, str] | None = None) -> dict:
+    if registered is None:
+        registered = await si.registered_map(gramps)
+    asset = await si._merged_one(accounts, asset_id)
+    main = (asset.get("stack") or {}).get("primaryAssetId")
+    if main and main != asset_id:
+        asset_id, asset = main, await si._merged_one(accounts, main)
+    client, _err = await si.owner_client(accounts, asset)
+    tags = si.tag_values(asset)
+    exif = asset.get("exifInfo") or {}
+    title, link_line = si.split_description(exif.get("description") or "")
+    versions, member_ids = await _stack_members(client, asset)
+    gid = registered_gid(registered, asset_id, member_ids)
+    labels = await labels_for(client, [asset_id, *member_ids])
+    if versions is not None:
+        details = await client.get_assets_many([m for m in member_ids if m != asset_id])
+        mine = version_fields(asset, cfg)
+        for member in versions["members"]:
+            detail = details.get(member["asset_id"])
+            if member["is_primary"]:
+                member["drift"] = []
+            elif detail is None:
+                member["drift"] = ["unreadable"]
+            else:
+                member.update(_member(detail, asset_id))
+                member["drift"] = drift(mine, version_fields(detail, cfg))
+            member["label"] = labels.get(member["asset_id"], "")
+    suggestions = await _suggestions(client, cfg, asset, member_ids, gid)
+    for sg in suggestions:
+        sg["gramps_id"] = registered_gid(registered, sg["asset_id"])
+    media, gramps_error, change = None, None, None
+    date_readonly = None
+    places: list[dict] = []
+    if gid:
+        media, notes, holders, gramps_error = await _gramps_side(gramps, gid)
+    if media is not None:
+        title = media.get("desc") or ""
+        date_form_, date_readonly = dates.date_from_gramps(media.get("date"))
+        notes_text = si.note_text(si.first_media_note(notes)).strip()
+        links = si.media_links(media)
+        places = [_place_info(h.get("gramps_id") or "", place_rows, h) for h in holders if h.get("gramps_id")]
+        change = media.get("change")
+    else:
+        date_form_ = None
+        notes_text, links = "", []
+    if person_map is None:
+        person_map = await si.load_person_map(gramps)
+    people = [{"id": p["id"], "name": p.get("name") or "", "linked": p["id"] in person_map}
+              for p in asset.get("people") or [] if p.get("id")]
+    return {
+        "asset_id": asset_id,
+        "filename": asset.get("originalFileName") or "",
+        "mime": asset.get("originalMimeType"),
+        "type": asset.get("type"),
+        "width": asset.get("width"),
+        "height": asset.get("height"),
+        "owner": getattr(client, "label", ""),
+        "owner_id": asset.get("ownerId"),
+        "immich_url": f"{cfg.public_url}/photos/{asset_id}" if cfg.public_url else None,
+        "thumb": f"/photos/api/thumb/{asset_id}",
+        "preview": f"/photos/api/thumb/{asset_id}?size=preview",
+        "title": title,
+        "link_line": link_line,
+        "label": labels.get(asset_id, ""),
+        "date": date_form_,
+        "date_readonly": date_readonly,
+        "immich_date": (asset.get("localDateTime") or "")[:10],
+        "place": places[0] if len(places) == 1 else None,
+        "places": places,
+        "tags": sorted(tags),
+        "gramps": {"gramps_id": gid, "url": si.gramps_url(cfg, gid)} if gid else None,
+        "gramps_error": gramps_error,
+        "change": change,
+        "notes": notes_text,
+        "people": people,
+        "versions": versions,
+        "suggestions": suggestions,
+        "links": [{"url": u} for u in links],
+    }
+
+
+async def pending_changes(gramps: GrampsClient, accounts: list[ImmichClient], cfg: SyncImmichConfig,
+                          asset_id: str, person_map: dict[str, str] | None = None,
+                          registered: dict[str, str] | None = None) -> list[str]:
+    if registered is None:
+        registered = await si.registered_map(gramps)
+    asset = await si._merged_one(accounts, asset_id)
+    client, _err = await si.owner_client(accounts, asset)
+    _versions, member_ids = await _stack_members(client, asset) if client else (None, [])
+    gid = registered_gid(registered, asset_id, member_ids)
+    if not gid:
+        return []
+    media = await gramps.get_media_by_gramps_id(gid)
+    if media is None:
+        return ["media"]
+    changes: set[str] = set()
+    async for ev in si.update_synced(gramps, accounts, cfg, gid, asset, media,
+                                     False, None, si.new_counts()):
+        if ev.action == "would_update":
+            changes |= set((ev.data or {}).get("cols") or [ev.entity]) - {"description"}
+    if client:
+        if person_map is None:
+            person_map = await si.load_person_map(gramps)
+        async for ev in si.link_asset_faces(gramps, client, asset, asset_id, media["handle"], gid,
+                                            person_map, si.new_face_results(), apply=False):
+            if ev.action in ("created", "updated"):
+                changes.add("faces")
+    return sorted(changes)
+
+
+async def move_place(gramps: GrampsClient, media_handle: str, old: dict | None, new: dict | None) -> bool:
+    if (old or {}).get("handle") == (new or {}).get("handle"):
+        return False
+    if old is not None:
+        refs = old.get("media_list") or []
+        old["media_list"] = [r for r in refs if r.get("ref") != media_handle]
+        await gramps.update_place(old["handle"], old)
+    if new is not None:
+        await si._link_place(gramps, new, media_handle)
+    return True
+
+
+def _item(entity: str, action: str, asset_id: str, gid: str | None, title: str, **extra) -> SyncEvent:
+    return SyncEvent(kind="item", entity=entity, action=action, source_id=asset_id,
+                     gramps_id=gid, title=title, **extra)
+
+
+async def save(gramps: GrampsClient, accounts: list[ImmichClient], cfg: SyncImmichConfig,
+               asset_id: str, form: dict,
+               registered: dict[str, str] | None = None) -> AsyncIterator[SyncEvent]:
+    form = validate_form(form)
+    if registered is None:
+        registered = await si.registered_map(gramps)
+    asset = await si._merged_one(accounts, asset_id)
+    stack = asset.get("stack") or {}
+    if stack.get("primaryAssetId") and stack["primaryAssetId"] != asset_id:
+        raise SyncError(400, "this asset is a stack variant, edit the stack's main image")
+    client, _err = await si.owner_client(accounts, asset)
+    _versions, member_ids = await _stack_members(client, asset)
+    gid = registered_gid(registered, asset_id, member_ids)
+    current_desc = ((asset.get("exifInfo") or {}).get("description") or "").strip()
+    filled = any([form["title"], form["date"], form["place_gramps_id"], form["notes"], form["links"]])
+    warning = None
+
+    async def copy_title(title: str, gid: str | None) -> None:
+        nonlocal warning
+        wanted = compose_description(title, None)
+        if wanted == current_desc:
+            return
+        try:
+            await client.update_asset(asset_id, description=wanted)
+        except ImmichError as exc:
+            warning = f"description not updated: {exc.message}"
+
+    if not gid and not filled:
+        await copy_title("", None)
+        yield SyncEvent(kind="summary", entity="media", detail="nothing to add",
+                        data={"gramps_id": None, "created": False, "changed": {}, "warning": warning})
+        return
+
+    new_place = None
+    if form["place_gramps_id"]:
+        try:
+            new_place = await gramps.get_place_by_gramps_id(form["place_gramps_id"])
+        except Exception as exc:  # noqa: BLE001
+            raise SyncError(502, f"Gramps could not be read: {str(exc)[:200]}")
+        if new_place is None:
+            raise SyncError(400, f"{form['place_gramps_id']} names no Gramps place")
+
+    notes = form["notes"]
+    created = False
+    if gid:
+        media, current_notes, holders, error = await _gramps_side(gramps, gid)
+        if media is None:
+            raise SyncError(502 if error.startswith("Gramps could not") else 404, error)
+        if form["change"] is not None and media.get("change") != form["change"]:
+            raise SyncError(409, "changed in Gramps since you opened it, reload")
+    else:
+        async for ev in si.sync_one_asset(gramps, accounts, cfg, asset_id, gramps_id=form["gramps_id"],
+                                          registered=registered):
+            if ev.kind == "item":
+                yield ev
+            elif ev.kind == "summary":
+                gid = ev.data["gramps_id"]
+        created = True
+        media, current_notes, holders, error = await _gramps_side(gramps, gid)
+        if media is None:
+            raise SyncError(502, error)
+
+    title = media.get("desc") or ""
+    changed: dict = {}
+    desc = form["title"] or asset.get("originalFileName") or gid
+    if desc != title:
+        media["desc"] = desc
+        changed["title"] = desc
+    had_form, readonly = dates.date_from_gramps(media.get("date"))
+    if form["date"]:
+        new_date = dates.gramps_date(form["date"])
+        if not dates.dates_equal(media.get("date"), new_date):
+            media["date"] = new_date
+            changed["date"] = dates.format_gramps_date(new_date)
+    elif had_form and not readonly:
+        media["date"] = dict(dates.EMPTY_DATE)
+        changed["date"] = "(none)"
+    if si.set_media_links(media, form["links"]):
+        changed["links"] = len(form["links"])
+    try:
+        note_action, stale_note = await si.stage_media_note(gramps, media, notes, current_notes)
+        if changed or note_action in ("created", "removed"):
+            await gramps.update_media(media["handle"], media)
+        if stale_note:
+            await gramps.delete_note(stale_note)
+    except Exception as exc:  # noqa: BLE001
+        raise SyncError(502, f"Gramps update failed: {str(exc)[:200]}")
+    if changed:
+        yield _item("media", "updated", asset_id, gid, media["desc"], data={"cols": changed})
+    if note_action:
+        yield _item("note", "updated" if note_action == "removed" else note_action, asset_id, gid,
+                    media["desc"], detail="note removed" if note_action == "removed" else None,
+                    data={"cols": {"note": f"{len(notes)} chars"}})
+
+    place_name = None
+    if len(holders) <= 1:
+        old_place = holders[0] if holders else None
+        try:
+            moved = await move_place(gramps, media["handle"], old_place, new_place)
+        except Exception as exc:  # noqa: BLE001
+            yield _item("place", "failed", asset_id, gid, media["desc"], detail=str(exc)[:200])
+        else:
+            if moved:
+                place_name = si.place_label(new_place) if new_place else None
+                yield _item("place", "updated", asset_id, (new_place or old_place).get("gramps_id"),
+                            place_name or si.place_label(old_place),
+                            detail="added to the gallery" if new_place else "taken out of the gallery")
+
+    await copy_title(media["desc"], gid)
+    if warning:
+        yield _item("media", "skipped", asset_id, gid, media["desc"], detail=warning)
+
+    if not created:
+        async for ev in si.sync_one_asset(gramps, accounts, cfg, asset_id, update=True, description=False,
+                                          registered=registered):
+            if ev.kind == "item" and ev.action != "skipped":
+                yield ev
+    if member_ids:
+        await match_all(accounts, client, cfg, asset_id, member_ids)
+
+    yield SyncEvent(kind="summary", entity="media", gramps_id=gid, title=media["desc"],
+                    detail="created" if created else "saved",
+                    data={"gramps_id": gid, "created": created, "changed": changed,
+                          "note": note_action, "place": place_name, "warning": warning})
+
+
+async def match_all(accounts: list[ImmichClient], client: ImmichClient, cfg: SyncImmichConfig,
+                    main_id: str, member_ids: list[str]) -> int:
+    others = [m for m in member_ids if m != main_id]
+    if not others:
+        return 0
+    main = await si._merged_one(accounts, main_id)
+    details = await client.get_assets_many(others)
+    changed = 0
+    for member_id in others:
+        detail = details.get(member_id)
+        if detail is None:
+            continue
+        if await match_version(client, cfg, main, detail):
+            changed += 1
+    return changed
+
+
+async def _recent(client: ImmichClient, page: int, person: str) -> dict:
+    try:
+        return await client.search_assets(page=page, size=PAGE_SIZE, person_id=person or None,
+                                          order_by="createdAt")
+    except ImmichError as exc:
+        if exc.status != 400:
+            raise
+        return await client.search_assets(page=page, size=PAGE_SIZE, person_id=person or None)
+
+
+async def _stack_index(accounts: list[ImmichClient]) -> tuple[dict, dict]:
+    """asset id -> (stack id, main id, size) and stack id -> member ids"""
+    stacks: dict[str, tuple[str, str | None, int]] = {}
+    members_of: dict[str, list[str]] = {}
+    for client in accounts:
+        try:
+            listing = await client.list_stacks()
+        except ImmichError:
+            continue
+        for s in listing:
+            member_ids = [a["id"] for a in s.get("assets") or []]
+            members_of[s["id"]] = member_ids
+            for aid in member_ids:
+                stacks[aid] = (s["id"], s.get("primaryAssetId"), len(member_ids))
+    return stacks, members_of
+
+
+async def _card_context(accounts: list[ImmichClient], registered: dict[str, str]):
+    stacks, members_of = await _stack_index(accounts)
+    minted = registered
+
+    def card(a: dict) -> dict:
+        aid = a["id"]
+        st = stacks.get(aid)
+        gid = minted.get(aid)
+        if not gid and st:
+            gid = next((minted[m] for m in members_of.get(st[0], []) if m in minted), None)
+        exif = a.get("exifInfo") or {}
+        return {"asset_id": aid, "filename": a.get("originalFileName") or "",
+                "title": si.split_description(exif.get("description") or "")[0],
+                "type": a.get("type"),
+                "thumb": f"/photos/api/thumb/{aid}", "gramps_id": gid, "owner_id": a.get("ownerId"),
+                "versions": st[2] if st else 1, "is_child": bool(st and st[1] != aid),
+                "missing": bool(a.get("_missing"))}
+
+    return stacks, card
+
+
+async def search(accounts: list[ImmichClient], registered: dict[str, str],
+                 mode: str = "recent", q: str = "", person: str = "", page: int = 1,
+                 browse: list[ImmichClient] | None = None) -> dict:
+    stacks, card = await _card_context(accounts, registered)
+    code = codes.normalize(q)
+    hit = next((aid for aid, gid in registered.items() if gid == code), None) if code else None
+    if hit is not None:
+        if page > 1:
+            return {"items": [], "nextPage": None}
+        main = (stacks[hit][1] or hit) if hit in stacks else hit
+        a = (await si._merged_details(accounts, [main])).get(main)
+        return {"items": [card(a or {"id": main, "originalFileName": "", "_missing": True})], "nextPage": None}
+    items: list[dict] = []
+    next_page: int | None = None
+    seen: set[str] = set()
+    for client in (browse if browse is not None else accounts):
+        try:
+            if q:
+                pages = [await client.search_assets(page=page, size=PAGE_SIZE, description=q,
+                                                    person_id=person or None),
+                         await client.search_assets(page=page, size=PAGE_SIZE, filename=q,
+                                                    person_id=person or None)]
+            else:
+                pages = [await _recent(client, page, person)]
+        except ImmichError as exc:
+            if exc.status == 400 and person:
+                continue
+            raise
+        for r in pages:
+            for a in r["items"]:
+                if a["id"] in seen:
+                    continue
+                seen.add(a["id"])
+                items.append(card(a))
+            if r["nextPage"]:
+                next_page = r["nextPage"]
+    return {"items": [i for i in items if not i["is_child"] and not (mode == "new" and i["gramps_id"])],
+            "nextPage": next_page}
+
+
+def hierarchy(place: dict, by_handle: dict[str, dict]) -> list[str]:
+    names, seen, cur = [], set(), place
+    while cur and cur["handle"] not in seen:
+        seen.add(cur["handle"])
+        names.append((cur.get("name") or {}).get("value") or cur.get("gramps_id") or "")
+        refs = cur.get("placeref_list") or []
+        cur = by_handle.get(refs[0].get("ref")) if refs else None
+    return [n for n in names if n]
+
+
+async def places(gramps: GrampsClient) -> list[dict]:
+    rows = await gramps.list_places_full()
+    by_handle = {p["handle"]: p for p in rows}
+    out = []
+    for p in rows:
+        gid = p.get("gramps_id") or ""
+        if not gid:
+            continue
+        out.append({
+            "gramps_id": gid,
+            "name": (p.get("name") or {}).get("value") or gid,
+            "hierarchy": hierarchy(p, by_handle),
+        })
+    out.sort(key=lambda r: r["name"].lower())
+    return out

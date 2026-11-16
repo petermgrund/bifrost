@@ -1,0 +1,90 @@
+"""Gemini for OCR"""
+
+from __future__ import annotations
+
+import base64
+
+import httpx
+
+API_BASE = "https://generativelanguage.googleapis.com/v1beta"
+
+
+class GeminiError(Exception):
+    pass
+
+
+def _message(resp: httpx.Response) -> str:
+    try:
+        return str(resp.json()["error"]["message"])
+    except (ValueError, KeyError, TypeError):
+        return resp.text[:400]
+
+
+class GeminiClient:
+    def __init__(self, api_key: str, model: str) -> None:
+        self._key = api_key
+        self._model = model
+        self._client = httpx.AsyncClient(
+            timeout=300.0, headers={"content-type": "application/json"})
+
+    @property
+    def configured(self) -> bool:
+        return bool(self._key)
+
+    @property
+    def model(self) -> str:
+        return self._model
+
+    async def close(self) -> None:
+        await self._client.aclose()
+
+    async def check(self) -> None:
+        """Raise unless Google accepts the key and knows the model"""
+        resp = await self._client.get(f"{API_BASE}/models/{self._model}", params={"key": self._key}, timeout=20.0)
+        if resp.status_code >= 400:
+            raise GeminiError(f"{resp.status_code}: {_message(resp)}")
+
+    async def transcribe(
+        self, data: bytes, mime: str, prompt: str,
+        thinking_budget: int | None = None,
+    ) -> str:
+        """Transcribe a document file (image or PDF) to plain text."""
+        return await self._generate([(data, mime)], prompt, {}, thinking_budget)
+
+    async def _generate(
+        self, files: list[tuple[bytes, str]], prompt: str, extra_cfg: dict,
+        thinking_budget: int | None,
+    ) -> str:
+        body: dict = {
+            "contents": [{"parts": [
+                {"text": prompt},
+                *({"inlineData": {"mimeType": mime,
+                                  "data": base64.b64encode(data).decode()}}
+                  for data, mime in files),
+            ]}],
+        }
+        # with thinking on the budget is shared so this must comfortably
+        # exceed thinking + the document's text
+        gen_cfg: dict = {"maxOutputTokens": 65536, **extra_cfg}
+        if thinking_budget is not None:
+            gen_cfg["thinkingConfig"] = {"thinkingBudget": thinking_budget}
+        body["generationConfig"] = gen_cfg
+        resp = await self._client.post(
+            f"{API_BASE}/models/{self._model}:generateContent",
+            params={"key": self._key}, json=body)
+        if resp.status_code >= 400:
+            raise GeminiError(f"{resp.status_code}: {_message(resp)}")
+        payload = resp.json()
+        cands = payload.get("candidates") or []
+        if not cands:
+            fb = payload.get("promptFeedback") or {}
+            raise GeminiError(f"no candidates returned ({fb or 'empty response'})")
+        cand = cands[0]
+        parts = ((cand.get("content") or {}).get("parts") or [])
+        text = "".join(p.get("text", "") for p in parts).strip()
+        reason = cand.get("finishReason")
+        if reason == "MAX_TOKENS":
+            raise GeminiError("transcription truncated at MAX_TOKENS")
+        if not text:
+            raise GeminiError(f"empty response (finishReason={reason or 'unknown'})")
+        return text

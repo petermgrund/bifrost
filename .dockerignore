@@ -1,0 +1,11 @@
+**/node_modules
+.git
+.claude
+venv
+.venv
+dev
+tests
+frontend
+config.yaml
+**/__pycache__
+docs

@@ -1,0 +1,40 @@
+# Gramps Web is required. Delete the sections of anything you do not use.
+
+codes: true                              # false gives new media Gramps' own IDs (O0001)
+
+gramps:
+  base_url: "http://gramps:5000/api"
+  username: "REPLACE_ME"
+  password: "REPLACE_ME"
+  public_url: "https://gramps.example.com"
+
+immich:
+  base_url: "http://immich:2283"
+  public_url: "https://immich.example.com"
+  accounts:                              # one or two
+    - api_key: "REPLACE_ME"
+      label: "me"
+  path_mappings:                         # Immich's upload folder -> the same folder inside Gramps' media folder
+    - immich_prefix: "/usr/src/app/upload/upload/"
+      gramps_prefix: "immich/"
+  previews_prefix: "immich-previews/"    # Immich's thumbs folder inside Gramps' media folder; "" to skip
+  sync_tag: "Sync/Gramps"
+  id_tag_prefix: "ID"
+
+paperless:
+  base_url: "http://paperless:8000"
+  api_token: "REPLACE_ME"
+  public_url: "https://paperless.example.com"
+  sync_tags: ["sync"]
+  gramps_id_field: "Gramps ID"           # a text custom field id
+  gramps_url_field: "Gramps URL"         # a URL custom field id
+  webhook_token: ""                      # any secret
+  date_qualifier_field: ""               # select custom field (optional)
+  attribute_fields: {}                   # optional, custom field: "Gramps attribute name"
+  ocr_tag: ""                            # documents with this tag are transcribed (optional)
+  transcribed_tag: ""                    # applied to transcribed documents (optional)
+  translation_marker: "======== ENGLISH TRANSLATION ========"  # the line in a document's content that starts its translation (optional)
+
+gemini:                                  # for paperless.ocr_tag
+  api_key: "REPLACE_ME"
+  model: "gemini-3-flash-preview"

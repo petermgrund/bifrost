@@ -228,7 +228,7 @@ class TestSave:
         im.update_asset = boom
         events = save(gr, im, "a1", {"title": "New", "change": 100})
         assert gr.media["ABC123"]["desc"] == "New"
-        assert summary_of(events).data["warning"] == "Immich description not updated: immich down"
+        assert summary_of(events).data["warning"] == "description not updated: immich down"
         assert [e.action for e in events if e.kind == "item" and e.entity == "media"] == ["updated", "skipped"]
 
     def test_a_stale_edit_is_refused(self):
@@ -911,6 +911,6 @@ class TestSyncedVersionLeads:
         mint("XYZ789", "u1")
         im = VersionsImmich(assets={"u1": unsynced, "s1": synced})
         gr = FakeGramps({"ABC123": media(desc="synced title"), "XYZ789": media(gid="XYZ789", handle="h2")})
-        with pytest.raises(SyncError, match="both photos are already in Gramps"):
+        with pytest.raises(SyncError, match="both already in Gramps"):
             run(photos.add_version(gr, [im], CFG, "u1", "s1"))
         assert im.created_stacks == []

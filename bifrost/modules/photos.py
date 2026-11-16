@@ -264,7 +264,7 @@ async def add_version(gramps: GrampsClient, accounts: list[ImmichClient], cfg: S
     main_gid = registered_gid(registered, asset_id, member_ids)
     new_gid = registered_gid(registered, new_id)
     if main_gid and new_gid and new_gid != main_gid:
-        raise SyncError(400, f"both already in Gramps as {main_gid} and {new_gid})")
+        raise SyncError(400, f"both already in Gramps as {main_gid} and {new_gid}")
     if new_gid and not main_gid:
         await client.create_stack([new_id, asset_id] + others)
         main_id = new_id

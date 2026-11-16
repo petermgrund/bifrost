@@ -1,5 +1,21 @@
 __pycache__/
+*.pyc
+venv/
+.venv/
+node_modules/
+*.log
+
+## local configuration and data
+/config.yaml*
+/config.*.yaml
 !/config.example.yaml
+/data/
+/dev/
+
+## notes and tooling
+NOTES.md
+CLAUDE.md
+/.claude
 
 ## system files
 .DS_Store

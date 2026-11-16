@@ -847,7 +847,7 @@ class TestSyncOneAsset:
                          "G2G2G2": {"gramps_id": "G2G2G2", "handle": "h2", "path": "immich/img.jpg"}})
         with pytest.raises(SyncError) as exc:
             self._run(im, gr, "p1")
-        assert exc.value.status == 400 and "same stack main" in exc.value.detail
+        assert exc.value.status == 400 and "unstack them first" in exc.value.detail
 
     def test_unstacked_create_skips_stack_listing(self):
         im = FakeImmich(assets={"a1": asset("a1")})

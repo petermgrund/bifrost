@@ -110,7 +110,7 @@ paperless:
 
 
 def test_the_old_layout_is_refused(tmp_path):
-    with pytest.raises(ConfigError, match="Upgrading"):
+    with pytest.raises(ConfigError, match="old config layout"):
         _load(tmp_path, "sync: {paperless: {webhook_token: x}}\n")
 
 

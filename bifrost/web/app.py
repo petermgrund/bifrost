@@ -110,6 +110,7 @@ async def config(request: Request) -> dict:
         "immich": bool(accounts),
         "accounts": [getattr(c, "label", "") for c in accounts],
         "paperless": st.paperless is not None,
+        "ocr": st.paperless is not None and bool(st.cfg.sync_paperless.ocr_tag),
     }
 
 

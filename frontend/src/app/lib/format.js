@@ -183,13 +183,13 @@ const SYNC_WORDS = {
   boxes_added: ['added', 'face box', 'face boxes'],
 };
 
-export function syncSummary(counts) {
+export function syncSummary(counts, idle = 'Everything is in sync') {
   const parts = [];
   for (const [key, n] of Object.entries(counts || {})) {
     const w = SYNC_WORDS[key];
     if (n && w) parts.push(`${w[0]} ${n} ${n === 1 ? w[1] : w[2] || `${w[1]}s`}`);
   }
-  if (!parts.length) return 'Everything is in sync';
+  if (!parts.length) return idle;
   const text = parts.join(', ');
   return text.charAt(0).toUpperCase() + text.slice(1);
 }

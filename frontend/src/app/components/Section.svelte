@@ -12,7 +12,7 @@
 
   let q = $state('');
   let page = $state(0);
-  let running = $state(false);
+  let running = $state('');
   let progress = $state(null);
   let failures = $state([]);
 
@@ -27,46 +27,50 @@
     page = 0;
   });
 
-  async function syncAll() {
+  async function run({ path, job, busy, idle }) {
     if (running) return;
-    running = true;
+    running = busy;
     failures = [];
     const timer = setInterval(async () => {
       try {
         const { runs } = await get('/api/runs/active');
-        progress = runs.find((r) => r.job === `sync.${kind}`) || null;
+        progress = runs.find((r) => r.job === job) || null;
       } catch {
         progress = null;
       }
     }, 750);
     try {
-      const r = await post(`/sync/api/${kind}`);
+      const r = await post(path);
       failures = r.events;
-      if (r.events.length) toastManager.warning(`${syncSummary(r.summary)}; ${r.events.length} failed`);
-      else toastManager.primary(syncSummary(r.summary));
+      const failed = `${r.events.length} failed`;
+      const summary = syncSummary(r.summary, r.events.length ? '' : idle);
+      if (r.events.length) toastManager.warning(summary ? `${summary}; ${failed}` : failed);
+      else toastManager.primary(summary);
       await loadMedia();
     } catch (e) {
       failures = [{ detail: e.message }];
     } finally {
       clearInterval(timer);
-      running = false;
+      running = '';
       progress = null;
     }
   }
+
+  const syncAll = () => run({ path: `/sync/api/${kind}`, job: `sync.${kind}`, busy: 'Syncing' });
 </script>
 
 <section class="flex min-w-0 flex-col gap-3">
   <div class="flex min-h-10 shrink-0 flex-wrap items-center gap-2">
     <Heading size="small" tag="h2">{title}</Heading>
     <span class="me-auto font-mono text-sm text-gray-500 dark:text-gray-400">{items.length}</span>
-    {@render actions?.()}
-    <Button size="small" leadingIcon={mdiSync} disabled={running} onclick={syncAll}>Sync everything</Button>
+    {@render actions?.({ running: !!running, run })}
+    <Button size="small" leadingIcon={mdiSync} disabled={!!running} onclick={syncAll}>Sync everything</Button>
   </div>
 
   {#if running}
     <div class="flex shrink-0 items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
       <LoadingSpinner size="small" />
-      <span class="truncate">{progress?.detail || 'Syncing'}</span>
+      <span class="truncate">{progress?.detail || running}</span>
       {#if progress?.total}<span class="font-mono text-xs">{progress.done}/{progress.total}</span>{/if}
     </div>
   {/if}

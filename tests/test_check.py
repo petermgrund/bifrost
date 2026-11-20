@@ -68,27 +68,57 @@ def test_an_immich_failure_is_an_error_event_and_the_faces_still_run(monkeypatch
 
 # ---- the endpoints
 
-def test_the_sync_endpoints_return_the_summary_and_what_failed(monkeypatch):
-    import httpx
+def _app():
     from fastapi import FastAPI
 
     from bifrost.web.routes import sync as sync_routes
 
-    monkeypatch.setattr(check, "sync_paperless", SimpleNamespace(sync=_gen(
-        SyncEvent(kind="item", entity="doc", action="created", source_id="1"),
-        SyncEvent(kind="item", entity="doc", action="failed", source_id="2", detail="no file"),
-        SyncEvent(kind="summary", data={"created": 1, "errors": 1}))))
     app = FastAPI()
     app.include_router(sync_routes.router)
     app.state.gramps, app.state.paperless, app.state.gemini = "gramps", "paperless", "gemini"
     app.state.immich_accounts = []
     app.state.cfg = cfg()
     app.state.caches = {"stale": 1}
+    return app
+
+
+def _post(app, *paths):
+    import httpx
 
     async def go():
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://b") as c:
-            return await c.post("/sync/api/paperless"), await c.post("/sync/api/immich")
-    documents, photos = asyncio.run(go())
+            return [await c.post(path) for path in paths]
+    return asyncio.run(go())
+
+
+def test_the_sync_endpoints_return_the_summary_and_what_failed(monkeypatch):
+    monkeypatch.setattr(check, "sync_paperless", SimpleNamespace(sync=_gen(
+        SyncEvent(kind="item", entity="doc", action="created", source_id="1"),
+        SyncEvent(kind="item", entity="doc", action="failed", source_id="2", detail="no file"),
+        SyncEvent(kind="summary", data={"created": 1, "errors": 1}))))
+    app = _app()
+    documents, photos = _post(app, "/sync/api/paperless", "/sync/api/immich")
     assert documents.json()["summary"] == {"created": 1, "errors": 1}
     assert [(e["source_id"], e["detail"]) for e in documents.json()["events"]] == [("2", "no file")]
     assert app.state.caches == {} and photos.status_code == 503
+
+
+def test_the_ocr_endpoint_transcribes_without_the_full_sync(monkeypatch):
+    from bifrost.web.routes import sync as sync_routes
+
+    def full_sync(*args, **kwargs):
+        raise AssertionError("the full sync ran")
+
+    monkeypatch.setattr(check, "sync_paperless", SimpleNamespace(sync=full_sync))
+    monkeypatch.setattr(sync_routes, "ocr", SimpleNamespace(run_with_sync=_gen(
+        SyncEvent(kind="progress", detail="Transcribing", data={"done": 0, "total": 2}),
+        SyncEvent(kind="item", entity="doc", action="created", source_id="1"),
+        SyncEvent(kind="item", entity="doc", action="failed", source_id="2", detail="Gemini: quota"),
+        SyncEvent(kind="summary", data={"transcribed": 1, "errors": 1}))))
+    app = _app()
+    [resp] = _post(app, "/sync/api/paperless/ocr")
+    assert resp.json()["summary"] == {"transcribed": 1, "errors": 1}
+    assert [(e["source_id"], e["detail"]) for e in resp.json()["events"]] == [("2", "Gemini: quota")]
+    assert app.state.caches == {}
+    app.state.paperless = None
+    assert _post(app, "/sync/api/paperless/ocr")[0].status_code == 503

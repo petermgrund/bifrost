@@ -99,6 +99,14 @@ def test_selected_limits_an_apply_and_transcribed_docs_lose_the_ocr_tag():
     assert [e.source_id for e in rows] == ["3"]
 
 
+def test_an_apply_counts_its_progress_over_the_selected_docs():
+    pl = FakePaperless(_docs())
+    events = _events(ocr.run(pl, FakeGemini(), CFG, GEM, apply=True, selected={"doc:1", "doc:3"}))
+    assert [(e.detail, e.data["done"], e.data["total"]) for e in events if e.kind == "progress"] == [
+        ("Transcribing", 0, 2), ("Transcribing", 1, 2)]
+    assert not [e for e in _events(ocr.run(pl, FakeGemini(), CFG, GEM, apply=False)) if e.kind == "progress"]
+
+
 def test_run_with_sync_skips_the_note_sync_when_nothing_was_transcribed():
     events = _events(ocr.run_with_sync(FakePaperless(_docs()), NoGramps(), FakeGemini(),
                                        CFG, GEM, selected=set()))

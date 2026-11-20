@@ -42,7 +42,7 @@ Documents are edited in Paperless.
 | Add a document to Gramps | Give it a sync tag |
 | Change its title, date or mirrored fields | Edit the document |
 | Choose its code yourself | Type the code into the Gramps ID field before the first sync |
-| Transcribe it | Give it the OCR tag |
+| Transcribe it | Give it the OCR tag → Run OCR or Sync everything |
 | Add a translation | Put it in the content after a line reading `======== ENGLISH TRANSLATION ========` or whatever `paperless.translation_marker` is set to |
 
 A document with the transcribed tag gets its content as a `Transcription` note in Gramps, and what follows the translation line as a `Translation` note.

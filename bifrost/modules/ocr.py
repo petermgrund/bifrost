@@ -9,7 +9,7 @@ from pypdf import PdfReader, PdfWriter
 
 from ..core.clients import GeminiClient, GeminiError, PaperlessClient
 from ..core.config import GeminiConfig, SyncPaperlessConfig
-from ..core.events import SyncEvent
+from ..core.events import SyncEvent, progress
 from .sync_paperless import NamesError, _doc_gramps_id, resolve_names
 
 OCR_PROMPT = """You are transcribing a historical or genealogical document \
@@ -125,12 +125,14 @@ async def run(
     else:
         docs = [d for d in docs if tag_id in (d.get("tags") or [])]
     yield SyncEvent(kind="started", detail=f"{len(docs)} document(s) tagged '{cfg.ocr_tag}'")
+    if selected is not None:
+        docs = [d for d in docs if f"doc:{d['id']}" in selected]
 
-    for doc in docs:
+    for done, doc in enumerate(docs):
         doc_id = doc["id"]
         title = doc.get("title", f"Untitled (Paperless #{doc_id})")
-        if selected is not None and f"doc:{doc_id}" not in selected:
-            continue
+        if apply:
+            yield progress("Transcribing", done, len(docs))
         text = _current_text(doc)
         create = _no_transcript(text)
         gid = _doc_gramps_id(doc, cfg.gramps_id_field_id)

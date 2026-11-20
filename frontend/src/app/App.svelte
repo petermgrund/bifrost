@@ -1,6 +1,6 @@
 <script>
   import { Alert, AppShell, AppShellHeader, Button, Heading, IconButton, LoadingSpinner, TooltipProvider } from '@immich/ui';
-  import { mdiCogOutline, mdiFaceManOutline, mdiPlus, mdiWeatherNight, mdiWeatherSunny } from '@mdi/js';
+  import { mdiCogOutline, mdiFaceManOutline, mdiPlus, mdiTextRecognition, mdiWeatherNight, mdiWeatherSunny } from '@mdi/js';
   import BifrostMark from './components/BifrostMark.svelte';
   import CodeDialog from './components/CodeDialog.svelte';
   import Connections from './components/Connections.svelte';
@@ -93,7 +93,21 @@
               items={documents}
               onOpen={(m) => (coded = m)}
               onCode={(m) => (coded = m)}
-            />
+            >
+              {#snippet actions({ running, run })}
+                {#if store.config.ocr}
+                  <Button
+                    size="small"
+                    variant="outline"
+                    color="secondary"
+                    leadingIcon={mdiTextRecognition}
+                    disabled={running}
+                    onclick={() => run({ path: '/sync/api/paperless/ocr', job: 'ocr', busy: 'Transcribing', idle: 'Nothing to transcribe' })}
+                    >Run OCR</Button
+                  >
+                {/if}
+              {/snippet}
+            </Section>
           {/if}
         </div>
       </div>

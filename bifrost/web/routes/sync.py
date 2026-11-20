@@ -41,6 +41,15 @@ async def sync_documents(request: Request) -> dict:
     return await _everything(st, "sync.paperless", check.documents(st.gramps, st.paperless, st.gemini, st.cfg))
 
 
+@router.post("/api/paperless/ocr")
+async def ocr_documents(request: Request) -> dict:
+    st = _state(request)
+    if st.paperless is None:
+        raise HTTPException(503, "Paperless not configured")
+    return await _everything(st, "ocr", ocr.run_with_sync(
+        st.paperless, st.gramps, st.gemini, st.cfg.sync_paperless, st.cfg.gemini))
+
+
 @router.post("/api/immich")
 async def sync_photos(request: Request) -> dict:
     """Sync every tagged Immich photo and the faces on the synced ones"""
